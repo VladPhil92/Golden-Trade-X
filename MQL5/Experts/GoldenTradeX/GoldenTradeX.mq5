@@ -7,7 +7,7 @@
 #property link      "https://github.com/VladPhil92/Golden-Trade-X"
 #property version   "1.20"
 #property strict
-#property description "EA de tendencia para Oro (XAUUSD): EMA cross + RSI + filtro ATR + ADX + tendencia H4, gestión de riesgo por % de equity, trailing stop con activación 1R, límites de drawdown diario/semanal y control de pérdidas consecutivas."
+#property description "EA de tendencia para Oro (XAUUSD): EMA cross + RSI + ADX + ATR + H4, gestión de riesgo multicapa con DD diario/semanal, pérdidas consecutivas y pausa por noticias."
 
 #include <Trade/Trade.mqh>
 #include <GoldenTradeX/RiskManager.mqh>
@@ -24,37 +24,36 @@ input group "=== Señales ==="
 input int     InpEmaFast          = 21;
 input int     InpEmaSlow          = 55;
 input int     InpRsiPeriod        = 14;
-input double  InpRsiUpper         = 70.0;   // RSI: techo para longs
-input double  InpRsiLower         = 30.0;   // RSI: suelo para shorts
-input double  InpRsiLongMin       = 45.0;   // RSI mínimo para longs (momentum alcista)
-input double  InpRsiShortMax      = 55.0;   // RSI máximo para shorts (momentum bajista)
+input double  InpRsiUpper         = 70.0;    // RSI: techo para longs
+input double  InpRsiLower         = 30.0;    // RSI: suelo para shorts
+input double  InpRsiLongMin       = 45.0;    // RSI minimo para longs (momentum alcista)
+input double  InpRsiShortMax      = 55.0;    // RSI maximo para shorts (momentum bajista)
 input ENUM_TIMEFRAMES InpTimeframe = PERIOD_M15;
 input int     InpAtrPeriod        = 14;
-input double  InpAtrMinRatio      = 0.8;    // ATR / ATR_SMA(20): mínimo para operar
-input int     InpAdxPeriod        = 14;     // Periodo ADX para filtro de régimen
-input double  InpAdxMinLevel      = 25.0;   // ADX mínimo (0 = desactivado)
-input double  InpAtrMaxRatio      = 3.0;    // ATR máximo vs ATR_SMA (0 = desactivado)
+input double  InpAtrMinRatio      = 0.8;     // ATR / ATR_SMA(20): minimo para operar
+input double  InpAtrMaxRatio      = 3.0;     // ATR / ATR_SMA(20): maximo (bloquea spikes)
+input double  InpAdxMinLevel      = 25.0;    // ADX minimo: regimen tendencial (0=off)
 
 //--- Filtro de tendencia H4
 input group "=== Filtro de Tendencia HTF ==="
-input bool    InpUseHtfFilter     = true;   // Solo operar a favor de la tendencia H4
-input int     InpHtfEmaPeriod     = 50;     // Periodo EMA en H4
+input bool    InpUseHtfFilter     = true;    // Solo operar a favor de la tendencia H4
+input int     InpHtfEmaPeriod     = 50;      // Periodo EMA en H4
 
-//--- Gestión de riesgo
+//--- Gestion de riesgo
 input group "=== Riesgo ==="
 input double  InpRiskPercent      = 1.0;
-input double  InpMaxDailyDD       = 4.0;
+input double  InpMaxDailyDD       = 4.0;     // Drawdown diario maximo (%)
+input double  InpMaxWeeklyDD      = 8.0;     // Drawdown semanal maximo (%)
+input int     InpMaxConsecLosses  = 3;       // Perdidas consecutivas antes de pausa (0=off)
 input int     InpMaxPositions     = 1;
-input double  InpAtrSlMultiplier  = 2.0;    // SL = ATR × factor
-input double  InpAtrTpMultiplier  = 3.0;    // TP = ATR × factor
+input double  InpAtrSlMultiplier  = 2.0;     // SL = ATR x factor
+input double  InpAtrTpMultiplier  = 3.0;     // TP = ATR x factor
 input double  InpMaxSpreadPoints  = 350;
-input double  InpMaxWeeklyDD      = 8.0;    // Drawdown semanal máximo (%)
-input int     InpMaxConsecLosses  = 3;      // Pérdidas consecutivas máx antes de pausa
 
 //--- Trailing stop
 input group "=== Trailing Stop ==="
 input bool    InpUseTrailing      = true;
-input double  InpTrailAtrMult     = 1.5;    // Trailing = ATR × factor
+input double  InpTrailAtrMult     = 1.5;     // Trailing = ATR x factor (activo desde +1R)
 
 //--- Sesiones
 input group "=== Sesiones ==="
@@ -66,7 +65,7 @@ input int     InpFridayCloseHour  = 19;
 
 //--- Noticias
 input group "=== Noticias ==="
-input bool    InpPauseForNews     = false;  // Pausar EA manualmente en días de noticias
+input bool    InpPauseForNews     = false;   // Pausa manual en dias de alto impacto (NFP/FOMC/CPI)
 
 //--- Objetos globales
 CTrade         trade;
@@ -80,7 +79,6 @@ string    g_gvLastBarKey = "";
 //+------------------------------------------------------------------+
 int OnInit()
   {
-   // Validar parámetros antes de inicializar indicadores
    if(InpEmaFast >= InpEmaSlow)
      {
       Print("GoldenTradeX: InpEmaFast debe ser menor que InpEmaSlow");
@@ -98,7 +96,7 @@ int OnInit()
      }
    if(InpRiskPercent <= 0 || InpRiskPercent > 10)
      {
-      Print("GoldenTradeX: InpRiskPercent fuera de rango (0–10%)");
+      Print("GoldenTradeX: InpRiskPercent fuera de rango (0-10%)");
       return(INIT_PARAMETERS_INCORRECT);
      }
 
@@ -125,7 +123,6 @@ int OnInit()
    sessionFilter.Init(InpUseSessionFilter, InpStartHour, InpEndHour,
                       InpCloseOnFriday, InpFridayCloseHour);
 
-   // Recuperar última barra procesada para evitar entrada espuria al reiniciar
    g_gvLastBarKey = StringFormat("GTX_%d_LastBar", (int)InpMagicNumber);
    g_lastBarTime  = (datetime)GlobalVariableGet(g_gvLastBarKey);
 
@@ -142,45 +139,43 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTick()
   {
-   // Cierre obligatorio de viernes antes de cualquier otra lógica
    if(sessionFilter.MustCloseAll())
      {
       CloseAllPositions("Cierre de fin de semana");
       return;
      }
 
-   // Trailing stop en cada tick (solo si la posición alcanzó 1R)
    if(InpUseTrailing)
       ManageTrailing();
 
    if(!IsNewBar()) return;
 
-   // Filtros de sesión y condiciones de mercado
    if(!sessionFilter.IsTradingAllowed())         return;
    if(!riskManager.IsSpreadAcceptable(_Symbol))  return;
+
    if(riskManager.IsDailyDrawdownExceeded())
      {
-      Comment("GoldenTradeX: drawdown diario alcanzado. Pausa hasta mañana.");
+      Comment("GoldenTradeX: DD diario alcanzado. Pausa hasta manana.");
       return;
      }
    if(riskManager.IsWeeklyDrawdownExceeded())
      {
-      Comment("GoldenTradeX: drawdown semanal alcanzado. Pausa hasta la semana siguiente.");
+      Comment("GoldenTradeX: DD semanal alcanzado. Pausa hasta la semana siguiente.");
       return;
      }
    if(riskManager.IsConsecutiveLossLimitReached())
      {
-      Comment("GoldenTradeX: ", InpMaxConsecLosses, " pérdidas consecutivas. Pausa temporal.");
+      Comment("GoldenTradeX: ", InpMaxConsecLosses,
+              " perdidas consecutivas. Pausa hasta nueva semana.");
       return;
      }
    if(InpPauseForNews)
      {
-      Comment("GoldenTradeX: pausa manual por evento de noticias.");
+      Comment("GoldenTradeX: pausa manual activa (evento de noticias).");
       return;
      }
-   if(riskManager.CountOpenPositions(_Symbol) >= InpMaxPositions) return;
 
-   // Verificar conexión al servidor antes de intentar operar
+   if(riskManager.CountOpenPositions(_Symbol) >= InpMaxPositions) return;
    if(!TerminalInfoInteger(TERMINAL_CONNECTED)) return;
 
    ENUM_SIGNAL signal = signalEngine.GetSignal();
@@ -214,8 +209,30 @@ void OnTick()
                           NormalizeDouble(sl, _Digits),
                           NormalizeDouble(tp, _Digits),
                           InpTradeComment))
-      Print("GoldenTradeX: fallo al abrir posición. Error: ",
+      Print("GoldenTradeX: fallo al abrir posicion. Error: ",
             trade.ResultRetcodeDescription());
+  }
+
+//+------------------------------------------------------------------+
+//| Registra resultado de cada deal cerrado para tracking de perdidas |
+//+------------------------------------------------------------------+
+void OnTradeTransaction(const MqlTradeTransaction &trans,
+                        const MqlTradeRequest     &request,
+                        const MqlTradeResult      &result)
+  {
+   if(trans.type != TRADE_TRANSACTION_DEAL_ADD) return;
+   if(trans.deal_type != DEAL_TYPE_BUY && trans.deal_type != DEAL_TYPE_SELL) return;
+
+   ulong dealTicket = trans.deal;
+   if(!HistoryDealSelect(dealTicket)) return;
+
+   if(HistoryDealGetInteger(dealTicket, DEAL_MAGIC) != (long)InpMagicNumber) return;
+
+   long entry = HistoryDealGetInteger(dealTicket, DEAL_ENTRY);
+   if(entry != DEAL_ENTRY_OUT && entry != DEAL_ENTRY_INOUT) return;
+
+   double profit = HistoryDealGetDouble(dealTicket, DEAL_PROFIT);
+   riskManager.RegisterTradeResult(profit);
   }
 
 //+------------------------------------------------------------------+
@@ -232,7 +249,7 @@ bool IsNewBar()
   }
 
 //+------------------------------------------------------------------+
-//| Trailing stop: se activa solo cuando la posición alcanza 1R      |
+//| Trailing stop: activo solo cuando la posicion alcanza 1R         |
 //+------------------------------------------------------------------+
 void ManageTrailing()
   {
@@ -240,7 +257,7 @@ void ManageTrailing()
    if(atr <= 0) return;
 
    double trail      = atr * InpTrailAtrMult;
-   double activation = atr * InpAtrSlMultiplier;  // 1R = distancia al SL inicial
+   double activation = atr * InpAtrSlMultiplier;
 
    for(int i = PositionsTotal() - 1; i >= 0; i--)
      {
@@ -257,7 +274,7 @@ void ManageTrailing()
       if(type == POSITION_TYPE_BUY)
         {
          double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-         if(bid - openPrice < activation) continue;  // no alcanzó 1R aún
+         if(bid - openPrice < activation) continue;
          double newSl = NormalizeDouble(bid - trail, _Digits);
          if(newSl > sl && newSl < bid)
             trade.PositionModify(ticket, newSl, tp);
@@ -265,7 +282,7 @@ void ManageTrailing()
       else
         {
          double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-         if(openPrice - ask < activation) continue;  // no alcanzó 1R aún
+         if(openPrice - ask < activation) continue;
          double newSl = NormalizeDouble(ask + trail, _Digits);
          if((newSl < sl || sl == 0) && newSl > ask)
             trade.PositionModify(ticket, newSl, tp);
@@ -274,7 +291,7 @@ void ManageTrailing()
   }
 
 //+------------------------------------------------------------------+
-//| Cierra todas las posiciones del EA con verificación de resultado  |
+//| Cierra todas las posiciones del EA con verificacion de resultado  |
 //+------------------------------------------------------------------+
 void CloseAllPositions(string reason)
   {
@@ -289,28 +306,5 @@ void CloseAllPositions(string reason)
                " — ", trade.ResultRetcodeDescription());
      }
    Comment("GoldenTradeX: ", reason);
-  }
-
-//+------------------------------------------------------------------+
-//| Detecta operaciones cerradas y registra resultado para tracking   |
-//+------------------------------------------------------------------+
-void OnTradeTransaction(const MqlTradeTransaction &trans,
-                        const MqlTradeRequest     &request,
-                        const MqlTradeResult      &result)
-  {
-   if(trans.type != TRADE_TRANSACTION_DEAL_ADD) return;
-   if(trans.deal_type != DEAL_TYPE_BUY && trans.deal_type != DEAL_TYPE_SELL) return;
-
-   ulong dealTicket = trans.deal;
-   if(!HistoryDealSelect(dealTicket)) return;
-
-   long magic = HistoryDealGetInteger(dealTicket, DEAL_MAGIC);
-   if(magic != (long)InpMagicNumber) return;
-
-   long entry = HistoryDealGetInteger(dealTicket, DEAL_ENTRY);
-   if(entry != DEAL_ENTRY_OUT && entry != DEAL_ENTRY_INOUT) return;
-
-   double profit = HistoryDealGetDouble(dealTicket, DEAL_PROFIT);
-   riskManager.RegisterTradeResult(profit);
   }
 //+------------------------------------------------------------------+
