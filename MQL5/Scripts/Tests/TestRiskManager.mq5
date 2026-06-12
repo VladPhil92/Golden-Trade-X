@@ -32,13 +32,15 @@ void AssertEqI(long a, long b, string label)    { AssertTrue(a==b, label); }
 class CRiskManagerTest : public CRiskManager
   {
 public:
-   int   GetConsecLosses()  { return(m_consecutiveLosses); }
+   int    GetConsecLosses()   { return(m_consecutiveLosses); }
    double GetSizeMultiplier() { return(GetPositionSizeMultiplier()); }
 
-   // Reset rápido sin GlobalVariables (tests aislados)
+   // Resetea estado en memoria Y borra la GlobalVariable para evitar
+   // contaminación entre tests en la misma sesión MT5
    void ResetState()
      {
       m_consecutiveLosses = 0;
+      if(m_gvConsecLossKey != "") GlobalVariableDel(m_gvConsecLossKey);
      }
   };
 

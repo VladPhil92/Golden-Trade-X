@@ -46,8 +46,12 @@ private:
                          "CloseDate,CloseTime,PositionID,Symbol,Type,"
                          "Lots,OpenPrice,InitialSL,InitialTP,ClosePrice,"
                          "ProfitLoss,Commission,RMultiple\n");
-      else
-         FileSeek(handle, 0, SEEK_END);
+      else if(FileSeek(handle, 0, SEEK_END) != 0)
+        {
+         Print("TradeLogger: FileSeek falló en '", filename, "' | Error: ", GetLastError());
+         FileClose(handle);
+         return(INVALID_HANDLE);
+        }
 
       return(handle);
      }

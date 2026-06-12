@@ -58,9 +58,8 @@ private:
      {
       MqlDateTime dt;
       TimeToStruct(TimeCurrent(), dt);
-      // Semana aproximada: año*100 + (día_del_año / 7)
-      int dayOfYear = dt.day + (dt.mon - 1) * 30;  // aproximación
-      int weekIndex = dt.year * 100 + dayOfYear / 7;
+      // Semana ISO: usa day_of_year provisto por TimeToStruct (0-based → +1)
+      int weekIndex = dt.year * 100 + (dt.day_of_year + 1) / 7;
 
       if(weekIndex == m_currentWeek) return;
 

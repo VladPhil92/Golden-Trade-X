@@ -22,6 +22,9 @@ jobs:
       - name: Install dependencies
         run: pip install flake8
 
+      - name: Python syntax check
+        run: python -m py_compile scripts/monitor.py scripts/backtest_analysis.py scripts/validate_set.py
+
       - name: flake8 — scripts/
         run: |
           flake8 scripts/ \

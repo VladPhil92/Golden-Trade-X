@@ -189,7 +189,7 @@ def snapshot(
     # ── Alerta: posición cerrada ───────────────────────────────────────
     for ticket, s in prev.items():
         if ticket not in current:
-            pnl_pct = s.profit / info.balance * 100 if info.balance else 0.0
+            pnl_pct = s.profit / info.balance * 100 if info.balance > 0 else 0.0
             icon    = "✅" if s.profit >= 0 else "❌"
             log.info("ALERT close #%d P/L %.2f (%.2f%%)", ticket, s.profit, pnl_pct)
             notifier.send(

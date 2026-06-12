@@ -83,6 +83,19 @@ void OnStart()
    // jueves dentro del rango
    AssertFalse(f.IsNewsBlockedAt(MakeTime(2026,2,12, 15,30)), "CPI: jueves en rango — no aplica");
 
+   //--- Cruce de medianoche: FOMC con offset UTC+5 cae a las 00:00 servidor
+   // 19:00 UTC + 5h = 00:00 servidor día siguiente → UtcToServer(19)=0
+   // blockStart = 0 - 30 = -30 (negativo), blockEnd = 0 + 90 = 90
+   // Debe bloquear los 30 min antes (23:30-23:59) y los 90 min después (00:00-01:30)
+   CNewsFilter fMid;
+   fMid.Init(true, 30, 90);
+   fMid.SetServerOffset(5);
+   AssertTrue (fMid.IsNewsBlockedAt(MakeTime(2026,1,28, 23,35)), "midnight: FOMC 30min antes (23:35)");
+   AssertTrue (fMid.IsNewsBlockedAt(MakeTime(2026,1,28, 23,59)), "midnight: FOMC 1min antes mednoche");
+   AssertTrue (fMid.IsNewsBlockedAt(MakeTime(2026,1,29,  0,30)), "midnight: FOMC 30min despues (00:30)");
+   AssertFalse(fMid.IsNewsBlockedAt(MakeTime(2026,1,28, 23,29)), "midnight: 31min antes — fuera de ventana");
+   AssertFalse(fMid.IsNewsBlockedAt(MakeTime(2026,1,29,  1,31)), "midnight: 91min despues — fuera de ventana");
+
    //--- Filtro desactivado: debe devolver false siempre
    CNewsFilter fOff;
    fOff.Init(false, 30, 90);
