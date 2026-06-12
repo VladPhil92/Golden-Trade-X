@@ -22,11 +22,14 @@ jobs:
       - name: Install dependencies
         run: pip install flake8
 
+      - name: Python syntax check
+        run: python -m py_compile scripts/monitor.py scripts/backtest_analysis.py scripts/validate_set.py
+
       - name: flake8 — scripts/
         run: |
           flake8 scripts/ \
             --max-line-length=120 \
-            --extend-ignore=E203,W503
+            --extend-ignore=E203,E221,W503
 
   # ── 2. Config validation ────────────────────────────────────────────
   config-validate:

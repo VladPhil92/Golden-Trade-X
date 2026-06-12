@@ -34,14 +34,27 @@ private:
      }
 
    // Devuelve true si la hora actual está en la ventana de bloqueo
-   // del evento definido por evServerHour:evMinUTC
+   // del evento definido por evServerHour:evMinUTC.
+   // Maneja correctamente blockStart negativo y blockEnd > 1439 (cruce de medianoche).
    bool InWindow(const MqlDateTime &dt, int evServerHour, int evMinUtc)
      {
-      int nowMins   = dt.hour * 60 + dt.min;
-      int evMins    = evServerHour * 60 + evMinUtc;
+      int nowMins    = dt.hour * 60 + dt.min;
+      int evMins     = evServerHour * 60 + evMinUtc;
       int blockStart = evMins - m_bufferBefore;
       int blockEnd   = evMins + m_bufferAfter;
-      return(nowMins >= blockStart && nowMins <= blockEnd);
+
+      // Ventana sin cruce de medianoche: caso normal
+      if(blockStart >= 0 && blockEnd <= 1439)
+         return(nowMins >= blockStart && nowMins <= blockEnd);
+
+      // Cruce de medianoche por inicio (blockStart < 0):
+      //   bloqueo activo si nowMins está en [0, blockEnd] O en [blockStart+1440, 1439]
+      if(blockStart < 0)
+         return(nowMins <= blockEnd || nowMins >= blockStart + 1440);
+
+      // Cruce de medianoche por fin (blockEnd > 1439):
+      //   bloqueo activo si nowMins >= blockStart O nowMins <= blockEnd-1440
+      return(nowMins >= blockStart || nowMins <= blockEnd - 1440);
      }
 
    // NFP: primer viernes de cada mes, 13:30 UTC
