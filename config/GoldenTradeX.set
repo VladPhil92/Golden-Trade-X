@@ -1,0 +1,23 @@
+; Golden Trade X v1.00 — preset por defecto (XAUUSD M15)
+InpMagicNumber=920260
+InpTradeComment=GoldenTradeX
+InpEmaFast=21
+InpEmaSlow=55
+InpRsiPeriod=14
+InpRsiUpper=70.0
+InpRsiLower=30.0
+InpTimeframe=15
+InpRiskPercent=1.0
+InpMaxDailyDD=4.0
+InpMaxPositions=1
+InpAtrSlMultiplier=2.0
+InpAtrTpMultiplier=3.0
+InpAtrPeriod=14
+InpMaxSpreadPoints=350
+InpUseTrailing=true
+InpTrailAtrMult=1.5
+InpUseSessionFilter=true
+InpStartHour=7
+InpEndHour=20
+InpCloseOnFriday=true
+InpFridayCloseHour=19
