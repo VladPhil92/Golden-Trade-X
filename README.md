@@ -52,7 +52,7 @@ Nueva vela → ¿Sesión permitida? → ¿Spread aceptable? → ¿DD diario OK? 
 | **SignalEngine** | Cruce EMA21/55 confirmado + continuación en barra 0 · RSI como momentum · filtro ATR mínimo · tendencia H4 · caché ATR por barra |
 | **RiskManager** | Lote por % de equity, rechaza lote < mínimo broker, drawdown diario persistido con GlobalVariable, precisión de decimales dinámica |
 | **SessionFilter** | Ventana Londres–NY (07–20 h servidor), cierre forzoso viernes 19 h |
-| **monitor.py** | Observabilidad externa: equity, flotante, posiciones · reconexión automática · logging a archivo · configurable por argparse/envvar |
+| **monitor.py** | Observabilidad externa: equity, flotante, posiciones · reconexión automática · logging a archivo · alertas Telegram · configurable por argparse/envvar |
 
 ### Gestión de riesgo por defecto
 
@@ -86,14 +86,25 @@ Nueva vela → ¿Sesión permitida? → ¿Spread aceptable? → ¿DD diario OK? 
 ## Monitor en Python (opcional)
 
 ```bash
-pip install MetaTrader5
-python scripts/monitor.py                    # defaults: XAUUSD, magic 920260
-python scripts/monitor.py --symbol GOLD --magic 920260 --refresh 60
-GTX_SYMBOL=XAUUSD. python scripts/monitor.py  # vía variable de entorno
+pip install -r requirements.txt
+
+python scripts/monitor.py                              # defaults: XAUUSD, magic 920260
+python scripts/monitor.py --symbol GOLD --refresh 60  # símbolo personalizado
+GTX_SYMBOL=XAUUSD. python scripts/monitor.py          # vía variable de entorno
+
+# Alertas Telegram (crear bot en @BotFather primero)
+python scripts/monitor.py \
+    --telegram-token  "123456:ABC-DEF..." \
+    --telegram-chat-id "@mi_canal"          \
+    --alert-dd-pct 2.0
+
+# O con variables de entorno
+GTX_TG_TOKEN=... GTX_TG_CHAT_ID=... python scripts/monitor.py
 ```
 
-Requiere el terminal MT5 abierto en la misma máquina (Windows).
-El monitor reconecta automáticamente si MT5 se desconecta y persiste logs en `monitor.log`.
+Requiere el terminal MT5 abierto en la misma máquina (Windows).  
+El monitor reconecta automáticamente si MT5 se desconecta y persiste logs en `monitor.log`.  
+Las alertas Telegram cubren: inicio/parada, posición abierta, posición cerrada con P/L y drawdown de equity.
 
 ---
 
@@ -101,7 +112,7 @@ El monitor reconecta automáticamente si MT5 se desconecta y persiste logs en `m
 
 - [x] Filtro de noticias de alto impacto — `NewsFilter.mqh` (NFP auto, FOMC hardcoded, CPI proxy)
 - [x] Break-even automático al alcanzar 0.5R — `InpUseBreakEven` + `InpBreakEvenR`
-- [ ] Alertas a Telegram desde `monitor.py`
+- [x] Alertas a Telegram desde `monitor.py` — `TelegramNotifier` (posición abierta/cerrada, DD, reconexión)
 - [x] Módulo de registro de operaciones en CSV para auditoría — `TradeLogger.mqh`
 - [x] Tests unitarios MQL5 — `MQL5/Scripts/Tests/` (`TestNewsFilter`, `TestRiskManager`)
 - [x] CI/CD GitHub Actions — validación automática en push

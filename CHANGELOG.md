@@ -5,6 +5,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.41] — 2026-06-12
+
+### Added
+- **Alertas Telegram en `monitor.py`** (`TelegramNotifier`): envía mensajes HTML al bot
+  configurado vía `--telegram-token` / `GTX_TG_TOKEN` y `--telegram-chat-id` / `GTX_TG_CHAT_ID`.
+  Eventos cubiertos:
+  - Monitor iniciado, detenido y reconectado.
+  - Posición abierta: lado, volumen, símbolo, precio de entrada, SL y TP.
+  - Posición cerrada: P/L en moneda y porcentaje sobre balance.
+  - Caída de equity ≥ `--alert-dd-pct` (default 2 %); se auto-resetea al recuperar la mitad.
+- `MonitorState` dataclass: rastrea snapshots anteriores de posiciones y referencias
+  de equity/balance para detectar cambios entre ciclos.
+- Arg `--alert-dd-pct` / env `GTX_ALERT_DD_PCT`.
+- `requirements.txt` — añadido `requests>=2.31.0`.
+
+### Changed
+- `monitor.py` refactorizado: funciones `_snap()`, `snapshot()` reciben `state` y `notifier`
+  para permitir pruebas unitarias sin efectos secundarios.
+
+---
+
 ## [1.40] — 2026-06-12
 
 ### Added
