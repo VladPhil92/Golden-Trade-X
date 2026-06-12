@@ -1,0 +1,6 @@
+*.ex5
+*.log
+__pycache__/
+*.pyc
+.env
+.vscode/

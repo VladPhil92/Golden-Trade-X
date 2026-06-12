@@ -1,0 +1,102 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ── 1. Python lint ─────────────────────────────────────────────────
+  python-lint:
+    name: Python lint (flake8)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install flake8
+
+      - name: flake8 — scripts/
+        run: |
+          flake8 scripts/ \
+            --max-line-length=120 \
+            --extend-ignore=E203,W503
+
+  # ── 2. Config validation ────────────────────────────────────────────
+  config-validate:
+    name: Validate GoldenTradeX.set
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Check all required parameters are present
+        run: |
+          python scripts/validate_set.py config/GoldenTradeX.set
+          python scripts/validate_set.py config/GoldenTradeX_XAGUSD.set
+
+  # ── 3. Repository structure check ──────────────────────────────────
+  structure-check:
+    name: Repository structure
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify required files exist
+        run: |
+          missing=0
+          for f in \
+            "MQL5/Experts/GoldenTradeX/GoldenTradeX.mq5" \
+            "MQL5/Include/GoldenTradeX/SignalEngine.mqh" \
+            "MQL5/Include/GoldenTradeX/RiskManager.mqh" \
+            "MQL5/Include/GoldenTradeX/SessionFilter.mqh" \
+            "MQL5/Include/GoldenTradeX/NewsFilter.mqh" \
+            "MQL5/Include/GoldenTradeX/TradeLogger.mqh" \
+            "MQL5/Scripts/Tests/TestNewsFilter.mq5" \
+            "MQL5/Scripts/Tests/TestRiskManager.mq5" \
+            "scripts/monitor.py" \
+            "scripts/backtest_analysis.py" \
+            "scripts/validate_set.py" \
+            "config/GoldenTradeX.set" \
+            "config/GoldenTradeX_XAGUSD.set" \
+            "requirements.txt" \
+            "CHANGELOG.md" \
+            "docs/STRATEGY.md"; do
+            if [ ! -f "$f" ]; then
+              echo "MISSING: $f"
+              missing=1
+            else
+              echo "OK:      $f"
+            fi
+          done
+          exit $missing
+
+  # ── 4. Version consistency ──────────────────────────────────────────
+  version-check:
+    name: Version consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: EA version matches CHANGELOG latest entry
+        run: |
+          ea_ver=$(grep -m1 '#property version' \
+            MQL5/Experts/GoldenTradeX/GoldenTradeX.mq5 \
+            | grep -oP '"\K[^"]+')
+          cl_ver=$(grep -m1 '^## \[' CHANGELOG.md \
+            | grep -oP '\[\K[^\]]+')
+          echo "EA version:        $ea_ver"
+          echo "CHANGELOG latest:  $cl_ver"
+          if [ "$ea_ver" != "$cl_ver" ]; then
+            echo "Version mismatch — update CHANGELOG.md or GoldenTradeX.mq5"
+            exit 1
+          fi

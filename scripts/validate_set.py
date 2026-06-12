@@ -1,0 +1,103 @@
+#!/usr/bin/env python3
+"""Validates that GoldenTradeX.set contains all required EA input parameters."""
+
+import sys
+import re
+
+REQUIRED = {
+    # Identity
+    "InpMagicNumber", "InpTradeComment",
+    # Signals
+    "InpEmaFast", "InpEmaSlow", "InpRsiPeriod", "InpRsiUpper", "InpRsiLower",
+    "InpRsiLongMin", "InpRsiShortMax", "InpTimeframe",
+    "InpAtrPeriod", "InpAtrMinRatio", "InpAtrMaxRatio", "InpAdxMinLevel",
+    # HTF filter
+    "InpUseHtfFilter", "InpHtfEmaPeriod",
+    # Risk
+    "InpRiskPercent", "InpMaxDailyDD", "InpMaxWeeklyDD",
+    "InpMaxConsecLosses", "InpMaxPositions",
+    "InpAtrSlMultiplier", "InpAtrTpMultiplier", "InpMaxSpreadPoints",
+    # Trailing / break-even
+    "InpUseTrailing", "InpTrailAtrMult", "InpUseBreakEven", "InpBreakEvenR",
+    # Sessions
+    "InpUseSessionFilter", "InpStartHour", "InpEndHour",
+    "InpCloseOnFriday", "InpFridayCloseHour",
+    # News
+    "InpUseNewsFilter", "InpNewsBufferBefore", "InpNewsBufferAfter", "InpPauseForNews",
+    # Logging
+    "InpEnableTradeLog",
+}
+
+RANGE_CHECKS = {
+    "InpRiskPercent":       (0, 10, False, True),
+    "InpMaxDailyDD":        (0, 100, False, True),
+    "InpMaxWeeklyDD":       (0, 100, False, True),
+    "InpAtrMinRatio":       (0, 10, False, True),
+    "InpAtrMaxRatio":       (0, 20, False, True),
+    "InpAtrSlMultiplier":   (0, 20, False, True),
+    "InpAtrTpMultiplier":   (0, 20, False, True),
+    "InpBreakEvenR":        (0, 10, False, True),
+    "InpStartHour":         (0, 23, True,  True),
+    "InpEndHour":           (0, 23, True,  True),
+    "InpFridayCloseHour":   (0, 23, True,  True),
+    "InpNewsBufferBefore":  (0, 240, True,  True),
+    "InpNewsBufferAfter":   (0, 480, True,  True),
+}
+
+
+def parse_set(path):
+    params = {}
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith(";"):
+                continue
+            m = re.match(r"^(\w+)=(.+)$", line)
+            if m:
+                params[m.group(1)] = m.group(2).strip()
+    return params
+
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: validate_set.py <path/to/GoldenTradeX.set>")
+        sys.exit(1)
+
+    path = sys.argv[1]
+    try:
+        params = parse_set(path)
+    except FileNotFoundError:
+        print(f"ERROR: file not found: {path}")
+        sys.exit(1)
+
+    errors = []
+
+    # Presence check
+    missing = REQUIRED - set(params.keys())
+    for key in sorted(missing):
+        errors.append(f"MISSING parameter: {key}")
+
+    # Range checks
+    for key, (lo, hi, is_int, inclusive) in RANGE_CHECKS.items():
+        if key not in params:
+            continue
+        raw = params[key]
+        try:
+            val = int(raw) if is_int else float(raw)
+        except ValueError:
+            errors.append(f"BAD VALUE for {key}: '{raw}' is not numeric")
+            continue
+        ok = (lo <= val <= hi) if inclusive else (lo < val < hi)
+        if not ok:
+            errors.append(f"OUT OF RANGE {key}={val} (expected {lo}..{hi})")
+
+    if errors:
+        for e in errors:
+            print(e)
+        sys.exit(1)
+
+    print(f"OK — {len(params)} parameters validated in {path}")
+
+
+if __name__ == "__main__":
+    main()
