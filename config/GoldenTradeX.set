@@ -1,12 +1,11 @@
-; Golden Trade X v1.20 — preset por defecto (XAUUSD M15)
-; Nota DST: StartHour/EndHour están en hora del servidor del broker.
-; La mayoría de brokers usa EET (GMT+2 verano / GMT+3 invierno). Si su broker
-; usa un offset fijo, ajuste estos valores cuando cambie el horario de mercado.
+; Golden Trade X v1.30 — preset por defecto (XAUUSD M15)
+; Nota DST: StartHour/EndHour estan en hora del servidor del broker.
+; La mayoria de brokers usa EET (GMT+2 verano / GMT+3 invierno).
 
 InpMagicNumber=920260
 InpTradeComment=GoldenTradeX
 
-; --- Señales ---
+; --- Senales ---
 InpEmaFast=21
 InpEmaSlow=55
 InpRsiPeriod=14
@@ -17,27 +16,28 @@ InpRsiShortMax=55.0
 InpTimeframe=15
 InpAtrPeriod=14
 InpAtrMinRatio=0.8
-InpAdxPeriod=14
-InpAdxMinLevel=25.0
 InpAtrMaxRatio=3.0
+InpAdxMinLevel=25.0
 
-; --- Filtro de Tendencia HTF ---
+; --- Filtro HTF ---
 InpUseHtfFilter=true
 InpHtfEmaPeriod=50
 
 ; --- Riesgo ---
 InpRiskPercent=1.0
 InpMaxDailyDD=4.0
+InpMaxWeeklyDD=8.0
+InpMaxConsecLosses=3
 InpMaxPositions=1
 InpAtrSlMultiplier=2.0
 InpAtrTpMultiplier=3.0
 InpMaxSpreadPoints=350
-InpMaxWeeklyDD=8.0
-InpMaxConsecLosses=3
 
-; --- Trailing Stop ---
+; --- Trailing y Break-Even ---
 InpUseTrailing=true
 InpTrailAtrMult=1.5
+InpUseBreakEven=true
+InpBreakEvenR=0.5
 
 ; --- Sesiones ---
 InpUseSessionFilter=true
@@ -47,4 +47,7 @@ InpCloseOnFriday=true
 InpFridayCloseHour=19
 
 ; --- Noticias ---
+InpUseNewsFilter=true
+InpNewsBufferBefore=30
+InpNewsBufferAfter=90
 InpPauseForNews=false

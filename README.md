@@ -92,10 +92,13 @@ El monitor reconecta automáticamente si MT5 se desconecta y persiste logs en `m
 
 ## Hoja de ruta
 
-- [ ] Filtro de noticias de alto impacto (calendario económico — NFP, FOMC, CPI)
-- [ ] Break-even automático al alcanzar 1R
+- [x] Filtro de noticias de alto impacto — `NewsFilter.mqh` (NFP auto, FOMC hardcoded, CPI proxy)
+- [x] Break-even automático al alcanzar 0.5R — `InpUseBreakEven` + `InpBreakEvenR`
 - [ ] Alertas a Telegram desde `monitor.py`
-- [ ] Módulo de registro de operaciones en CSV/SQLite para auditoría
+- [ ] Módulo de registro de operaciones en CSV/SQLite para auditoría — `TradeLogger.mqh`
+- [ ] Tests unitarios MQL5 — `MQL5/Scripts/Tests/`
+- [ ] CI/CD GitHub Actions — validación automática en push
+- [ ] Backtesting walk-forward + Monte Carlo (requiere MetaTrader 5)
 - [ ] Versión multi-símbolo (XAGUSD)
 
 ## Licencia

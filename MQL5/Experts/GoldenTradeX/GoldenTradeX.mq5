@@ -5,22 +5,23 @@
 //+------------------------------------------------------------------+
 #property copyright "CTG One Technology S.A.S."
 #property link      "https://github.com/VladPhil92/Golden-Trade-X"
-#property version   "1.20"
+#property version   "1.30"
 #property strict
-#property description "EA de tendencia para Oro (XAUUSD): EMA cross + RSI + ADX + ATR + H4, gestión de riesgo multicapa con DD diario/semanal, pérdidas consecutivas y pausa por noticias."
+#property description "EA de tendencia para Oro (XAUUSD): EMA cross + RSI + ADX + ATR + H4, gestion de riesgo multicapa con DD diario/semanal, perdidas consecutivas, break-even y filtro de noticias."
 
 #include <Trade/Trade.mqh>
 #include <GoldenTradeX/RiskManager.mqh>
 #include <GoldenTradeX/SignalEngine.mqh>
 #include <GoldenTradeX/SessionFilter.mqh>
+#include <GoldenTradeX/NewsFilter.mqh>
 
 //--- Identidad
 input group "=== Identidad ==="
 input ulong   InpMagicNumber      = 920260;
 input string  InpTradeComment     = "GoldenTradeX";
 
-//--- Señales base
-input group "=== Señales ==="
+//--- Senales
+input group "=== Senales ==="
 input int     InpEmaFast          = 21;
 input int     InpEmaSlow          = 55;
 input int     InpRsiPeriod        = 14;
@@ -30,30 +31,32 @@ input double  InpRsiLongMin       = 45.0;    // RSI minimo para longs (momentum 
 input double  InpRsiShortMax      = 55.0;    // RSI maximo para shorts (momentum bajista)
 input ENUM_TIMEFRAMES InpTimeframe = PERIOD_M15;
 input int     InpAtrPeriod        = 14;
-input double  InpAtrMinRatio      = 0.8;     // ATR / ATR_SMA(20): minimo para operar
-input double  InpAtrMaxRatio      = 3.0;     // ATR / ATR_SMA(20): maximo (bloquea spikes)
+input double  InpAtrMinRatio      = 0.8;     // ATR/ATR_SMA(20): minimo para operar
+input double  InpAtrMaxRatio      = 3.0;     // ATR/ATR_SMA(20): maximo (bloquea spikes)
 input double  InpAdxMinLevel      = 25.0;    // ADX minimo: regimen tendencial (0=off)
 
 //--- Filtro de tendencia H4
 input group "=== Filtro de Tendencia HTF ==="
-input bool    InpUseHtfFilter     = true;    // Solo operar a favor de la tendencia H4
-input int     InpHtfEmaPeriod     = 50;      // Periodo EMA en H4
+input bool    InpUseHtfFilter     = true;
+input int     InpHtfEmaPeriod     = 50;
 
 //--- Gestion de riesgo
 input group "=== Riesgo ==="
 input double  InpRiskPercent      = 1.0;
-input double  InpMaxDailyDD       = 4.0;     // Drawdown diario maximo (%)
-input double  InpMaxWeeklyDD      = 8.0;     // Drawdown semanal maximo (%)
-input int     InpMaxConsecLosses  = 3;       // Perdidas consecutivas antes de pausa (0=off)
+input double  InpMaxDailyDD       = 4.0;
+input double  InpMaxWeeklyDD      = 8.0;
+input int     InpMaxConsecLosses  = 3;
 input int     InpMaxPositions     = 1;
 input double  InpAtrSlMultiplier  = 2.0;     // SL = ATR x factor
 input double  InpAtrTpMultiplier  = 3.0;     // TP = ATR x factor
 input double  InpMaxSpreadPoints  = 350;
 
-//--- Trailing stop
-input group "=== Trailing Stop ==="
+//--- Trailing stop y Break-even
+input group "=== Trailing Stop y Break-Even ==="
 input bool    InpUseTrailing      = true;
-input double  InpTrailAtrMult     = 1.5;     // Trailing = ATR x factor (activo desde +1R)
+input double  InpTrailAtrMult     = 1.5;     // Trailing = ATR x factor
+input bool    InpUseBreakEven     = true;    // Mover SL a entrada al alcanzar umbral
+input double  InpBreakEvenR       = 0.5;     // Umbral break-even como multiplo del SL (0.5 = +0.5R)
 
 //--- Sesiones
 input group "=== Sesiones ==="
@@ -65,13 +68,17 @@ input int     InpFridayCloseHour  = 19;
 
 //--- Noticias
 input group "=== Noticias ==="
-input bool    InpPauseForNews     = false;   // Pausa manual en dias de alto impacto (NFP/FOMC/CPI)
+input bool    InpUseNewsFilter    = true;    // Bloqueo automatico NFP/FOMC/CPI
+input int     InpNewsBufferBefore = 30;      // Minutos de bloqueo antes del evento
+input int     InpNewsBufferAfter  = 90;      // Minutos de bloqueo despues del evento
+input bool    InpPauseForNews     = false;   // Pausa manual adicional (override)
 
 //--- Objetos globales
 CTrade         trade;
 CRiskManager   riskManager;
 CSignalEngine  signalEngine;
 CSessionFilter sessionFilter;
+CNewsFilter    newsFilter;
 
 datetime  g_lastBarTime  = 0;
 string    g_gvLastBarKey = "";
@@ -99,6 +106,11 @@ int OnInit()
       Print("GoldenTradeX: InpRiskPercent fuera de rango (0-10%)");
       return(INIT_PARAMETERS_INCORRECT);
      }
+   if(InpBreakEvenR <= 0 || InpBreakEvenR > InpAtrSlMultiplier)
+     {
+      Print("GoldenTradeX: InpBreakEvenR debe estar en (0, AtrSlMultiplier]");
+      return(INIT_PARAMETERS_INCORRECT);
+     }
 
    trade.SetExpertMagicNumber(InpMagicNumber);
    trade.SetDeviationInPoints(20);
@@ -123,10 +135,13 @@ int OnInit()
    sessionFilter.Init(InpUseSessionFilter, InpStartHour, InpEndHour,
                       InpCloseOnFriday, InpFridayCloseHour);
 
+   newsFilter.Init(InpUseNewsFilter, InpNewsBufferBefore, InpNewsBufferAfter);
+
    g_gvLastBarKey = StringFormat("GTX_%d_LastBar", (int)InpMagicNumber);
    g_lastBarTime  = (datetime)GlobalVariableGet(g_gvLastBarKey);
 
-   Print("GoldenTradeX v1.20 inicializado en ", _Symbol);
+   newsFilter.PrintStatus();
+   Print("GoldenTradeX v1.30 inicializado en ", _Symbol);
    return(INIT_SUCCEEDED);
   }
 
@@ -167,6 +182,11 @@ void OnTick()
      {
       Comment("GoldenTradeX: ", InpMaxConsecLosses,
               " perdidas consecutivas. Pausa hasta nueva semana.");
+      return;
+     }
+   if(newsFilter.IsNewsBlocked())
+     {
+      Comment("GoldenTradeX: ventana de noticias activa. Esperando...");
       return;
      }
    if(InpPauseForNews)
@@ -214,7 +234,7 @@ void OnTick()
   }
 
 //+------------------------------------------------------------------+
-//| Registra resultado de cada deal cerrado para tracking de perdidas |
+//| Registra resultado de cada deal cerrado (tracker de perdidas)     |
 //+------------------------------------------------------------------+
 void OnTradeTransaction(const MqlTradeTransaction &trans,
                         const MqlTradeRequest     &request,
@@ -249,15 +269,16 @@ bool IsNewBar()
   }
 
 //+------------------------------------------------------------------+
-//| Trailing stop: activo solo cuando la posicion alcanza 1R         |
+//| Break-even + Trailing: gestion de SL en posiciones abiertas      |
 //+------------------------------------------------------------------+
 void ManageTrailing()
   {
    double atr = signalEngine.GetATR();
    if(atr <= 0) return;
 
-   double trail      = atr * InpTrailAtrMult;
-   double activation = atr * InpAtrSlMultiplier;
+   double trail         = atr * InpTrailAtrMult;
+   double trailActivation = atr * InpAtrSlMultiplier;           // 1R
+   double beActivation  = atr * InpAtrSlMultiplier * InpBreakEvenR; // fraccion de 1R
 
    for(int i = PositionsTotal() - 1; i >= 0; i--)
      {
@@ -274,15 +295,33 @@ void ManageTrailing()
       if(type == POSITION_TYPE_BUY)
         {
          double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-         if(bid - openPrice < activation) continue;
+
+         // Break-even: mover SL a precio de entrada cuando se alcanza el umbral
+         if(InpUseBreakEven && bid - openPrice >= beActivation && sl < openPrice)
+           {
+            trade.PositionModify(ticket, NormalizeDouble(openPrice, _Digits), tp);
+            continue;  // trailing se aplicara en el siguiente tick
+           }
+
+         // Trailing: activo desde 1R
+         if(bid - openPrice < trailActivation) continue;
          double newSl = NormalizeDouble(bid - trail, _Digits);
          if(newSl > sl && newSl < bid)
             trade.PositionModify(ticket, newSl, tp);
         }
-      else
+      else  // SELL
         {
          double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-         if(openPrice - ask < activation) continue;
+
+         // Break-even: mover SL a precio de entrada cuando se alcanza el umbral
+         if(InpUseBreakEven && openPrice - ask >= beActivation && (sl > openPrice || sl == 0))
+           {
+            trade.PositionModify(ticket, NormalizeDouble(openPrice, _Digits), tp);
+            continue;
+           }
+
+         // Trailing: activo desde 1R
+         if(openPrice - ask < trailActivation) continue;
          double newSl = NormalizeDouble(ask + trail, _Digits);
          if((newSl < sl || sl == 0) && newSl > ask)
             trade.PositionModify(ticket, newSl, tp);
