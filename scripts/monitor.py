@@ -1,66 +1,126 @@
 """
 Golden Trade X — Monitor de cuenta y posiciones (Python + MetaTrader5).
 
-Capa opcional de observabilidad: se conecta al terminal MT5 local,
-lee equity, posiciones abiertas del EA (por magic number) e imprime
-un resumen periódico. Punto de partida para dashboards, alertas
-(Telegram, email) o registro en base de datos.
-
-Requisitos:
-    pip install MetaTrader5 pandas
+Observabilidad externa: equity, posiciones del EA por magic number,
+con reconexión automática y logging persistente.
 
 Uso:
-    python monitor.py
+    python monitor.py [--symbol XAUUSD] [--magic 920260] [--refresh 30]
+    GTX_SYMBOL=GOLD python monitor.py   # también acepta variables de entorno
 """
 
+import argparse
+import logging
+import os
 import time
-from datetime import datetime
 
 import MetaTrader5 as mt5
 
-MAGIC_NUMBER = 920260
-SYMBOL = "XAUUSD"
-REFRESH_SECONDS = 30
+DEFAULT_MAGIC   = 920260
+DEFAULT_SYMBOL  = "XAUUSD"
+DEFAULT_REFRESH = 30
+MAX_RETRIES     = 5
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler("monitor.log", encoding="utf-8"),
+    ],
+)
+log = logging.getLogger(__name__)
 
 
-def connect() -> bool:
-    if not mt5.initialize():
-        print(f"Error inicializando MT5: {mt5.last_error()}")
-        return False
+def connect(attempt: int = 0) -> bool:
+    if mt5.initialize():
+        info = mt5.account_info()
+        if info is not None:
+            log.info(
+                "Conectado | Cuenta %d (%s) | Balance %.2f %s",
+                info.login, info.server, info.balance, info.currency,
+            )
+            return True
+        log.warning("MT5 activo pero sin cuenta conectada.")
+    else:
+        log.error("mt5.initialize() falló: %s", mt5.last_error())
+
+    if attempt < MAX_RETRIES:
+        wait = 2 ** attempt
+        log.info("Reintento %d/%d en %ds…", attempt + 1, MAX_RETRIES, wait)
+        time.sleep(wait)
+        mt5.shutdown()
+        return connect(attempt + 1)
+
+    return False
+
+
+def snapshot(symbol: str, magic: int) -> None:
     info = mt5.account_info()
     if info is None:
-        print("No hay cuenta conectada en el terminal MT5.")
-        return False
-    print(f"Conectado a cuenta {info.login} ({info.server}) | "
-          f"Balance: {info.balance:.2f} {info.currency}")
-    return True
+        log.warning("account_info() = None (terminal desconectado?)")
+        return
 
+    positions = mt5.positions_get(symbol=symbol) or []
+    ea_pos    = [p for p in positions if p.magic == magic]
+    floating  = sum(p.profit for p in ea_pos)
 
-def snapshot() -> None:
-    info = mt5.account_info()
-    positions = mt5.positions_get(symbol=SYMBOL) or []
-    ea_positions = [p for p in positions if p.magic == MAGIC_NUMBER]
-
-    floating = sum(p.profit for p in ea_positions)
-    print(f"\n[{datetime.now():%Y-%m-%d %H:%M:%S}] "
-          f"Equity: {info.equity:.2f} | Flotante GTX: {floating:.2f} | "
-          f"Posiciones GTX: {len(ea_positions)}")
-
-    for p in ea_positions:
+    log.info(
+        "Equity %.2f | Flotante GTX %.2f | Posiciones GTX %d",
+        info.equity, floating, len(ea_pos),
+    )
+    for p in ea_pos:
         side = "BUY" if p.type == mt5.POSITION_TYPE_BUY else "SELL"
-        print(f"  #{p.ticket} {side} {p.volume} {p.symbol} @ {p.price_open} "
-              f"| SL {p.sl} TP {p.tp} | P/L {p.profit:.2f}")
+        log.info(
+            "  #%d %s %.2f %s @ %.5f | SL %.5f TP %.5f | P/L %.2f",
+            p.ticket, side, p.volume, p.symbol,
+            p.price_open, p.sl, p.tp, p.profit,
+        )
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Golden Trade X — Monitor MT5")
+    parser.add_argument(
+        "--symbol",
+        default=os.getenv("GTX_SYMBOL", DEFAULT_SYMBOL),
+        help="Nombre del símbolo en el broker (ej: XAUUSD, GOLD, XAUUSD.)",
+    )
+    parser.add_argument(
+        "--magic",
+        type=int,
+        default=int(os.getenv("GTX_MAGIC", str(DEFAULT_MAGIC))),
+        help="Magic number del EA",
+    )
+    parser.add_argument(
+        "--refresh",
+        type=int,
+        default=DEFAULT_REFRESH,
+        help="Intervalo de refresco en segundos",
+    )
+    args = parser.parse_args()
+
+    log.info("Monitor iniciado | Symbol=%s Magic=%d Refresh=%ds",
+             args.symbol, args.magic, args.refresh)
+
     if not connect():
+        log.error("No se pudo conectar a MT5. Abortando.")
         return
+
     try:
         while True:
-            snapshot()
-            time.sleep(REFRESH_SECONDS)
+            # Detectar desconexión y reconectar antes de cada snapshot
+            if mt5.terminal_info() is None:
+                log.warning("Terminal desconectado. Reconectando…")
+                mt5.shutdown()
+                if not connect():
+                    log.error("Reconexión fallida. Deteniendo monitor.")
+                    break
+
+            snapshot(args.symbol, args.magic)
+            time.sleep(args.refresh)
+
     except KeyboardInterrupt:
-        print("\nMonitor detenido.")
+        log.info("Monitor detenido por el usuario.")
     finally:
         mt5.shutdown()
 

@@ -28,28 +28,32 @@ golden-trade-x/
 ### Flujo de decisión (cada vela cerrada M15)
 
 ```
-Nueva vela → ¿Sesión permitida? → ¿Spread aceptable? → ¿DD diario OK?
-          → ¿Posiciones < máx? → SignalEngine (cruce EMA 21/55 + filtro RSI)
-          → RiskManager calcula lote por % de equity y distancia al SL (ATR×2)
-          → Orden con SL/TP automáticos → Trailing stop ATR×1.5 en cada tick
+Nueva vela → ¿Sesión permitida? → ¿Spread aceptable? → ¿DD diario OK? (persistido)
+          → ¿Posiciones < máx? → ¿Terminal conectado?
+          → SignalEngine: ¿ATR ≥ ATR_SMA×0.8? → ¿Tendencia H4 acompaña?
+          → Cruce EMA21/55 + RSI momentum (45–70 longs / 30–55 shorts)
+          → RiskManager calcula lote (retorna 0 si lote < mínimo broker)
+          → Orden con SL/TP automáticos
+          → Trailing stop ATR×1.5 activado solo desde +1R
 ```
 
 ### Módulos
 
 | Módulo | Responsabilidad |
 |---|---|
-| **GoldenTradeX.mq5** | Ciclo de vida del EA, orquestación, trailing, cierre de viernes |
-| **SignalEngine** | Cruce EMA 21/55 confirmado en vela cerrada + filtro RSI 14 anti-extremos + ATR 14 para volatilidad |
-| **RiskManager** | Lote por riesgo % de equity, freno de drawdown diario (4 %), filtro de spread, límite de posiciones |
-| **SessionFilter** | Ventana Londres–Nueva York (07–20 h servidor), cierre forzoso viernes 19 h |
-| **monitor.py** | Observabilidad externa: equity, flotante y posiciones del EA vía API Python de MT5 |
+| **GoldenTradeX.mq5** | Orquestación, trailing con activación 1R, cierre de viernes con verificación, persistencia de estado |
+| **SignalEngine** | Cruce EMA21/55 confirmado + continuación en barra 0 · RSI como momentum · filtro ATR mínimo · tendencia H4 · caché ATR por barra |
+| **RiskManager** | Lote por % de equity, rechaza lote < mínimo broker, drawdown diario persistido con GlobalVariable, precisión de decimales dinámica |
+| **SessionFilter** | Ventana Londres–NY (07–20 h servidor), cierre forzoso viernes 19 h |
+| **monitor.py** | Observabilidad externa: equity, flotante, posiciones · reconexión automática · logging a archivo · configurable por argparse/envvar |
 
 ### Gestión de riesgo por defecto
 
 - Riesgo por operación: **1 % del equity**
 - Stop Loss: **ATR(14) × 2** · Take Profit: **ATR(14) × 3** (R:R 1:1.5)
-- Trailing stop: **ATR × 1.5**
-- Drawdown diario máximo: **4 %** (el EA se pausa hasta el día siguiente)
+- Trailing stop: **ATR × 1.5** (activo solo desde +1R para evitar stops prematuros)
+- Drawdown diario máximo: **4 %** — persiste entre reinicios del EA via GlobalVariable
+- Si lote calculado < lote mínimo del broker: la posición no se abre (sin sobreapalancamiento)
 - Spread máximo: **350 puntos** (ajústelo a su broker)
 - 1 posición simultánea, identificada por magic number `920260`
 
@@ -75,17 +79,20 @@ Nueva vela → ¿Sesión permitida? → ¿Spread aceptable? → ¿DD diario OK?
 ## Monitor en Python (opcional)
 
 ```bash
-pip install MetaTrader5 pandas
-python scripts/monitor.py
+pip install MetaTrader5
+python scripts/monitor.py                    # defaults: XAUUSD, magic 920260
+python scripts/monitor.py --symbol GOLD --magic 920260 --refresh 60
+GTX_SYMBOL=XAUUSD. python scripts/monitor.py  # vía variable de entorno
 ```
 
 Requiere el terminal MT5 abierto en la misma máquina (Windows).
+El monitor reconecta automáticamente si MT5 se desconecta y persiste logs en `monitor.log`.
 
 ---
 
 ## Hoja de ruta
 
-- [ ] Filtro de noticias de alto impacto (calendario económico)
+- [ ] Filtro de noticias de alto impacto (calendario económico — NFP, FOMC, CPI)
 - [ ] Break-even automático al alcanzar 1R
 - [ ] Alertas a Telegram desde `monitor.py`
 - [ ] Módulo de registro de operaciones en CSV/SQLite para auditoría
