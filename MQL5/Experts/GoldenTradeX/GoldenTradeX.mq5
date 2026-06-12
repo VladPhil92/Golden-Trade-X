@@ -5,9 +5,9 @@
 //+------------------------------------------------------------------+
 #property copyright "CTG One Technology S.A.S."
 #property link      "https://github.com/VladPhil92/Golden-Trade-X"
-#property version   "1.10"
+#property version   "1.20"
 #property strict
-#property description "EA de tendencia para Oro (XAUUSD): EMA cross + RSI + filtro ATR + tendencia H4, gestión de riesgo por % de equity, trailing stop con activación 1R y límites de drawdown diario."
+#property description "EA de tendencia para Oro (XAUUSD): EMA cross + RSI + filtro ATR + ADX + tendencia H4, gestión de riesgo por % de equity, trailing stop con activación 1R, límites de drawdown diario/semanal y control de pérdidas consecutivas."
 
 #include <Trade/Trade.mqh>
 #include <GoldenTradeX/RiskManager.mqh>
@@ -29,6 +29,11 @@ input double  InpRsiLower         = 30.0;   // RSI: suelo para shorts
 input double  InpRsiLongMin       = 45.0;   // RSI mínimo para longs (momentum alcista)
 input double  InpRsiShortMax      = 55.0;   // RSI máximo para shorts (momentum bajista)
 input ENUM_TIMEFRAMES InpTimeframe = PERIOD_M15;
+input int     InpAtrPeriod        = 14;
+input double  InpAtrMinRatio      = 0.8;    // ATR / ATR_SMA(20): mínimo para operar
+input int     InpAdxPeriod        = 14;     // Periodo ADX para filtro de régimen
+input double  InpAdxMinLevel      = 25.0;   // ADX mínimo (0 = desactivado)
+input double  InpAtrMaxRatio      = 3.0;    // ATR máximo vs ATR_SMA (0 = desactivado)
 
 //--- Filtro de tendencia H4
 input group "=== Filtro de Tendencia HTF ==="
@@ -42,9 +47,9 @@ input double  InpMaxDailyDD       = 4.0;
 input int     InpMaxPositions     = 1;
 input double  InpAtrSlMultiplier  = 2.0;    // SL = ATR × factor
 input double  InpAtrTpMultiplier  = 3.0;    // TP = ATR × factor
-input int     InpAtrPeriod        = 14;
-input double  InpAtrMinRatio      = 0.8;    // ATR / ATR_SMA(20): mínimo para operar
 input double  InpMaxSpreadPoints  = 350;
+input double  InpMaxWeeklyDD      = 8.0;    // Drawdown semanal máximo (%)
+input int     InpMaxConsecLosses  = 3;      // Pérdidas consecutivas máx antes de pausa
 
 //--- Trailing stop
 input group "=== Trailing Stop ==="
@@ -58,6 +63,10 @@ input int     InpStartHour        = 7;
 input int     InpEndHour          = 20;
 input bool    InpCloseOnFriday    = true;
 input int     InpFridayCloseHour  = 19;
+
+//--- Noticias
+input group "=== Noticias ==="
+input bool    InpPauseForNews     = false;  // Pausar EA manualmente en días de noticias
 
 //--- Objetos globales
 CTrade         trade;
@@ -102,6 +111,7 @@ int OnInit()
                          InpRsiPeriod, InpRsiUpper, InpRsiLower,
                          InpRsiLongMin, InpRsiShortMax,
                          InpAtrPeriod, InpAtrMinRatio,
+                         InpAdxMinLevel, InpAtrMaxRatio,
                          InpUseHtfFilter, InpHtfEmaPeriod))
      {
       Print("GoldenTradeX: error inicializando SignalEngine");
@@ -109,7 +119,8 @@ int OnInit()
      }
 
    riskManager.Init(InpRiskPercent, InpMaxDailyDD, InpMaxPositions,
-                    InpMaxSpreadPoints, InpMagicNumber);
+                    InpMaxSpreadPoints, InpMagicNumber,
+                    InpMaxConsecLosses, InpMaxWeeklyDD);
 
    sessionFilter.Init(InpUseSessionFilter, InpStartHour, InpEndHour,
                       InpCloseOnFriday, InpFridayCloseHour);
@@ -118,7 +129,7 @@ int OnInit()
    g_gvLastBarKey = StringFormat("GTX_%d_LastBar", (int)InpMagicNumber);
    g_lastBarTime  = (datetime)GlobalVariableGet(g_gvLastBarKey);
 
-   Print("GoldenTradeX v1.10 inicializado en ", _Symbol);
+   Print("GoldenTradeX v1.20 inicializado en ", _Symbol);
    return(INIT_SUCCEEDED);
   }
 
@@ -150,6 +161,21 @@ void OnTick()
    if(riskManager.IsDailyDrawdownExceeded())
      {
       Comment("GoldenTradeX: drawdown diario alcanzado. Pausa hasta mañana.");
+      return;
+     }
+   if(riskManager.IsWeeklyDrawdownExceeded())
+     {
+      Comment("GoldenTradeX: drawdown semanal alcanzado. Pausa hasta la semana siguiente.");
+      return;
+     }
+   if(riskManager.IsConsecutiveLossLimitReached())
+     {
+      Comment("GoldenTradeX: ", InpMaxConsecLosses, " pérdidas consecutivas. Pausa temporal.");
+      return;
+     }
+   if(InpPauseForNews)
+     {
+      Comment("GoldenTradeX: pausa manual por evento de noticias.");
       return;
      }
    if(riskManager.CountOpenPositions(_Symbol) >= InpMaxPositions) return;
@@ -263,5 +289,28 @@ void CloseAllPositions(string reason)
                " — ", trade.ResultRetcodeDescription());
      }
    Comment("GoldenTradeX: ", reason);
+  }
+
+//+------------------------------------------------------------------+
+//| Detecta operaciones cerradas y registra resultado para tracking   |
+//+------------------------------------------------------------------+
+void OnTradeTransaction(const MqlTradeTransaction &trans,
+                        const MqlTradeRequest     &request,
+                        const MqlTradeResult      &result)
+  {
+   if(trans.type != TRADE_TRANSACTION_DEAL_ADD) return;
+   if(trans.deal_type != DEAL_TYPE_BUY && trans.deal_type != DEAL_TYPE_SELL) return;
+
+   ulong dealTicket = trans.deal;
+   if(!HistoryDealSelect(dealTicket)) return;
+
+   long magic = HistoryDealGetInteger(dealTicket, DEAL_MAGIC);
+   if(magic != (long)InpMagicNumber) return;
+
+   long entry = HistoryDealGetInteger(dealTicket, DEAL_ENTRY);
+   if(entry != DEAL_ENTRY_OUT && entry != DEAL_ENTRY_INOUT) return;
+
+   double profit = HistoryDealGetDouble(dealTicket, DEAL_PROFIT);
+   riskManager.RegisterTradeResult(profit);
   }
 //+------------------------------------------------------------------+

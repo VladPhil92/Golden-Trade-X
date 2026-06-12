@@ -20,12 +20,15 @@ private:
    int             m_hEmaSlow;
    int             m_hRsi;
    int             m_hAtr;
-   int             m_hHtfEma;     // EMA en H4 para filtro de tendencia superior
+   int             m_hAdx;      // ADX para filtro de régimen de tendencia
+   int             m_hHtfEma;   // EMA en H4 para filtro de tendencia superior
    double          m_rsiUpper;
    double          m_rsiLower;
-   double          m_rsiLongMin;  // RSI mínimo para longs (confirma momentum alcista)
-   double          m_rsiShortMax; // RSI máximo para shorts (confirma momentum bajista)
-   double          m_atrMinRatio; // ATR / ATR_SMA(20) debe superar este ratio
+   double          m_rsiLongMin;   // RSI mínimo para longs (confirma momentum alcista)
+   double          m_rsiShortMax;  // RSI máximo para shorts (confirma momentum bajista)
+   double          m_atrMinRatio;  // ATR / ATR_SMA(20) debe superar este ratio
+   double          m_adxMinLevel;  // ADX mínimo para operar (0 = desactivado)
+   double          m_atrMaxRatio;  // ATR / ATR_SMA(20) máximo permitido (0 = desactivado)
    bool            m_useHtfFilter;
 
    // Caché del ATR: evita CopyBuffer en cada tick
@@ -57,6 +60,7 @@ public:
              int rsiPeriod, double rsiUpper, double rsiLower,
              double rsiLongMin, double rsiShortMax,
              int atrPeriod, double atrMinRatio,
+             double adxMinLevel, double atrMaxRatio,
              bool useHtfFilter, int htfEmaPeriod)
      {
       m_symbol       = symbol;
@@ -66,10 +70,13 @@ public:
       m_rsiLongMin   = rsiLongMin;
       m_rsiShortMax  = rsiShortMax;
       m_atrMinRatio  = atrMinRatio;
+      m_adxMinLevel  = adxMinLevel;
+      m_atrMaxRatio  = atrMaxRatio;
       m_useHtfFilter = useHtfFilter;
       m_cachedAtr    = 0;
       m_cachedAtrBar = 0;
       m_hHtfEma      = INVALID_HANDLE;
+      m_hAdx         = INVALID_HANDLE;
 
       m_hEmaFast = iMA(symbol, tf, emaFast, 0, MODE_EMA, PRICE_CLOSE);
       m_hEmaSlow = iMA(symbol, tf, emaSlow, 0, MODE_EMA, PRICE_CLOSE);
@@ -79,6 +86,10 @@ public:
       if(m_hEmaFast == INVALID_HANDLE || m_hEmaSlow == INVALID_HANDLE ||
          m_hRsi == INVALID_HANDLE || m_hAtr == INVALID_HANDLE)
          return(false);
+
+      // Crear handle de ADX para filtro de régimen
+      m_hAdx = iADX(symbol, tf, 14);
+      if(m_hAdx == INVALID_HANDLE) return(false);
 
       if(m_useHtfFilter)
         {
@@ -95,6 +106,7 @@ public:
       if(m_hEmaSlow != INVALID_HANDLE) IndicatorRelease(m_hEmaSlow);
       if(m_hRsi     != INVALID_HANDLE) IndicatorRelease(m_hRsi);
       if(m_hAtr     != INVALID_HANDLE) IndicatorRelease(m_hAtr);
+      if(m_hAdx     != INVALID_HANDLE) IndicatorRelease(m_hAdx);
       if(m_hHtfEma  != INVALID_HANDLE) IndicatorRelease(m_hHtfEma);
      }
 
@@ -117,6 +129,22 @@ public:
          double atrNow = GetATR();
          double atrAvg = AtrSma(20);
          if(atrAvg > 0 && atrNow < atrAvg * m_atrMinRatio) return(SIGNAL_NONE);
+        }
+
+      // Filtro de régimen: solo operar en mercados tendenciales (ADX > umbral)
+      if(m_adxMinLevel > 0)
+        {
+         double adxMain;
+         if(!CopyOne(m_hAdx, 1, adxMain)) return(SIGNAL_NONE);
+         if(adxMain < m_adxMinLevel) return(SIGNAL_NONE);
+        }
+
+      // Filtro ATR máximo: evitar entradas en picos de volatilidad (eventos de noticias)
+      if(m_atrMaxRatio > 0)
+        {
+         double atrNow = GetATR();
+         double atrAvg = AtrSma(20);
+         if(atrAvg > 0 && atrNow > atrAvg * m_atrMaxRatio) return(SIGNAL_NONE);
         }
 
       // Cruce confirmado en barra cerrada [1 vs 2] + continuación en barra en curso [0]
