@@ -5,15 +5,16 @@
 //+------------------------------------------------------------------+
 #property copyright "CTG One Technology S.A.S."
 #property link      "https://github.com/VladPhil92/Golden-Trade-X"
-#property version   "1.30"
+#property version   "1.40"
 #property strict
-#property description "EA de tendencia para Oro (XAUUSD): EMA cross + RSI + ADX + ATR + H4, gestion de riesgo multicapa con DD diario/semanal, perdidas consecutivas, break-even y filtro de noticias."
+#property description "EA de tendencia para Oro (XAUUSD): EMA cross + RSI + ADX + ATR + H4, gestion de riesgo multicapa con DD diario/semanal, perdidas consecutivas, break-even, filtro de noticias y registro CSV."
 
 #include <Trade/Trade.mqh>
 #include <GoldenTradeX/RiskManager.mqh>
 #include <GoldenTradeX/SignalEngine.mqh>
 #include <GoldenTradeX/SessionFilter.mqh>
 #include <GoldenTradeX/NewsFilter.mqh>
+#include <GoldenTradeX/TradeLogger.mqh>
 
 //--- Identidad
 input group "=== Identidad ==="
@@ -73,12 +74,17 @@ input int     InpNewsBufferBefore = 30;      // Minutos de bloqueo antes del eve
 input int     InpNewsBufferAfter  = 90;      // Minutos de bloqueo despues del evento
 input bool    InpPauseForNews     = false;   // Pausa manual adicional (override)
 
+//--- Registro de operaciones
+input group "=== Registro ==="
+input bool    InpEnableTradeLog   = true;    // Escribe CSV en carpeta Files del terminal
+
 //--- Objetos globales
 CTrade         trade;
 CRiskManager   riskManager;
 CSignalEngine  signalEngine;
 CSessionFilter sessionFilter;
 CNewsFilter    newsFilter;
+CTradeLogger   tradeLogger;
 
 datetime  g_lastBarTime  = 0;
 string    g_gvLastBarKey = "";
@@ -136,12 +142,13 @@ int OnInit()
                       InpCloseOnFriday, InpFridayCloseHour);
 
    newsFilter.Init(InpUseNewsFilter, InpNewsBufferBefore, InpNewsBufferAfter);
+   tradeLogger.Init(InpEnableTradeLog, InpMagicNumber);
 
    g_gvLastBarKey = StringFormat("GTX_%d_LastBar", (int)InpMagicNumber);
    g_lastBarTime  = (datetime)GlobalVariableGet(g_gvLastBarKey);
 
    newsFilter.PrintStatus();
-   Print("GoldenTradeX v1.30 inicializado en ", _Symbol);
+   Print("GoldenTradeX v1.40 inicializado en ", _Symbol);
    return(INIT_SUCCEEDED);
   }
 
@@ -253,6 +260,7 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
 
    double profit = HistoryDealGetDouble(dealTicket, DEAL_PROFIT);
    riskManager.RegisterTradeResult(profit);
+   tradeLogger.LogTrade(dealTicket);
   }
 
 //+------------------------------------------------------------------+

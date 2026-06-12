@@ -13,14 +13,20 @@ golden-trade-x/
 ├── MQL5/
 │   ├── Experts/GoldenTradeX/
 │   │   └── GoldenTradeX.mq5        ← EA principal (orquestador)
-│   └── Include/GoldenTradeX/
-│       ├── SignalEngine.mqh        ← Motor de señales (EMA + RSI + ATR)
-│       ├── RiskManager.mqh         ← Gestión de riesgo y capital
-│       └── SessionFilter.mqh       ← Filtro de sesiones y fin de semana
+│   ├── Include/GoldenTradeX/
+│   │   ├── SignalEngine.mqh        ← Motor de señales (EMA + RSI + ADX + ATR + H4)
+│   │   ├── RiskManager.mqh         ← Gestión de riesgo y capital
+│   │   ├── SessionFilter.mqh       ← Filtro de sesiones y fin de semana
+│   │   ├── NewsFilter.mqh          ← Filtro NFP / FOMC / CPI
+│   │   └── TradeLogger.mqh         ← Registro CSV por operación cerrada
+│   └── Scripts/Tests/
+│       ├── TestNewsFilter.mq5      ← Tests unitarios NewsFilter
+│       └── TestRiskManager.mq5     ← Tests unitarios RiskManager
 ├── scripts/
 │   └── monitor.py                  ← Monitor opcional en Python (MetaTrader5)
 ├── config/
 │   └── GoldenTradeX.set            ← Preset de parámetros para el Strategy Tester
+├── requirements.txt                ← Dependencias Python
 └── docs/
     └── STRATEGY.md                 ← Documento de estrategia y plan de pruebas
 ```
@@ -41,7 +47,7 @@ Nueva vela → ¿Sesión permitida? → ¿Spread aceptable? → ¿DD diario OK? 
 
 | Módulo | Responsabilidad |
 |---|---|
-| **GoldenTradeX.mq5** | Orquestación, trailing con activación 1R, cierre de viernes con verificación, persistencia de estado |
+| **GoldenTradeX.mq5** | Orquestación, trailing con activación 1R, cierre de viernes con verificación, persistencia de estado, integración TradeLogger |
 | **SignalEngine** | Cruce EMA21/55 confirmado + continuación en barra 0 · RSI como momentum · filtro ATR mínimo · tendencia H4 · caché ATR por barra |
 | **RiskManager** | Lote por % de equity, rechaza lote < mínimo broker, drawdown diario persistido con GlobalVariable, precisión de decimales dinámica |
 | **SessionFilter** | Ventana Londres–NY (07–20 h servidor), cierre forzoso viernes 19 h |
@@ -95,8 +101,8 @@ El monitor reconecta automáticamente si MT5 se desconecta y persiste logs en `m
 - [x] Filtro de noticias de alto impacto — `NewsFilter.mqh` (NFP auto, FOMC hardcoded, CPI proxy)
 - [x] Break-even automático al alcanzar 0.5R — `InpUseBreakEven` + `InpBreakEvenR`
 - [ ] Alertas a Telegram desde `monitor.py`
-- [ ] Módulo de registro de operaciones en CSV/SQLite para auditoría — `TradeLogger.mqh`
-- [ ] Tests unitarios MQL5 — `MQL5/Scripts/Tests/`
+- [x] Módulo de registro de operaciones en CSV para auditoría — `TradeLogger.mqh`
+- [x] Tests unitarios MQL5 — `MQL5/Scripts/Tests/` (`TestNewsFilter`, `TestRiskManager`)
 - [ ] CI/CD GitHub Actions — validación automática en push
 - [ ] Backtesting walk-forward + Monte Carlo (requiere MetaTrader 5)
 - [ ] Versión multi-símbolo (XAGUSD)

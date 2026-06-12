@@ -94,6 +94,9 @@ public:
       DetectServerOffset();
      }
 
+   // Permite inyectar offset fijo en tests (evita dependencia de TimeCurrent/TimeGMT)
+   void SetServerOffset(int offset) { m_serverOffset = offset; }
+
    // Devuelve true si el momento actual está dentro de una ventana de bloqueo
    bool IsNewsBlocked()
      {
@@ -101,6 +104,21 @@ public:
 
       MqlDateTime dt;
       TimeToStruct(TimeCurrent(), dt);
+
+      if(IsNfpWindow(dt))       return(true);
+      if(IsCpiProxyWindow(dt))  return(true);
+      if(IsFomcWindow(dt))      return(true);
+
+      return(false);
+     }
+
+   // Variante para tests: evalúa el bloqueo en una datetime específica
+   bool IsNewsBlockedAt(datetime t)
+     {
+      if(!m_enabled) return(false);
+
+      MqlDateTime dt;
+      TimeToStruct(t, dt);
 
       if(IsNfpWindow(dt))       return(true);
       if(IsCpiProxyWindow(dt))  return(true);
