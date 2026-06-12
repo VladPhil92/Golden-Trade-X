@@ -40,7 +40,9 @@ jobs:
           python-version: "3.11"
 
       - name: Check all required parameters are present
-        run: python scripts/validate_set.py config/GoldenTradeX.set
+        run: |
+          python scripts/validate_set.py config/GoldenTradeX.set
+          python scripts/validate_set.py config/GoldenTradeX_XAGUSD.set
 
   # ── 3. Repository structure check ──────────────────────────────────
   structure-check:
@@ -62,7 +64,10 @@ jobs:
             "MQL5/Scripts/Tests/TestNewsFilter.mq5" \
             "MQL5/Scripts/Tests/TestRiskManager.mq5" \
             "scripts/monitor.py" \
+            "scripts/backtest_analysis.py" \
+            "scripts/validate_set.py" \
             "config/GoldenTradeX.set" \
+            "config/GoldenTradeX_XAGUSD.set" \
             "requirements.txt" \
             "CHANGELOG.md" \
             "docs/STRATEGY.md"; do

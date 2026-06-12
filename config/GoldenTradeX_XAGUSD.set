@@ -1,0 +1,65 @@
+; Golden Trade X v1.42 — preset XAGUSD (Plata) M15
+; Arrastrar el EA al gráfico XAGUSD M15 con este preset.
+; Magic number diferente (920261) para operar en paralelo con la instancia XAUUSD.
+;
+; Diferencias clave vs XAUUSD:
+;   - InpMagicNumber  : 920261  (evita colisiones de GlobalVariables)
+;   - InpMaxSpreadPoints: 500   (spreads de plata son más amplios: 120-400 pts)
+;   - El cálculo de lote usa ATR del símbolo, por lo que se adapta
+;     automáticamente a la mayor volatilidad de la plata.
+;   - Ajuste fino de RSI y ATR recomendado tras backtest en XAGUSD.
+
+InpMagicNumber=920261
+InpTradeComment=GoldenTradeX_XAGUSD
+
+; --- Senales ---
+InpEmaFast=21
+InpEmaSlow=55
+InpRsiPeriod=14
+InpRsiUpper=70.0
+InpRsiLower=30.0
+InpRsiLongMin=45.0
+InpRsiShortMax=55.0
+InpTimeframe=15
+InpAtrPeriod=14
+InpAtrMinRatio=0.8
+InpAtrMaxRatio=3.0
+InpAdxMinLevel=25.0
+
+; --- Filtro HTF ---
+InpUseHtfFilter=true
+InpHtfEmaPeriod=50
+
+; --- Riesgo ---
+; Mismo porcentaje — el lote calculado sera menor (ATR de XAGUSD es mayor en puntos)
+InpRiskPercent=1.0
+InpMaxDailyDD=4.0
+InpMaxWeeklyDD=8.0
+InpMaxConsecLosses=3
+InpMaxPositions=1
+InpAtrSlMultiplier=2.0
+InpAtrTpMultiplier=3.0
+; Spread maximo ampliado para plata (revisar con su broker)
+InpMaxSpreadPoints=500
+
+; --- Trailing y Break-Even ---
+InpUseTrailing=true
+InpTrailAtrMult=1.5
+InpUseBreakEven=true
+InpBreakEvenR=0.5
+
+; --- Sesiones ---
+InpUseSessionFilter=true
+InpStartHour=7
+InpEndHour=20
+InpCloseOnFriday=true
+InpFridayCloseHour=19
+
+; --- Noticias ---
+InpUseNewsFilter=true
+InpNewsBufferBefore=30
+InpNewsBufferAfter=90
+InpPauseForNews=false
+
+; --- Registro ---
+InpEnableTradeLog=true

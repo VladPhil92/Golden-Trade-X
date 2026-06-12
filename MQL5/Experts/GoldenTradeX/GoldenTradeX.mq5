@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "CTG One Technology S.A.S."
 #property link      "https://github.com/VladPhil92/Golden-Trade-X"
-#property version   "1.41"
+#property version   "1.42"
 #property strict
 #property description "EA de tendencia para Oro (XAUUSD): EMA cross + RSI + ADX + ATR + H4, gestion de riesgo multicapa con DD diario/semanal, perdidas consecutivas, break-even, filtro de noticias y registro CSV."
 
@@ -148,7 +148,7 @@ int OnInit()
    g_lastBarTime  = (datetime)GlobalVariableGet(g_gvLastBarKey);
 
    newsFilter.PrintStatus();
-   Print("GoldenTradeX v1.41 inicializado en ", _Symbol);
+   Print("GoldenTradeX v1.42 inicializado en ", _Symbol);
    return(INIT_SUCCEEDED);
   }
 

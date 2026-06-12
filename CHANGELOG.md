@@ -5,6 +5,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.42] — 2026-06-12
+
+### Added
+- **`scripts/backtest_analysis.py`** — herramienta de análisis estadístico post-backtest
+  (stdlib puro, sin numpy/pandas). Lee los CSV de TradeLogger y calcula:
+  - Métricas core: win rate, profit factor, Sharpe anualizado, max drawdown, R-múltiplo
+    promedio, ganancia/pérdida media, ratio R:R realizado, recovery factor, pérdidas
+    consecutivas máximas.
+  - **Monte Carlo** (default 1 000 simulaciones, seed configurable): shufflea la secuencia de
+    trades N veces y reporta distribución del max DD (P5/P25/P50/P75/P95) y probabilidad
+    de ruina (DD ≥ 40 %).
+  - **Walk-forward por trimestre**: métricas por ventana temporal (N, WR%, PF, Net P/L,
+    AvgR, Sharpe).
+  - **Checklist institucional**: PF ≥ 1.8, Sharpe ≥ 1.5, WR ≥ 45 %, Max DD ≤ 15 %,
+    MC DD P95 ≤ 25 %, MC ruina < 5 %, recovery factor ≥ 3, pérd. consec. ≤ 5.
+  - Opción `--output report.csv` para exportar tabla walk-forward.
+  - Auto-descubre archivos `GoldenTradeX_*.csv` en el directorio actual.
+- **`config/GoldenTradeX_XAGUSD.set`** — preset para operar en XAGUSD (Plata) M15.
+  Magic number `920261` (permite instancia simultánea con XAUUSD), spread máximo
+  500 pts (ajustar al broker). El cálculo de lote usa el ATR del símbolo, adaptándose
+  automáticamente a la mayor volatilidad de la plata.
+
+---
+
 ## [1.41] — 2026-06-12
 
 ### Added

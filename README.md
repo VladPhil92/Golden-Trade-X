@@ -23,9 +23,12 @@ golden-trade-x/
 │       ├── TestNewsFilter.mq5      ← Tests unitarios NewsFilter
 │       └── TestRiskManager.mq5     ← Tests unitarios RiskManager
 ├── scripts/
-│   └── monitor.py                  ← Monitor opcional en Python (MetaTrader5)
+│   ├── monitor.py                  ← Monitor en Python (MetaTrader5) con alertas Telegram
+│   ├── backtest_analysis.py        ← Monte Carlo + walk-forward sobre CSV de TradeLogger
+│   └── validate_set.py             ← Validador de parámetros (usado por CI)
 ├── config/
-│   └── GoldenTradeX.set            ← Preset de parámetros para el Strategy Tester
+│   ├── GoldenTradeX.set            ← Preset XAUUSD para el Strategy Tester
+│   └── GoldenTradeX_XAGUSD.set     ← Preset XAGUSD (Plata, magic 920261)
 ├── requirements.txt                ← Dependencias Python
 ├── CHANGELOG.md                    ← Historial de versiones
 └── docs/
@@ -82,6 +85,43 @@ Nueva vela → ¿Sesión permitida? → ¿Spread aceptable? → ¿DD diario OK? 
 2. Símbolo `XAUUSD`, timeframe M15, modelo *Every tick based on real ticks*.
 3. Cargue el preset `config/GoldenTradeX.set`.
 4. Periodo recomendado: mínimo 2–3 años; luego *walk-forward* y optimización solo de EMA/ATR para evitar sobreajuste.
+5. El EA genera un CSV de trades via `TradeLogger`. Analícelos con:
+
+```bash
+pip install -r requirements.txt
+
+# Análisis estadístico del CSV exportado por TradeLogger
+python scripts/backtest_analysis.py                       # auto-descubre CSVs
+python scripts/backtest_analysis.py trades.csv            # archivo específico
+python scripts/backtest_analysis.py --mc-runs 2000 --output wf.csv
+```
+
+Salida de ejemplo:
+```
+  Operaciones totales              412
+  Win rate                         51.7 %
+  Profit factor                    1.842
+  Sharpe ratio (anual.)            1.631
+  Max drawdown                     1240.50  (12.4 %)
+  ─────────────────────────────────────────
+  MONTE CARLO  (1 000 simulaciones)
+  Max DD P50 (mediana)             11.2 %
+  Max DD P95 (escenario adverso)   19.8 %
+  Prob. ruina (DD ≥ 40 %)          0.0 %
+  ─────────────────────────────────────────
+  [✓] Profit Factor ≥ 1.8          1.842
+  [✓] Sharpe ≥ 1.5                 1.631
+  [✓] Max DD ≤ 15 %                12.4 %
+  >>> TODOS LOS OBJETIVOS SUPERADOS <<<
+```
+
+## Multi-símbolo: XAGUSD (Plata)
+
+El EA funciona en cualquier símbolo. Para operar XAGUSD simultáneamente con XAUUSD:
+
+1. Abra un gráfico **XAGUSD M15** en MT5.
+2. Arrastre el EA y cargue el preset `config/GoldenTradeX_XAGUSD.set`.
+3. El magic number `920261` distingue las instancias (sin colisión de GlobalVariables).
 
 ## Monitor en Python (opcional)
 
@@ -116,8 +156,8 @@ Las alertas Telegram cubren: inicio/parada, posición abierta, posición cerrada
 - [x] Módulo de registro de operaciones en CSV para auditoría — `TradeLogger.mqh`
 - [x] Tests unitarios MQL5 — `MQL5/Scripts/Tests/` (`TestNewsFilter`, `TestRiskManager`)
 - [x] CI/CD GitHub Actions — validación automática en push
-- [ ] Backtesting walk-forward + Monte Carlo (requiere MetaTrader 5)
-- [ ] Versión multi-símbolo (XAGUSD)
+- [x] Backtesting walk-forward + Monte Carlo — `scripts/backtest_analysis.py` (lee CSV de TradeLogger)
+- [x] Versión multi-símbolo (XAGUSD) — `config/GoldenTradeX_XAGUSD.set`
 
 ## Licencia
 
