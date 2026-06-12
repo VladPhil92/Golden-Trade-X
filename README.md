@@ -27,6 +27,7 @@ golden-trade-x/
 ├── config/
 │   └── GoldenTradeX.set            ← Preset de parámetros para el Strategy Tester
 ├── requirements.txt                ← Dependencias Python
+├── CHANGELOG.md                    ← Historial de versiones
 └── docs/
     └── STRATEGY.md                 ← Documento de estrategia y plan de pruebas
 ```
@@ -103,7 +104,7 @@ El monitor reconecta automáticamente si MT5 se desconecta y persiste logs en `m
 - [ ] Alertas a Telegram desde `monitor.py`
 - [x] Módulo de registro de operaciones en CSV para auditoría — `TradeLogger.mqh`
 - [x] Tests unitarios MQL5 — `MQL5/Scripts/Tests/` (`TestNewsFilter`, `TestRiskManager`)
-- [ ] CI/CD GitHub Actions — validación automática en push
+- [x] CI/CD GitHub Actions — validación automática en push
 - [ ] Backtesting walk-forward + Monte Carlo (requiere MetaTrader 5)
 - [ ] Versión multi-símbolo (XAGUSD)
 
