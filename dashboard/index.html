@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Golden Trade X — Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1117; --surface: #1a1d27; --surface2: #222535;
+    --accent: #f0b429; --green: #22c55e; --red: #ef4444;
+    --text: #e2e8f0; --muted: #6b7280; --border: #2d3148;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; min-height: 100vh; }
+  header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 16px 24px; display: flex; align-items: center; gap: 12px; }
+  header .logo { font-size: 1.3rem; font-weight: 700; color: var(--accent); }
+  header .version { font-size: 0.75rem; color: var(--muted); background: var(--surface2); padding: 2px 8px; border-radius: 20px; }
+  .upload-zone { border: 2px dashed var(--border); border-radius: var(--radius); padding: 32px; text-align: center; cursor: pointer; margin: 24px; transition: border-color .2s; }
+  .upload-zone:hover { border-color: var(--accent); }
+  .upload-zone input { display: none; }
+  .upload-zone .icon { font-size: 2.5rem; margin-bottom: 8px; }
+  .upload-zone p { color: var(--muted); font-size: 0.9rem; }
+  .upload-zone label { cursor: pointer; color: var(--accent); font-weight: 600; }
+  #dashboard { display: none; padding: 0 24px 40px; }
+  .kpi-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; margin: 20px 0; }
+  .kpi { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+  .kpi .label { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 6px; }
+  .kpi .value { font-size: 1.5rem; font-weight: 700; }
+  .kpi .value.pos { color: var(--green); }
+  .kpi .value.neg { color: var(--red); }
+  .kpi .value.neu { color: var(--accent); }
+  .section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; margin-bottom: 16px; }
+  .section h3 { font-size: 0.9rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 16px; }
+  .chart-wrap { position: relative; height: 260px; }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+  th { text-align: left; color: var(--muted); font-weight: 500; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+  td { padding: 7px 10px; border-bottom: 1px solid var(--border); }
+  tr:last-child td { border-bottom: none; }
+  tr.win td:first-child { border-left: 3px solid var(--green); }
+  tr.loss td:first-child { border-left: 3px solid var(--red); }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 0.72rem; font-weight: 600; }
+  .badge.buy  { background: rgba(34,197,94,.15); color: var(--green); }
+  .badge.sell { background: rgba(239,68,68,.15); color: var(--red); }
+  .target-list { list-style: none; display: grid; gap: 8px; }
+  .target-list li { display: flex; align-items: center; gap: 10px; font-size: 0.85rem; }
+  .target-list .chk { font-size: 1.1rem; }
+  @media (max-width: 640px) { .two-col { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<header>
+  <span class="logo">⚡ Golden Trade X</span>
+  <span class="version">v2.00</span>
+  <span style="margin-left:auto;font-size:.8rem;color:var(--muted)" id="filename">Sin datos cargados</span>
+</header>
+
+<div class="upload-zone" id="uploadZone">
+  <div class="icon">📂</div>
+  <p>Arrastra aquí los CSV exportados por TradeLogger o</p>
+  <label for="fileInput">haz clic para seleccionar archivos</label>
+  <input type="file" id="fileInput" accept=".csv" multiple>
+</div>
+
+<div id="dashboard">
+
+  <!-- KPIs -->
+  <div class="kpi-grid" id="kpiGrid"></div>
+
+  <!-- Equity curve -->
+  <div class="section">
+    <h3>Curva de Equity</h3>
+    <div class="chart-wrap"><canvas id="equityChart"></canvas></div>
+  </div>
+
+  <div class="two-col">
+    <!-- Por régimen -->
+    <div class="section">
+      <h3>Rendimiento por Régimen</h3>
+      <div class="chart-wrap"><canvas id="regimeChart"></canvas></div>
+    </div>
+    <!-- Por confidence score -->
+    <div class="section">
+      <h3>Win Rate por Confidence</h3>
+      <div class="chart-wrap"><canvas id="confChart"></canvas></div>
+    </div>
+  </div>
+
+  <!-- Monthly P/L -->
+  <div class="section">
+    <h3>P/L Mensual</h3>
+    <div class="chart-wrap"><canvas id="monthlyChart"></canvas></div>
+  </div>
+
+  <!-- Checklist institucional -->
+  <div class="section">
+    <h3>Objetivos Institucionales</h3>
+    <ul class="target-list" id="targetList"></ul>
+  </div>
+
+  <!-- Últimos trades -->
+  <div class="section">
+    <h3>Últimas 30 operaciones</h3>
+    <div style="overflow-x:auto">
+      <table id="tradeTable">
+        <thead>
+          <tr>
+            <th>Fecha</th><th>Hora</th><th>Tipo</th><th>Lotes</th>
+            <th>Entrada</th><th>Cierre</th><th>P/L</th><th>R</th><th>Conf</th><th>Régimen</th>
+          </tr>
+        </thead>
+        <tbody id="tradeBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ── CSV Parser ──────────────────────────────────────────────────────────────
+function parseCsv(text) {
+  const lines = text.trim().split('\n');
+  const headers = lines[0].split(',').map(h => h.trim());
+  return lines.slice(1).map(line => {
+    const vals = line.split(',');
+    const obj = {};
+    headers.forEach((h, i) => obj[h] = (vals[i] || '').trim());
+    return obj;
+  }).filter(r => r.CloseDate);
+}
+
+function parseComment(c) {
+  const conf = (c.match(/Conf=(\d+)/) || [])[1];
+  const reg  = (c.match(/Reg=([A-Z_]+)/) || [])[1];
+  return { confidence: conf ? parseInt(conf) : null, regime: reg || 'UNKNOWN' };
+}
+
+// ── Statistics ──────────────────────────────────────────────────────────────
+function pf(returns) {
+  const gp = returns.filter(r => r > 0).reduce((a,b)=>a+b,0);
+  const gl = Math.abs(returns.filter(r => r < 0).reduce((a,b)=>a+b,0));
+  return gl > 0 ? gp/gl : Infinity;
+}
+
+function sharpe(returns) {
+  if (returns.length < 2) return 0;
+  const mean = returns.reduce((a,b)=>a+b,0)/returns.length;
+  const std = Math.sqrt(returns.map(r=>(r-mean)**2).reduce((a,b)=>a+b,0)/(returns.length-1));
+  return std ? mean/std * Math.sqrt(252) : 0;
+}
+
+function maxDD(curve) {
+  let peak = curve[0], maxDdPct = 0;
+  for (const v of curve) {
+    if (v > peak) peak = v;
+    const dd = peak > 0 ? (peak-v)/peak : 0;
+    if (dd > maxDdPct) maxDdPct = dd;
+  }
+  return maxDdPct * 100;
+}
+
+function equityCurve(returns, start=10000) {
+  const c = [start];
+  for (const r of returns) c.push(c[c.length-1]+r);
+  return c;
+}
+
+// ── Chart helpers ────────────────────────────────────────────────────────────
+const CHART_DEFAULTS = {
+  color: '#e2e8f0',
+  grid: { color: '#2d3148' },
+  plugins: { legend: { labels: { color: '#e2e8f0', font: { size: 11 } } } },
+};
+
+let charts = {};
+function destroyAll() {
+  Object.values(charts).forEach(c => c.destroy());
+  charts = {};
+}
+
+function buildEquityChart(labels, data) {
+  const ctx = document.getElementById('equityChart').getContext('2d');
+  const isPos = data[data.length-1] >= data[0];
+  charts.equity = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Equity', data,
+        borderColor: isPos ? '#22c55e' : '#ef4444',
+        backgroundColor: isPos ? 'rgba(34,197,94,.08)' : 'rgba(239,68,68,.08)',
+        borderWidth: 2, pointRadius: 0, fill: true, tension: 0.3,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      plugins: { ...CHART_DEFAULTS.plugins, tooltip: { mode: 'index', intersect: false } },
+      scales: {
+        x: { ticks: { color: '#6b7280', maxTicksLimit: 8 }, grid: CHART_DEFAULTS.grid },
+        y: { ticks: { color: '#6b7280' }, grid: CHART_DEFAULTS.grid },
+      }
+    }
+  });
+}
+
+function buildRegimeChart(labels, nets, wrs) {
+  const ctx = document.getElementById('regimeChart').getContext('2d');
+  charts.regime = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Net P/L', data: nets, backgroundColor: nets.map(v => v>=0 ? 'rgba(34,197,94,.7)' : 'rgba(239,68,68,.7)'), yAxisID: 'y' },
+        { label: 'Win %', data: wrs, type: 'line', borderColor: '#f0b429', pointRadius: 4, yAxisID: 'y2' },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      plugins: CHART_DEFAULTS.plugins,
+      scales: {
+        x: { ticks: { color: '#6b7280', font: { size: 10 } }, grid: CHART_DEFAULTS.grid },
+        y:  { ticks: { color: '#6b7280' }, grid: CHART_DEFAULTS.grid, position: 'left' },
+        y2: { ticks: { color: '#f0b429', callback: v => v+'%' }, grid: { display: false }, position: 'right', min: 0, max: 100 },
+      }
+    }
+  });
+}
+
+function buildConfChart(bands, wrs, pfs) {
+  const ctx = document.getElementById('confChart').getContext('2d');
+  charts.conf = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: bands,
+      datasets: [
+        { label: 'Win %', data: wrs, backgroundColor: 'rgba(240,180,41,.6)', yAxisID: 'y' },
+        { label: 'PF', data: pfs, type: 'line', borderColor: '#22c55e', pointRadius: 4, yAxisID: 'y2' },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      plugins: CHART_DEFAULTS.plugins,
+      scales: {
+        x: { ticks: { color: '#6b7280', font: { size: 10 } }, grid: CHART_DEFAULTS.grid },
+        y:  { ticks: { color: '#6b7280', callback: v => v+'%' }, grid: CHART_DEFAULTS.grid, min: 0, max: 100 },
+        y2: { ticks: { color: '#22c55e' }, grid: { display: false }, position: 'right' },
+      }
+    }
+  });
+}
+
+function buildMonthlyChart(labels, data) {
+  const ctx = document.getElementById('monthlyChart').getContext('2d');
+  charts.monthly = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{ label: 'P/L mensual', data, backgroundColor: data.map(v=>v>=0?'rgba(34,197,94,.7)':'rgba(239,68,68,.7)') }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      plugins: CHART_DEFAULTS.plugins,
+      scales: {
+        x: { ticks: { color: '#6b7280', maxTicksLimit: 18 }, grid: CHART_DEFAULTS.grid },
+        y: { ticks: { color: '#6b7280' }, grid: CHART_DEFAULTS.grid },
+      }
+    }
+  });
+}
+
+// ── Render ───────────────────────────────────────────────────────────────────
+function render(allTrades) {
+  destroyAll();
+
+  const net = r => parseFloat(r.ProfitLoss||0) + parseFloat(r.Commission||0);
+  const returns = allTrades.map(net);
+  const wins    = allTrades.filter(r => net(r) > 0);
+  const wr      = wins.length / allTrades.length * 100;
+  const netTotal= returns.reduce((a,b)=>a+b,0);
+  const pfVal   = pf(returns);
+  const shp     = sharpe(returns);
+  const curve   = equityCurve(returns);
+  const dd      = maxDD(curve);
+  const avgR    = allTrades.map(r=>parseFloat(r.RMultiple||0)).reduce((a,b)=>a+b,0)/allTrades.length;
+  const maxCL   = (() => { let best=0,cur=0; for(const t of allTrades){if(net(t)<0)cur++;else cur=0;if(cur>best)best=cur;}return best; })();
+
+  // KPIs
+  const kpis = [
+    { label: 'Total Trades', value: allTrades.length, cls: 'neu', fmt: v=>v },
+    { label: 'Win Rate',     value: wr,               cls: wr>=50?'pos':'neg', fmt: v=>v.toFixed(1)+'%' },
+    { label: 'Net P/L',      value: netTotal,          cls: netTotal>=0?'pos':'neg', fmt: v=>(v>=0?'+':'')+v.toFixed(2) },
+    { label: 'Profit Factor',value: pfVal,             cls: pfVal>=1.5?'pos':pfVal>=1?'neu':'neg', fmt: v=>isFinite(v)?v.toFixed(3):'∞' },
+    { label: 'Sharpe',       value: shp,               cls: shp>=1.5?'pos':shp>=1?'neu':'neg', fmt: v=>v.toFixed(3) },
+    { label: 'Max DD',       value: dd,                cls: dd<=15?'pos':dd<=25?'neu':'neg', fmt: v=>v.toFixed(1)+'%' },
+    { label: 'Avg R',        value: avgR,              cls: avgR>0?'pos':'neg', fmt: v=>(v>=0?'+':'')+v.toFixed(3)+'R' },
+    { label: 'Max Consec L', value: maxCL,             cls: maxCL<=5?'pos':'neg', fmt: v=>v },
+  ];
+  document.getElementById('kpiGrid').innerHTML = kpis.map(k =>
+    `<div class="kpi"><div class="label">${k.label}</div><div class="value ${k.cls}">${k.fmt(k.value)}</div></div>`
+  ).join('');
+
+  // Equity chart
+  const eqLabels = allTrades.map(r => r.CloseDate || '').filter((v,i)=>i%Math.max(1,Math.floor(allTrades.length/60))===0);
+  buildEquityChart(
+    allTrades.map((_,i)=>i % Math.max(1,Math.floor(allTrades.length/60))===0 ? allTrades[i].CloseDate : ''),
+    curve.slice(1)
+  );
+
+  // Régimen
+  const regimes = {};
+  for (const t of allTrades) {
+    const { regime } = parseComment(t.Comment || '');
+    if (!regimes[regime]) regimes[regime] = [];
+    regimes[regime].push(net(t));
+  }
+  const regLabels = Object.keys(regimes);
+  buildRegimeChart(
+    regLabels,
+    regLabels.map(r => +regimes[r].reduce((a,b)=>a+b,0).toFixed(2)),
+    regLabels.map(r => +(regimes[r].filter(v=>v>0).length/regimes[r].length*100).toFixed(1)),
+  );
+
+  // Confidence bands
+  const bands = [[0,39],[40,54],[55,69],[70,84],[85,100]];
+  const bandData = bands.map(([lo,hi]) => {
+    const ts = allTrades.filter(t => {
+      const {confidence} = parseComment(t.Comment||'');
+      return confidence !== null && confidence >= lo && confidence <= hi;
+    });
+    if (!ts.length) return null;
+    const r = ts.map(net);
+    return { band:`${lo}-${hi}`, wr: ts.filter(t=>net(t)>0).length/ts.length*100, pf: pf(r) };
+  }).filter(Boolean);
+  buildConfChart(bandData.map(b=>b.band), bandData.map(b=>+b.wr.toFixed(1)), bandData.map(b=>isFinite(b.pf)?+b.pf.toFixed(3):5));
+
+  // Monthly
+  const monthly = {};
+  for (const t of allTrades) {
+    const key = (t.CloseDate||'').substring(0,7);
+    if (!monthly[key]) monthly[key] = 0;
+    monthly[key] += net(t);
+  }
+  const mKeys = Object.keys(monthly).sort();
+  buildMonthlyChart(mKeys, mKeys.map(k => +monthly[k].toFixed(2)));
+
+  // Checklist
+  const targets = [
+    { label: 'Profit Factor ≥ 1.8', ok: pfVal >= 1.8, val: isFinite(pfVal) ? pfVal.toFixed(3) : '∞' },
+    { label: 'Sharpe ≥ 1.5',        ok: shp   >= 1.5, val: shp.toFixed(3) },
+    { label: 'Win Rate ≥ 45%',      ok: wr    >= 45,  val: wr.toFixed(1)+'%' },
+    { label: 'Max DD ≤ 15%',        ok: dd    <= 15,  val: dd.toFixed(1)+'%' },
+    { label: 'Pérd. consec. ≤ 5',   ok: maxCL <= 5,   val: maxCL },
+    { label: 'Avg R > 0',           ok: avgR  > 0,    val: avgR.toFixed(3)+'R' },
+  ];
+  document.getElementById('targetList').innerHTML = targets.map(t =>
+    `<li><span class="chk">${t.ok ? '✅' : '❌'}</span>${t.label}<span style="margin-left:auto;color:${t.ok?'#22c55e':'#ef4444'}">${t.val}</span></li>`
+  ).join('');
+
+  // Trades table (últimos 30)
+  const last30 = allTrades.slice(-30).reverse();
+  document.getElementById('tradeBody').innerHTML = last30.map(t => {
+    const n = net(t);
+    const {confidence, regime} = parseComment(t.Comment||'');
+    return `<tr class="${n>=0?'win':'loss'}">
+      <td>${t.CloseDate||''}</td>
+      <td>${t.CloseTime||''}</td>
+      <td><span class="badge ${(t.Type||'').toLowerCase()}">${t.Type||''}</span></td>
+      <td>${parseFloat(t.Lots||0).toFixed(2)}</td>
+      <td>${parseFloat(t.OpenPrice||0).toFixed(2)}</td>
+      <td>${parseFloat(t.ClosePrice||0).toFixed(2)}</td>
+      <td style="color:${n>=0?'#22c55e':'#ef4444'};font-weight:600">${n>=0?'+':''}${n.toFixed(2)}</td>
+      <td style="color:${n>=0?'#22c55e':'#ef4444'}">${parseFloat(t.RMultiple||0).toFixed(2)}R</td>
+      <td>${confidence !== null ? confidence : '—'}</td>
+      <td style="font-size:.75rem;color:var(--muted)">${regime}</td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('dashboard').style.display = 'block';
+  document.getElementById('uploadZone').style.display = 'none';
+}
+
+// ── File handling ────────────────────────────────────────────────────────────
+function handleFiles(files) {
+  const allTrades = [];
+  let loaded = 0;
+  const fileNames = [];
+
+  Array.from(files).forEach(file => {
+    fileNames.push(file.name);
+    const reader = new FileReader();
+    reader.onload = e => {
+      const trades = parseCsv(e.target.result);
+      allTrades.push(...trades);
+      loaded++;
+      if (loaded === files.length) {
+        allTrades.sort((a,b) => (a.CloseDate+a.CloseTime).localeCompare(b.CloseDate+b.CloseTime));
+        document.getElementById('filename').textContent = fileNames.join(', ') + ` — ${allTrades.length} trades`;
+        render(allTrades);
+      }
+    };
+    reader.readAsText(file);
+  });
+}
+
+document.getElementById('fileInput').addEventListener('change', e => handleFiles(e.target.files));
+document.getElementById('uploadZone').addEventListener('dragover', e => { e.preventDefault(); e.currentTarget.style.borderColor='#f0b429'; });
+document.getElementById('uploadZone').addEventListener('dragleave', e => { e.currentTarget.style.borderColor='#2d3148'; });
+document.getElementById('uploadZone').addEventListener('drop', e => {
+  e.preventDefault();
+  e.currentTarget.style.borderColor = '#2d3148';
+  handleFiles(e.dataTransfer.files);
+});
+</script>
+</body>
+</html>

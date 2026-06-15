@@ -26,6 +26,10 @@ REQUIRED = {
     "InpUseNewsFilter", "InpNewsBufferBefore", "InpNewsBufferAfter", "InpPauseForNews",
     # Logging
     "InpEnableTradeLog",
+    # v2.00 — Ensemble & Smart Money
+    "InpUseRegimeFilter", "InpUseSmcFilter", "InpMinConfidence",
+    # v2.00 — Advanced Risk
+    "InpMaxMonthlyDD", "InpCpThresholdPct",
 }
 
 RANGE_CHECKS = {
@@ -37,6 +41,9 @@ RANGE_CHECKS = {
     "InpAtrSlMultiplier":   (0, 20, False, True),
     "InpAtrTpMultiplier":   (0, 20, False, True),
     "InpBreakEvenR":        (0, 10, False, True),
+    "InpMinConfidence":     (0, 100, True, True),
+    "InpMaxMonthlyDD":      (0, 100, False, True),
+    "InpCpThresholdPct":    (0, 50, False, True),
     "InpStartHour":         (0, 23, True,  True),
     "InpEndHour":           (0, 23, True,  True),
     "InpFridayCloseHour":   (0, 23, True,  True),

@@ -1,2 +1,5 @@
 MetaTrader5>=5.0.45
 requests>=2.31.0
+xgboost>=2.0.0
+scikit-learn>=1.4.0
+

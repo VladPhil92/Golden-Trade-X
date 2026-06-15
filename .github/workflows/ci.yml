@@ -23,7 +23,13 @@ jobs:
         run: pip install flake8
 
       - name: Python syntax check
-        run: python -m py_compile scripts/monitor.py scripts/backtest_analysis.py scripts/validate_set.py
+        run: |
+          python -m py_compile \
+            scripts/monitor.py \
+            scripts/backtest_analysis.py \
+            scripts/validate_set.py \
+            scripts/regime_analysis.py \
+            scripts/ml_pipeline.py
 
       - name: flake8 — scripts/
         run: |
@@ -64,16 +70,24 @@ jobs:
             "MQL5/Include/GoldenTradeX/SessionFilter.mqh" \
             "MQL5/Include/GoldenTradeX/NewsFilter.mqh" \
             "MQL5/Include/GoldenTradeX/TradeLogger.mqh" \
+            "MQL5/Include/GoldenTradeX/MarketRegimeEngine.mqh" \
+            "MQL5/Include/GoldenTradeX/SmartMoneyEngine.mqh" \
+            "MQL5/Include/GoldenTradeX/ConfidenceEngine.mqh" \
             "MQL5/Scripts/Tests/TestNewsFilter.mq5" \
             "MQL5/Scripts/Tests/TestRiskManager.mq5" \
+            "MQL5/Scripts/Tests/TestMarketRegime.mq5" \
             "scripts/monitor.py" \
             "scripts/backtest_analysis.py" \
+            "scripts/regime_analysis.py" \
+            "scripts/ml_pipeline.py" \
             "scripts/validate_set.py" \
+            "dashboard/index.html" \
             "config/GoldenTradeX.set" \
             "config/GoldenTradeX_XAGUSD.set" \
             "requirements.txt" \
             "CHANGELOG.md" \
-            "docs/STRATEGY.md"; do
+            "docs/STRATEGY.md" \
+            "docs/ARCHITECTURE.md"; do
             if [ ! -f "$f" ]; then
               echo "MISSING: $f"
               missing=1
@@ -103,3 +117,18 @@ jobs:
             echo "Version mismatch — update CHANGELOG.md or GoldenTradeX.mq5"
             exit 1
           fi
+
+  # ── 5. Dashboard validation ─────────────────────────────────────────
+  dashboard-check:
+    name: Dashboard HTML valid
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check dashboard exists and references Chart.js
+        run: |
+          if ! grep -q "chart.js" dashboard/index.html; then
+            echo "FAIL: dashboard/index.html missing Chart.js reference"
+            exit 1
+          fi
+          echo "OK: dashboard/index.html valid"

@@ -5,6 +5,63 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [2.00] — 2026-06-15
+
+### Added — MQL5
+- **`MarketRegimeEngine.mqh`** — Motor de detección automática de régimen de mercado.
+  7 estados: `TRENDING_BULL`, `TRENDING_BEAR`, `RANGING`, `VOLATILE`, `ACCUMULATION`,
+  `DISTRIBUTION`, `UNKNOWN`. Basado en ADX, ATR ratio, Bollinger Band Width y slope de EMA.
+  `RegimeScore(isBuy)` retorna 0-25 según alineación con la dirección de la operación.
+  Bloqueo automático en `VOLATILE`.
+- **`SmartMoneyEngine.mqh`** — Smart Money Concepts completo:
+  - **BOS** (Break of Structure): detecta ruptura de swing high/low previo
+  - **CHOCH** (Change of Character): cambio de estructura de mercado
+  - **FVG** (Fair Value Gap): gap de 3 velas alcista y bajista
+  - **Order Blocks**: última vela contratendencia antes del BOS
+  - **Liquidity Sweeps**: barrido de swing con reversión intrabar
+  - `SmcScore(ctx, isBuy)` retorna 0-30 según confluencia con la dirección
+- **`ConfidenceEngine.mqh`** — Ensemble Confidence Score 0-100:
+  `BaseSignal(25) + RegimeBonus(25) + SmcBonus(30) + HtfBonus(15) + AtrBonus(5)`
+  Solo se ejecuta la operación si `score >= InpMinConfidence`.
+- **`TestMarketRegime.mq5`** — Tests unitarios para los 3 nuevos módulos:
+  `RegimeToString`, inicialización, `Compute()` sin señal base = 0,
+  `SmcScore()` con contextos neutro/máximo/bull/sell.
+- **`docs/ARCHITECTURE.md`** — Diagrama de arquitectura completo, flujo de decisión,
+  desglose del Confidence Score, lógica SMC y roadmap a producción.
+
+### Added — Python
+- **`scripts/regime_analysis.py`** — Análisis estadístico por régimen de mercado.
+  Lee el campo `Comment` del CSV (formato `GTX|Conf=N|Reg=X`), agrupa trades por
+  régimen y confidence band, genera stress test (sin top-N trades).
+- **`scripts/ml_pipeline.py`** — Pipeline completo de Machine Learning (XGBoost).
+  15 features de ingeniería: confidence score, régimen, hora cíclica, día/mes cíclico,
+  R anterior, racha, win rate 10 trades. Split temporal (no aleatorio). Evaluación con
+  Accuracy, Precision, Recall, AUC-ROC. Feature importance. Export del modelo a JSON.
+- **`dashboard/index.html`** — Dashboard web estático (sin servidor):
+  equity curve, 8 KPIs, P/L por régimen, win rate por confidence band,
+  P/L mensual, checklist institucional, tabla de últimos 30 trades.
+  Carga CSV via drag-and-drop o selector. Chart.js CDN.
+
+### Changed — MQL5
+- **`GoldenTradeX.mq5`** v1.42 → **v2.00**: integra `MarketRegimeEngine`,
+  `SmartMoneyEngine` y `ConfidenceEngine`. Nuevos inputs:
+  `InpUseRegimeFilter`, `InpUseSmcFilter`, `InpMinConfidence`.
+  El comentario de cada trade incluye `|Conf=N|Reg=REGIME` para trazabilidad.
+- **`RiskManager.mqh`** — Añadidos:
+  - Circuit Breaker mensual (`InpMaxMonthlyDD`, persiste con GlobalVariable)
+  - Kill Switch de emergencia (`SetKillSwitch(bool)`)
+  - Capital Preservation Mode (activa riesgo 25% cuando DD diario ≥ `InpCpThresholdPct`)
+  - `PrintStatus()` para diagnóstico en Journal
+
+### Changed — Infraestructura
+- **`config/GoldenTradeX.set`** y **`GoldenTradeX_XAGUSD.set`** — nuevos parámetros v2.00
+- **`scripts/validate_set.py`** — validación de los 5 nuevos parámetros v2.00
+- **`.github/workflows/ci.yml`** — 5 jobs: +syntax check para nuevos scripts,
+  +estructura para nuevos archivos requeridos, +dashboard validation job
+- **`requirements.txt`** — añadidos `xgboost>=2.0.0`, `scikit-learn>=1.4.0`
+
+---
+
 ## [1.42] — 2026-06-12
 
 ### Added
