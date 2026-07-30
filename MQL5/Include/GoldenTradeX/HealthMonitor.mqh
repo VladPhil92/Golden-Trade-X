@@ -43,8 +43,28 @@ private:
       FileClose(fh);
      }
 
-   void FixOrphanSL(CTrade &trade)
+   // Obtiene el ATR actual usando el enfoque handle+CopyBuffer de MQL5
+   double GetCurrentATR()
      {
+      double atr = 0.0;
+      int    h   = iATR(m_symbol, PERIOD_M15, 14);
+      if(h != INVALID_HANDLE)
+        {
+         double buf[];
+         if(CopyBuffer(h, 0, 1, 1, buf) > 0)
+            atr = buf[0];
+         IndicatorRelease(h);
+        }
+      if(atr <= 0)
+         atr = SymbolInfoDouble(m_symbol, SYMBOL_POINT) * 200;
+      return atr;
+     }
+
+   void FixOrphanSL(CTrade &tradeObj)
+     {
+      double atr    = GetCurrentATR();
+      int    digits = (int)SymbolInfoInteger(m_symbol, SYMBOL_DIGITS);
+
       for(int i = PositionsTotal() - 1; i >= 0; i--)
         {
          ulong ticket = PositionGetTicket(i);
@@ -55,9 +75,6 @@ private:
          double sl = PositionGetDouble(POSITION_SL);
          if(sl != 0) continue;
 
-         double atr  = iATR(m_symbol, PERIOD_M15, 14, 1);
-         if(atr <= 0) atr = SymbolInfoDouble(m_symbol, SYMBOL_POINT) * 200;
-
          double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
          double tp        = PositionGetDouble(POSITION_TP);
          long   posType   = PositionGetInteger(POSITION_TYPE);
@@ -65,7 +82,7 @@ private:
                             ? openPrice - atr * m_emergencyAtrMult
                             : openPrice + atr * m_emergencyAtrMult;
 
-         if(trade.PositionModify(ticket, NormalizeDouble(emergSL, _Digits), tp))
+         if(tradeObj.PositionModify(ticket, NormalizeDouble(emergSL, digits), tp))
             Print("HealthMonitor: ORPHAN SL fixed ticket=", ticket,
                   " emergencySL=", emergSL);
          else
@@ -81,9 +98,9 @@ public:
              double emergencyAtrMult = 3.0,
              int checkIntervalSec = 60)
      {
-      m_symbol          = symbol;
-      m_magic           = magic;
-      m_minMarginLevel  = minMarginLevel;
+      m_symbol           = symbol;
+      m_magic            = magic;
+      m_minMarginLevel   = minMarginLevel;
       m_emergencyAtrMult = emergencyAtrMult;
       m_checkIntervalSec = checkIntervalSec;
       m_lastCheck        = 0;
@@ -92,14 +109,14 @@ public:
      }
 
    // Llamar desde OnTimer(). Retorna true si se ejecutó el check.
-   bool Check(CTrade &trade)
+   bool Check(CTrade &tradeObj)
      {
       datetime now = TimeCurrent();
       if(now - m_lastCheck < m_checkIntervalSec) return false;
       m_lastCheck = now;
 
-      bool connected = (bool)TerminalInfoInteger(TERMINAL_CONNECTED);
-      string alert   = "";
+      bool   connected = (bool)TerminalInfoInteger(TERMINAL_CONNECTED);
+      string alert     = "";
 
       // ── 1. Margen ────────────────────────────────────────────────────
       double marginLevel = AccountInfoDouble(ACCOUNT_MARGIN_LEVEL);
@@ -118,16 +135,16 @@ public:
         }
 
       // ── 3. Orphan SL ─────────────────────────────────────────────────
-      FixOrphanSL(trade);
+      FixOrphanSL(tradeObj);
 
       // ── 4. Equity hoy ────────────────────────────────────────────────
-      double equity     = AccountInfoDouble(ACCOUNT_EQUITY);
-      double balance    = AccountInfoDouble(ACCOUNT_BALANCE);
-      double equityPct  = (balance > 0) ? equity / balance * 100.0 : 100.0;
+      double equity    = AccountInfoDouble(ACCOUNT_EQUITY);
+      double balance   = AccountInfoDouble(ACCOUNT_BALANCE);
+      double equityPct = (balance > 0) ? equity / balance * 100.0 : 100.0;
 
-      // ── 5. Escribir estado ───────────────────────────────────────────
+      // ── 5. Posiciones abiertas del EA ─────────────────────────────────
       int openPos = 0;
-      for(int i = PositionsTotal()-1; i >= 0; i--)
+      for(int i = PositionsTotal() - 1; i >= 0; i--)
         {
          ulong t = PositionGetTicket(i);
          if(t == 0) continue;
@@ -137,7 +154,6 @@ public:
         }
 
       WriteStatusFile(connected, equityPct, openPos, alert);
-
       return true;
      }
 

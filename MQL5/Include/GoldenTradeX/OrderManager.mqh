@@ -66,13 +66,13 @@ private:
      {
       Print("OrderManager [", TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS), "] ",
             op, " attempt=", attempt,
-            " retcode=", code, " (", m_trade->ResultRetcodeDescription(), ")");
+            " retcode=", code, " comment=", m_trade.ResultComment());
      }
 
 public:
-   void Init(CTrade* trade, int maxRetries = 3, int retryDelayMs = 500)
+   void Init(CTrade* tradePtr, int maxRetries = 3, int retryDelayMs = 500)
      {
-      m_trade         = trade;
+      m_trade         = tradePtr;
       m_maxRetries    = maxRetries;
       m_retryDelayMs  = retryDelayMs;
       m_lastSlippage  = 0;
@@ -100,27 +100,29 @@ public:
       if(type == ORDER_TYPE_SELL && (sl <= price || tp >= price))
         { Print("OrderManager: REJECTED SELL — SL debe ser > price y TP < price."); return false; }
 
+      int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
+
       for(int attempt = 1; attempt <= m_maxRetries + 1; attempt++)
         {
          if(attempt > 1) Sleep(m_retryDelayMs * (attempt - 1));
 
          m_totalAttempts++;
-         bool ok = m_trade->PositionOpen(symbol, type, lots, price,
-                                         NormalizeDouble(sl, (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS)),
-                                         NormalizeDouble(tp, (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS)),
-                                         comment);
-         uint code = m_trade->ResultRetcode();
+         bool ok = m_trade.PositionOpen(symbol, type, lots, price,
+                                        NormalizeDouble(sl, digits),
+                                        NormalizeDouble(tp, digits),
+                                        comment);
+         uint code = m_trade.ResultRetcode();
          LogAttempt("OPEN", attempt, code);
 
          if(IsSuccess(code) || ok)
            {
-            double execPrice = m_trade->ResultPrice();
+            double execPrice = m_trade.ResultPrice();
             m_lastSlippage   = (execPrice > 0)
                                ? MathAbs(execPrice - price) / SymbolInfoDouble(symbol, SYMBOL_POINT)
                                : 0;
             m_totalSlippage += m_lastSlippage;
             m_successCount++;
-            Print("OrderManager: OPEN CONFIRMED ticket=", m_trade->ResultOrder(),
+            Print("OrderManager: OPEN CONFIRMED ticket=", m_trade.ResultOrder(),
                   " exec=", execPrice, " slip=", m_lastSlippage, "pts");
             return true;
            }
@@ -150,17 +152,18 @@ public:
    bool ModifyPosition(ulong ticket, double newSL, double newTP)
      {
       if(!PositionSelectByTicket(ticket)) return false;
-      string symbol = PositionGetString(POSITION_SYMBOL);
+      string symbol  = PositionGetString(POSITION_SYMBOL);
+      int    digits  = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
 
       for(int attempt = 1; attempt <= m_maxRetries + 1; attempt++)
         {
          if(attempt > 1) Sleep(m_retryDelayMs);
 
          m_totalAttempts++;
-         bool ok = m_trade->PositionModify(ticket,
-                                           NormalizeDouble(newSL, (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS)),
-                                           NormalizeDouble(newTP, (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS)));
-         uint code = m_trade->ResultRetcode();
+         bool ok   = m_trade.PositionModify(ticket,
+                                            NormalizeDouble(newSL, digits),
+                                            NormalizeDouble(newTP, digits));
+         uint code = m_trade.ResultRetcode();
          if(IsSuccess(code) || ok) { m_successCount++; return true; }
          if(IsFatal(code) || !IsRetryable(code) || attempt == m_maxRetries + 1)
            { LogAttempt("MODIFY", attempt, code); m_failCount++; return false; }
@@ -176,8 +179,8 @@ public:
          if(attempt > 1) Sleep(m_retryDelayMs);
 
          m_totalAttempts++;
-         bool ok = m_trade->PositionClose(ticket);
-         uint code = m_trade->ResultRetcode();
+         bool ok   = m_trade.PositionClose(ticket);
+         uint code = m_trade.ResultRetcode();
          if(IsSuccess(code) || ok) { m_successCount++; return true; }
          if(IsFatal(code) || !IsRetryable(code) || attempt == m_maxRetries + 1)
            { LogAttempt("CLOSE", attempt, code); m_failCount++; return false; }
@@ -193,8 +196,8 @@ public:
          if(attempt > 1) Sleep(m_retryDelayMs);
 
          m_totalAttempts++;
-         bool ok = m_trade->PositionClosePartial(ticket, lots);
-         uint code = m_trade->ResultRetcode();
+         bool ok   = m_trade.PositionClosePartial(ticket, lots);
+         uint code = m_trade.ResultRetcode();
          if(IsSuccess(code) || ok) { m_successCount++; return true; }
          if(IsFatal(code) || !IsRetryable(code) || attempt == m_maxRetries + 1)
            { LogAttempt("CLOSE_PARTIAL", attempt, code); m_failCount++; return false; }
@@ -203,7 +206,11 @@ public:
      }
 
    // ── Detectar error fatal en última operación ──────────────────────
-   bool LastErrorIsFatal() { return IsFatal(m_trade->ResultRetcode()); }
+   bool LastErrorIsFatal()
+     {
+      uint rc = m_trade.ResultRetcode();
+      return IsFatal(rc);
+     }
 
    // ── Estadísticas de ejecución ─────────────────────────────────────
    double GetLastSlippage()   const { return m_lastSlippage; }
