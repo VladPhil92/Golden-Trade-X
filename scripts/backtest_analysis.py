@@ -216,6 +216,10 @@ def main() -> None:
         "--output", type=str, default="",
         help="Optional CSV path to save the walk-forward table",
     )
+    parser.add_argument(
+        "--html-output", type=str, default="",
+        help="Optional HTML path to save a self-contained analysis report",
+    )
     args = parser.parse_args()
 
     # ── File discovery ─────────────────────────────────────────────────
@@ -337,6 +341,174 @@ def main() -> None:
             writer.writeheader()
             writer.writerows(wf_rows)
         print(f"\n  Walk-forward table saved → {args.output}")
+
+    # ── Optional HTML report ───────────────────────────────────────────
+    if args.html_output:
+        html = _build_html_report(
+            trades, returns, curve, wf_rows, mc, checks,
+            pf, wr, sharpe, dd_pct, net_pnl, avg_r, max_cl, rec_fac,
+        )
+        with open(args.html_output, "w", encoding="utf-8") as f:
+            f.write(html)
+        print(f"\n  HTML report saved → {args.html_output}")
+
+
+# ── HTML report builder ────────────────────────────────────────────────────────
+
+def _build_html_report(
+    trades: List[Trade],
+    returns: List[float],
+    curve: List[float],
+    wf_rows: List[Dict],
+    mc: Dict,
+    checks: list,
+    pf: float, wr: float, sharpe: float, dd_pct: float,
+    net_pnl: float, avg_r: float, max_cl: int, rec_fac: float,
+) -> str:
+    import datetime
+    n = len(trades)
+    today = datetime.date.today()
+
+    # Equity curve SVG (pure SVG, no CDN)
+    if len(curve) > 1:
+        start_eq = curve[0]
+        final_eq  = curve[-1]
+        line_color = "#00c853" if final_eq >= start_eq else "#f44336"
+        svg_w, svg_h, pad = 700, 160, 18
+        min_y = min(curve)
+        max_y = max(curve)
+        ry = max_y - min_y or 1
+        pts = " ".join(
+            f"{pad + i / (len(curve) - 1) * (svg_w - 2*pad):.1f},"
+            f"{svg_h - pad - (v - min_y) / ry * (svg_h - 2*pad):.1f}"
+            for i, v in enumerate(curve)
+        )
+        svg_eq = (
+            f'<svg viewBox="0 0 {svg_w} {svg_h}" style="width:100%;height:auto">'
+            f'<polyline points="{pts}" fill="none" stroke="{line_color}" stroke-width="2"/>'
+            f'</svg>'
+        )
+    else:
+        svg_eq = "<p>No equity data</p>"
+
+    # Walk-forward bar chart SVG
+    def wf_svg() -> str:
+        if not wf_rows:
+            return "<p>Insufficient quarters for walk-forward</p>"
+        n_bars = len(wf_rows)
+        bar_w = max(18, 560 // n_bars)
+        total_w = bar_w * n_bars + 40
+        h = 110
+        nets = [r["net_pnl"] for r in wf_rows]
+        max_abs = max(abs(v) for v in nets) or 1
+        mid = h // 2
+        parts = []
+        for i, r in enumerate(wf_rows):
+            x = 20 + i * bar_w
+            bar_h_val = abs(r["net_pnl"]) / max_abs * (mid - 12)
+            color = "#00c853" if r["net_pnl"] >= 0 else "#f44336"
+            y = mid - bar_h_val if r["net_pnl"] >= 0 else mid
+            parts.append(f'<rect x="{x}" y="{y:.0f}" width="{bar_w-2}" '
+                         f'height="{max(bar_h_val, 1):.0f}" fill="{color}" opacity="0.85"/>')
+            parts.append(f'<text x="{x + bar_w//2}" y="{h-2}" text-anchor="middle" '
+                         f'font-size="8" fill="#777">{r["window"][-4:]}</text>')
+        parts.append(f'<line x1="20" y1="{mid}" x2="{total_w-20}" y2="{mid}" '
+                     f'stroke="#444" stroke-width="1"/>')
+        return (f'<svg viewBox="0 0 {total_w} {h}" style="width:100%;height:auto">'
+                + "".join(parts) + "</svg>")
+
+    checks_html = "".join(
+        f'<tr><td style="color:{"#00c853" if ok else "#f44336"}">{"✓" if ok else "✗"}</td>'
+        f'<td>{lbl}</td><td>{val}</td></tr>'
+        for lbl, ok, val in checks
+    )
+
+    wf_rows_html = "".join(
+        f"<tr><td>{r['window']}</td><td>{r['trades']}</td>"
+        f"<td>{r['win_rate']:.1f}%</td><td>{r['profit_factor']:.3f}</td>"
+        f"<td>{r['net_pnl']:+.2f}</td><td>{r['avg_r']:+.3f}R</td>"
+        f"<td>{r['sharpe']:.3f}</td></tr>"
+        for r in wf_rows
+    )
+
+    all_pass = all(ok for _, ok, _ in checks)
+    verdict_color = "#00c853" if all_pass else "#f44336"
+    verdict_text  = ("ALL TARGETS MET — Ready for live demo"
+                     if all_pass else "Targets pending — optimize before live trading")
+    pf_str = f"{pf:.3f}" if pf != float("inf") else "Inf"
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GTX Backtest Report {today}</title>
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{background:#0f1117;color:#e0e0e0;font-family:monospace;font-size:13px;padding:20px;max-width:900px}}
+h1{{color:#ffd700;font-size:17px;margin-bottom:3px}}
+h2{{color:#90caf9;font-size:12px;margin:18px 0 6px;border-bottom:1px solid #2a2d34;padding-bottom:3px}}
+.meta{{color:#666;font-size:11px;margin-bottom:16px}}
+.grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:8px;margin-bottom:14px}}
+.kpi{{background:#161921;border:1px solid #252830;border-radius:5px;padding:9px}}
+.kpi .lbl{{color:#666;font-size:10px}}
+.kpi .val{{color:#ffd700;font-size:15px;font-weight:bold;margin-top:2px}}
+table{{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:10px}}
+th{{background:#161921;color:#90caf9;padding:5px 7px;text-align:left}}
+td{{padding:4px 7px;border-bottom:1px solid #1e2030}}
+.mc{{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-bottom:12px}}
+.mc-c{{background:#161921;border:1px solid #252830;border-radius:4px;padding:8px;text-align:center}}
+.mc-c .lbl{{color:#666;font-size:10px}}
+.mc-c .val{{font-size:13px;margin-top:2px}}
+.verdict{{border:2px solid {verdict_color};border-radius:5px;padding:11px;
+          margin-top:14px;color:{verdict_color};font-weight:bold;text-align:center}}
+</style>
+</head>
+<body>
+<h1>Golden Trade X — Backtest Analysis Report</h1>
+<div class="meta">Generated: {today} | {n} trades | stdlib-only report (no CDN)</div>
+
+<h2>KEY METRICS</h2>
+<div class="grid">
+  <div class="kpi"><div class="lbl">Net P/L</div><div class="val">{net_pnl:+.2f}</div></div>
+  <div class="kpi"><div class="lbl">Win Rate</div><div class="val">{wr:.1f}%</div></div>
+  <div class="kpi"><div class="lbl">Profit Factor</div><div class="val">{pf_str}</div></div>
+  <div class="kpi"><div class="lbl">Sharpe Ratio</div><div class="val">{sharpe:.3f}</div></div>
+  <div class="kpi"><div class="lbl">Max Drawdown</div><div class="val">{dd_pct*100:.1f}%</div></div>
+  <div class="kpi"><div class="lbl">Avg R-Multiple</div><div class="val">{avg_r:+.3f}R</div></div>
+  <div class="kpi"><div class="lbl">Recovery Factor</div><div class="val">{rec_fac:.2f}</div></div>
+  <div class="kpi"><div class="lbl">Max Consec. Loss</div><div class="val">{max_cl}</div></div>
+</div>
+
+<h2>EQUITY CURVE</h2>
+{svg_eq}
+
+<h2>MONTE CARLO ({mc["runs"]:,} simulations · 40% ruin threshold)</h2>
+<div class="mc">
+  <div class="mc-c"><div class="lbl">P5 best case</div><div class="val">{mc["dd_p5"]:.1f}%</div></div>
+  <div class="mc-c"><div class="lbl">P25</div><div class="val">{mc["dd_p25"]:.1f}%</div></div>
+  <div class="mc-c"><div class="lbl">P50 median</div><div class="val">{mc["dd_p50"]:.1f}%</div></div>
+  <div class="mc-c"><div class="lbl">P75</div><div class="val">{mc["dd_p75"]:.1f}%</div></div>
+  <div class="mc-c"><div class="lbl">P95 worst case</div><div class="val">{mc["dd_p95"]:.1f}%</div></div>
+  <div class="mc-c"><div class="lbl">Ruin probability</div><div class="val">{mc["ruin_pct"]:.1f}%</div></div>
+</div>
+
+<h2>WALK-FORWARD BY QUARTER</h2>
+{wf_svg()}
+<table>
+<tr><th>Quarter</th><th>N</th><th>WR%</th><th>PF</th><th>Net P/L</th><th>Avg R</th><th>Sharpe</th></tr>
+{wf_rows_html if wf_rows_html else '<tr><td colspan="7">Insufficient data</td></tr>'}
+</table>
+
+<h2>INSTITUTIONAL TARGETS CHECKLIST</h2>
+<table>
+<tr><th></th><th>Target</th><th>Value</th></tr>
+{checks_html}
+</table>
+
+<div class="verdict">{verdict_text}</div>
+</body>
+</html>"""
 
 
 if __name__ == "__main__":

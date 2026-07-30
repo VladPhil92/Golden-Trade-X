@@ -1,4 +1,4 @@
-; Golden Trade X v1.40 — preset por defecto (XAUUSD M15)
+; Golden Trade X v2.00 — preset por defecto (XAUUSD M15)
 ; Nota DST: StartHour/EndHour estan en hora del servidor del broker.
 ; La mayoria de brokers usa EET (GMT+2 verano / GMT+3 invierno).
 
@@ -23,15 +23,22 @@ InpAdxMinLevel=25.0
 InpUseHtfFilter=true
 InpHtfEmaPeriod=50
 
+; --- Smart Money & Ensemble (v2.00) ---
+InpUseRegimeFilter=true
+InpUseSmcFilter=true
+InpMinConfidence=55
+
 ; --- Riesgo ---
 InpRiskPercent=1.0
 InpMaxDailyDD=4.0
 InpMaxWeeklyDD=8.0
+InpMaxMonthlyDD=15.0
 InpMaxConsecLosses=3
 InpMaxPositions=1
 InpAtrSlMultiplier=2.0
 InpAtrTpMultiplier=3.0
 InpMaxSpreadPoints=350
+InpCpThresholdPct=8.0
 
 ; --- Trailing y Break-Even ---
 InpUseTrailing=true

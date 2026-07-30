@@ -5,6 +5,114 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [2.10] — 2026-07-30
+
+### Added — MQL5
+- **`FibonacciEngine.mqh`** — Fibonacci confluence module (score 0-20):
+  Detects swing high/low (3-bar fractal, lookback=100), calculates 7 levels
+  (23.6%, 38.2%, 50%, 61.8%, 78.6%, 127.2%, 161.8%), identifies Premium/Discount
+  zones, finds nearest level within ATR×0.5. `FibScore(ctx, isBuy)` awards
+  38.2%/61.8%=20, 50%=15, 23.6%/78.6%=10, extensions=5; halved if price
+  is in the wrong zone for the trade direction.
+- **`TestSessionFilter.mq5`** — 22 unit tests for `CSessionFilter`:
+  disabled filter (4 cases), standard session boundaries, weekend blocks,
+  friday close logic, `MustCloseAll()`, closeFriday=false, edge hours,
+  full weekday coverage. Testable subclass with injected datetime.
+
+### Added — Python
+- **`scripts/correlation_engine.py`** — Macro correlation analysis (requires yfinance):
+  Downloads XAUUSD, DXY, VIX, US10Y, SP500; calculates full-period Pearson and
+  rolling Pearson (default 30d window); DXY-regime breakdown; actionable signals
+  (inverse DXY threshold, risk-off VIX, stagflation regime); CSV cache for offline.
+- **`scripts/optimize_confidence.py`** — Grid search for optimal `InpMinConfidence`:
+  Evaluates threshold 0-90 (step=5) by PF, Sharpe, Net P/L, Max DD; balanced
+  recommendation at PF≥1.5 AND kept≥40%; `--metric` flag; CSV output.
+- **`scripts/fomc_calendar.py`** — FOMC calendar updater:
+  Hardcoded 2025-2027 dates; optional live scrape from federalreserve.gov
+  (requires requests, beautifulsoup4); upcoming meetings with countdown;
+  generates ready-to-paste MQL5 `IsFomcDay()` code block.
+
+### Changed — Python
+- **`scripts/backtest_analysis.py`** — Added `--html-output` flag:
+  Generates a self-contained HTML report (no CDN) with SVG equity curve,
+  SVG walk-forward bar chart, KPI grid, Monte Carlo grid, institutional
+  targets checklist. Pure stdlib, no external dependencies.
+
+### Changed — Infrastructure
+- **`.github/workflows/ci.yml`** — Python syntax check extended to cover
+  `correlation_engine.py`, `optimize_confidence.py`, `fomc_calendar.py`;
+  structure-check extended to cover `FibonacciEngine.mqh`,
+  `TestSessionFilter.mq5`, `TestFibonacci.mq5`, and all 3 new Python scripts.
+
+### Changed — ConfidenceEngine (arquitectura)
+- **`ConfidenceEngine.mqh`** — `atrBonus` (calidad ATR, 0-5) reemplazado por
+  `fibBonus` (confluencia Fibonacci, 0-5). Score total sigue siendo 0-100.
+  Mapeo: FibScore 0-20 → fibBonus 0-5 (÷4). `atrPeriod` eliminado de `Init()`.
+- **`GoldenTradeX.mq5`** — incluye `FibonacciEngine.mqh`, instancia
+  `CFibonacciEngine fibEngine`, llama `Analyze()` + `FibScore()` en cada señal
+  y pasa el resultado a `confEngine.Compute()` como 5to parámetro.
+- **`TestFibonacci.mq5`** — 21 unit tests: Init, contexto inválido, scores
+  por nivel, penalización Premium/Discount, cap en 20, simetría 38.2%↔61.8%.
+
+---
+
+## [2.00] — 2026-06-15
+
+### Added — MQL5
+- **`MarketRegimeEngine.mqh`** — Motor de detección automática de régimen de mercado.
+  7 estados: `TRENDING_BULL`, `TRENDING_BEAR`, `RANGING`, `VOLATILE`, `ACCUMULATION`,
+  `DISTRIBUTION`, `UNKNOWN`. Basado en ADX, ATR ratio, Bollinger Band Width y slope de EMA.
+  `RegimeScore(isBuy)` retorna 0-25 según alineación con la dirección de la operación.
+  Bloqueo automático en `VOLATILE`.
+- **`SmartMoneyEngine.mqh`** — Smart Money Concepts completo:
+  - **BOS** (Break of Structure): detecta ruptura de swing high/low previo
+  - **CHOCH** (Change of Character): cambio de estructura de mercado
+  - **FVG** (Fair Value Gap): gap de 3 velas alcista y bajista
+  - **Order Blocks**: última vela contratendencia antes del BOS
+  - **Liquidity Sweeps**: barrido de swing con reversión intrabar
+  - `SmcScore(ctx, isBuy)` retorna 0-30 según confluencia con la dirección
+- **`ConfidenceEngine.mqh`** — Ensemble Confidence Score 0-100:
+  `BaseSignal(25) + RegimeBonus(25) + SmcBonus(30) + HtfBonus(15) + AtrBonus(5)`
+  Solo se ejecuta la operación si `score >= InpMinConfidence`.
+- **`TestMarketRegime.mq5`** — Tests unitarios para los 3 nuevos módulos:
+  `RegimeToString`, inicialización, `Compute()` sin señal base = 0,
+  `SmcScore()` con contextos neutro/máximo/bull/sell.
+- **`docs/ARCHITECTURE.md`** — Diagrama de arquitectura completo, flujo de decisión,
+  desglose del Confidence Score, lógica SMC y roadmap a producción.
+
+### Added — Python
+- **`scripts/regime_analysis.py`** — Análisis estadístico por régimen de mercado.
+  Lee el campo `Comment` del CSV (formato `GTX|Conf=N|Reg=X`), agrupa trades por
+  régimen y confidence band, genera stress test (sin top-N trades).
+- **`scripts/ml_pipeline.py`** — Pipeline completo de Machine Learning (XGBoost).
+  15 features de ingeniería: confidence score, régimen, hora cíclica, día/mes cíclico,
+  R anterior, racha, win rate 10 trades. Split temporal (no aleatorio). Evaluación con
+  Accuracy, Precision, Recall, AUC-ROC. Feature importance. Export del modelo a JSON.
+- **`dashboard/index.html`** — Dashboard web estático (sin servidor):
+  equity curve, 8 KPIs, P/L por régimen, win rate por confidence band,
+  P/L mensual, checklist institucional, tabla de últimos 30 trades.
+  Carga CSV via drag-and-drop o selector. Chart.js CDN.
+
+### Changed — MQL5
+- **`GoldenTradeX.mq5`** v1.42 → **v2.00**: integra `MarketRegimeEngine`,
+  `SmartMoneyEngine` y `ConfidenceEngine`. Nuevos inputs:
+  `InpUseRegimeFilter`, `InpUseSmcFilter`, `InpMinConfidence`.
+  El comentario de cada trade incluye `|Conf=N|Reg=REGIME` para trazabilidad.
+- **`RiskManager.mqh`** — Añadidos:
+  - Circuit Breaker mensual (`InpMaxMonthlyDD`, persiste con GlobalVariable)
+  - Kill Switch de emergencia (`SetKillSwitch(bool)`)
+  - Capital Preservation Mode (activa riesgo 25% cuando DD diario ≥ `InpCpThresholdPct`)
+  - `PrintStatus()` para diagnóstico en Journal
+
+### Changed — Infraestructura
+- **`config/GoldenTradeX.set`** y **`GoldenTradeX_XAGUSD.set`** — nuevos parámetros v2.00
+- **`scripts/validate_set.py`** — validación de los 5 nuevos parámetros v2.00
+- **`.github/workflows/ci.yml`** — 5 jobs: +syntax check para nuevos scripts,
+  +estructura para nuevos archivos requeridos, +dashboard validation job
+- **`requirements.txt`** — añadidos `xgboost>=2.0.0`, `scikit-learn>=1.4.0`
+
+---
+
 ## [1.42] — 2026-06-12
 
 ### Added
