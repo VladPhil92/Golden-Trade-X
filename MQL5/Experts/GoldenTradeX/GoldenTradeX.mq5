@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "CTG One Technology S.A.S."
 #property link      "https://github.com/VladPhil92/Golden-Trade-X"
-#property version   "2.00"
+#property version   "2.10"
 #property strict
 #property description "EA de precisión para Oro (XAUUSD): EMA+RSI+ADX+ATR+H4 + Market Regime + Smart Money Concepts + Ensemble Confidence Score. Gestión de riesgo multicapa con circuit breaker mensual, kill switch y Capital Preservation Mode."
 

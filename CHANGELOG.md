@@ -5,6 +5,47 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [2.10] — 2026-07-30
+
+### Added — MQL5
+- **`FibonacciEngine.mqh`** — Fibonacci confluence module (score 0-20):
+  Detects swing high/low (3-bar fractal, lookback=100), calculates 7 levels
+  (23.6%, 38.2%, 50%, 61.8%, 78.6%, 127.2%, 161.8%), identifies Premium/Discount
+  zones, finds nearest level within ATR×0.5. `FibScore(ctx, isBuy)` awards
+  38.2%/61.8%=20, 50%=15, 23.6%/78.6%=10, extensions=5; halved if price
+  is in the wrong zone for the trade direction.
+- **`TestSessionFilter.mq5`** — 22 unit tests for `CSessionFilter`:
+  disabled filter (4 cases), standard session boundaries, weekend blocks,
+  friday close logic, `MustCloseAll()`, closeFriday=false, edge hours,
+  full weekday coverage. Testable subclass with injected datetime.
+
+### Added — Python
+- **`scripts/correlation_engine.py`** — Macro correlation analysis (requires yfinance):
+  Downloads XAUUSD, DXY, VIX, US10Y, SP500; calculates full-period Pearson and
+  rolling Pearson (default 30d window); DXY-regime breakdown; actionable signals
+  (inverse DXY threshold, risk-off VIX, stagflation regime); CSV cache for offline.
+- **`scripts/optimize_confidence.py`** — Grid search for optimal `InpMinConfidence`:
+  Evaluates threshold 0-90 (step=5) by PF, Sharpe, Net P/L, Max DD; balanced
+  recommendation at PF≥1.5 AND kept≥40%; `--metric` flag; CSV output.
+- **`scripts/fomc_calendar.py`** — FOMC calendar updater:
+  Hardcoded 2025-2027 dates; optional live scrape from federalreserve.gov
+  (requires requests, beautifulsoup4); upcoming meetings with countdown;
+  generates ready-to-paste MQL5 `IsFomcDay()` code block.
+
+### Changed — Python
+- **`scripts/backtest_analysis.py`** — Added `--html-output` flag:
+  Generates a self-contained HTML report (no CDN) with SVG equity curve,
+  SVG walk-forward bar chart, KPI grid, Monte Carlo grid, institutional
+  targets checklist. Pure stdlib, no external dependencies.
+
+### Changed — Infrastructure
+- **`.github/workflows/ci.yml`** — Python syntax check extended to cover
+  `correlation_engine.py`, `optimize_confidence.py`, `fomc_calendar.py`;
+  structure-check extended to cover `FibonacciEngine.mqh`,
+  `TestSessionFilter.mq5`, and all 3 new Python scripts.
+
+---
+
 ## [2.00] — 2026-06-15
 
 ### Added — MQL5

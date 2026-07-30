@@ -29,7 +29,10 @@ jobs:
             scripts/backtest_analysis.py \
             scripts/validate_set.py \
             scripts/regime_analysis.py \
-            scripts/ml_pipeline.py
+            scripts/ml_pipeline.py \
+            scripts/correlation_engine.py \
+            scripts/optimize_confidence.py \
+            scripts/fomc_calendar.py
 
       - name: flake8 — scripts/
         run: |
@@ -73,14 +76,19 @@ jobs:
             "MQL5/Include/GoldenTradeX/MarketRegimeEngine.mqh" \
             "MQL5/Include/GoldenTradeX/SmartMoneyEngine.mqh" \
             "MQL5/Include/GoldenTradeX/ConfidenceEngine.mqh" \
+            "MQL5/Include/GoldenTradeX/FibonacciEngine.mqh" \
             "MQL5/Scripts/Tests/TestNewsFilter.mq5" \
             "MQL5/Scripts/Tests/TestRiskManager.mq5" \
             "MQL5/Scripts/Tests/TestMarketRegime.mq5" \
+            "MQL5/Scripts/Tests/TestSessionFilter.mq5" \
             "scripts/monitor.py" \
             "scripts/backtest_analysis.py" \
             "scripts/regime_analysis.py" \
             "scripts/ml_pipeline.py" \
             "scripts/validate_set.py" \
+            "scripts/correlation_engine.py" \
+            "scripts/optimize_confidence.py" \
+            "scripts/fomc_calendar.py" \
             "dashboard/index.html" \
             "config/GoldenTradeX.set" \
             "config/GoldenTradeX_XAGUSD.set" \
