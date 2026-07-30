@@ -20,10 +20,13 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install ruff
+        # Version fijada: los defaults de ruff cambian entre versiones y
+        # romperían el CI sin que cambie el código.
+        run: pip install "ruff==0.15.8"
 
       - name: ruff — scripts/ and tests/
-        run: ruff check scripts/ tests/ --line-length 120
+        # E4/E7/E9/F = paridad con flake8 (errores reales, no estilo)
+        run: ruff check scripts/ tests/ --line-length 120 --select E4,E7,E9,F
 
   # ── 1b. MQL5 lint (MQL4-ismos y API inexistente) ───────────────────
   # No compila (MetaEditor no corre en Linux) pero detecta las clases de
