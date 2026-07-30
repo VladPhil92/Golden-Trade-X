@@ -33,6 +33,7 @@ private:
    string  m_gvMonthKey;
    string  m_gvMonthEquityKey;
    bool    m_killSwitch;            // parada de emergencia manual
+   string  m_gvKillSwitchKey;       // v2.20: persiste kill switch entre reinicios
    bool    m_capitalPreservation;   // modo conservador: reduce riesgo al 25%
    double  m_cpThresholdPct;        // % DD que activa Capital Preservation (default 8%)
 
@@ -129,11 +130,18 @@ public:
       m_gvConsecLossKey  = StringFormat("GTX_%d_%d_ConsecLoss",  (int)login, (int)magic);
       m_gvMonthKey       = StringFormat("GTX_%d_%d_Month",       (int)login, (int)magic);
       m_gvMonthEquityKey = StringFormat("GTX_%d_%d_MonthEquity", (int)login, (int)magic);
+      m_gvKillSwitchKey  = StringFormat("GTX_%d_%d_KillSwitch",  (int)login, (int)magic);
 
       if(GlobalVariableCheck(m_gvConsecLossKey))
          m_consecutiveLosses = (int)GlobalVariableGet(m_gvConsecLossKey);
       else
          m_consecutiveLosses = 0;
+
+      // v2.20: restaurar kill switch desde GlobalVariable (sobrevive reinicios)
+      m_killSwitch = GlobalVariableCheck(m_gvKillSwitchKey) &&
+                     GlobalVariableGet(m_gvKillSwitchKey) != 0.0;
+      if(m_killSwitch)
+         Print("RiskManager: Kill Switch estaba ACTIVO — restaurado desde GlobalVariable.");
 
       UpdateDay();
       UpdateWeek();
@@ -216,7 +224,11 @@ public:
    void SetKillSwitch(bool active)
      {
       m_killSwitch = active;
-      if(active) Print("RiskManager: KILL SWITCH activado. Sin operaciones hasta reinicio.");
+      GlobalVariableSet(m_gvKillSwitchKey, active ? 1.0 : 0.0);  // v2.20: persistir
+      if(active)
+         Print("RiskManager: KILL SWITCH activado. Sin operaciones hasta desactivar.");
+      else
+         Print("RiskManager: KILL SWITCH desactivado.");
      }
    bool IsKillSwitchActive() { return m_killSwitch; }
 

@@ -30,6 +30,7 @@ private:
    double          m_adxMinLevel;  // ADX mínimo para operar (0 = desactivado)
    double          m_atrMaxRatio;  // ATR / ATR_SMA(20) máximo permitido (0 = desactivado)
    bool            m_useHtfFilter;
+   long            m_minVolume;     // v2.20: volumen mínimo de ticks en barra cerrada (0=off)
 
    // Caché del ATR: evita CopyBuffer en cada tick
    double          m_cachedAtr;
@@ -61,7 +62,8 @@ public:
              double rsiLongMin, double rsiShortMax,
              int atrPeriod, double atrMinRatio,
              double adxMinLevel, double atrMaxRatio,
-             bool useHtfFilter, int htfEmaPeriod)
+             bool useHtfFilter, int htfEmaPeriod,
+             long minTickVolume = 0)
      {
       m_symbol       = symbol;
       m_tf           = tf;
@@ -73,6 +75,7 @@ public:
       m_adxMinLevel  = adxMinLevel;
       m_atrMaxRatio  = atrMaxRatio;
       m_useHtfFilter = useHtfFilter;
+      m_minVolume    = minTickVolume;
       m_cachedAtr    = 0;
       m_cachedAtrBar = 0;
       m_hHtfEma      = INVALID_HANDLE;
@@ -159,6 +162,13 @@ public:
          candidate = SIGNAL_SELL;
 
       if(candidate == SIGNAL_NONE) return(SIGNAL_NONE);
+
+      // Filtro de volumen mínimo de ticks: evitar señales en barras de bajo interés
+      if(m_minVolume > 0)
+        {
+         long vol = iVolume(m_symbol, m_tf, 1);
+         if(vol < m_minVolume) return(SIGNAL_NONE);
+        }
 
       // Filtro HTF: operar solo a favor de la tendencia H4
       if(m_useHtfFilter && m_hHtfEma != INVALID_HANDLE)

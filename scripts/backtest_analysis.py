@@ -100,11 +100,26 @@ def max_drawdown(curve: List[float]) -> Tuple[float, float]:
 
 
 def sharpe_ratio(returns: List[float], periods_per_year: int = 252) -> float:
+    """Legacy per-trade Sharpe — use daily_sharpe() for annualised accuracy."""
     n = len(returns)
     if n < 2:
         return 0.0
     mean = sum(returns) / n
     std = math.sqrt(sum((r - mean) ** 2 for r in returns) / (n - 1))
+    return (mean / std) * math.sqrt(periods_per_year) if std else 0.0
+
+
+def daily_sharpe(trades: List["Trade"], periods_per_year: int = 252) -> float:
+    """Proper Sharpe: annualised on daily P&L buckets (sqrt-252 annualisation)."""
+    daily: Dict[str, float] = defaultdict(float)
+    for t in trades:
+        daily[t.close_date] += t.net
+    rets = list(daily.values())
+    n = len(rets)
+    if n < 2:
+        return 0.0
+    mean = sum(rets) / n
+    std = math.sqrt(sum((r - mean) ** 2 for r in rets) / (n - 1))
     return (mean / std) * math.sqrt(periods_per_year) if std else 0.0
 
 
@@ -135,8 +150,8 @@ def monte_carlo(
     ruins = 0
 
     for _ in range(runs):
-        shuffled = returns[:]
-        rng.shuffle(shuffled)
+        # v2.20: bootstrap (sampling with replacement) — not shuffle-only
+        shuffled = [rng.choice(returns) for _ in range(len(returns))]
         _, dd_pct = max_drawdown(equity_curve(shuffled, start))
         dd_pcts.append(dd_pct * 100)
         if dd_pct >= RUIN_THRESHOLD:
@@ -258,7 +273,7 @@ def main() -> None:
     avg_win  = sum(t.net for t in trades if t.is_win) / wins if wins else 0.0
     avg_loss = sum(t.net for t in trades if not t.is_win) / losses if losses else 0.0
     rr       = abs(avg_win / avg_loss) if avg_loss else float("inf")
-    sharpe   = sharpe_ratio(returns)
+    sharpe   = daily_sharpe(trades)    # v2.20: daily-bucket Sharpe with sqrt(252)
     curve    = equity_curve(returns, args.start_equity)
     dd_abs, dd_pct = max_drawdown(curve)
     rec_fac  = net_pnl / dd_abs if dd_abs > 0 else float("inf")

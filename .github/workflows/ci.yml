@@ -32,13 +32,19 @@ jobs:
             scripts/ml_pipeline.py \
             scripts/correlation_engine.py \
             scripts/optimize_confidence.py \
-            scripts/fomc_calendar.py
+            scripts/fomc_calendar.py \
+            scripts/session_analyzer.py \
+            scripts/walk_forward_optimizer.py \
+            scripts/live_monitor.py
 
-      - name: flake8 — scripts/
+      - name: flake8 — scripts/ and tests/
         run: |
           flake8 scripts/ \
             --max-line-length=120 \
             --extend-ignore=E203,E221,W503
+          flake8 tests/ \
+            --max-line-length=120 \
+            --extend-ignore=E203,E221,W503,E402
 
   # ── 2. Config validation ────────────────────────────────────────────
   config-validate:
@@ -77,6 +83,11 @@ jobs:
             "MQL5/Include/GoldenTradeX/SmartMoneyEngine.mqh" \
             "MQL5/Include/GoldenTradeX/ConfidenceEngine.mqh" \
             "MQL5/Include/GoldenTradeX/FibonacciEngine.mqh" \
+            "MQL5/Include/GoldenTradeX/PartialTakeProfit.mqh" \
+            "MQL5/Include/GoldenTradeX/EquityCurveFilter.mqh" \
+            "MQL5/Include/GoldenTradeX/OrderManager.mqh" \
+            "MQL5/Include/GoldenTradeX/HealthMonitor.mqh" \
+            "MQL5/Scripts/Tests/TestOrderManager.mq5" \
             "MQL5/Scripts/Tests/TestNewsFilter.mq5" \
             "MQL5/Scripts/Tests/TestRiskManager.mq5" \
             "MQL5/Scripts/Tests/TestMarketRegime.mq5" \
@@ -90,6 +101,11 @@ jobs:
             "scripts/correlation_engine.py" \
             "scripts/optimize_confidence.py" \
             "scripts/fomc_calendar.py" \
+            "scripts/session_analyzer.py" \
+            "scripts/walk_forward_optimizer.py" \
+            "scripts/live_monitor.py" \
+            "tests/test_backtest_analysis.py" \
+            ".env.example" \
             "dashboard/index.html" \
             "config/GoldenTradeX.set" \
             "config/GoldenTradeX_XAGUSD.set" \
@@ -127,7 +143,26 @@ jobs:
             exit 1
           fi
 
-  # ── 5. Dashboard validation ─────────────────────────────────────────
+  # ── 5. Python unit tests (pytest) ──────────────────────────────────
+  python-tests:
+    name: Python unit tests (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install test dependencies
+        run: pip install pytest pytest-cov
+
+      - name: Run pytest
+        run: |
+          pytest tests/ -v --tb=short
+
+  # ── 6. Dashboard validation ─────────────────────────────────────────
   dashboard-check:
     name: Dashboard HTML valid
     runs-on: ubuntu-latest

@@ -30,6 +30,12 @@ REQUIRED = {
     "InpUseRegimeFilter", "InpUseSmcFilter", "InpMinConfidence",
     # v2.00 — Advanced Risk
     "InpMaxMonthlyDD", "InpCpThresholdPct",
+    # v2.20 — Partial Take Profit
+    "InpUsePartialTP", "InpPartialTPR", "InpPartialTPPct",
+    # v2.20 — Equity Curve Filter
+    "InpUseEqCurveFilter", "InpEqCurvePeriod",
+    # v2.20 — Signal quality
+    "InpMinTickVolume",
 }
 
 RANGE_CHECKS = {
@@ -44,6 +50,10 @@ RANGE_CHECKS = {
     "InpMinConfidence":     (0, 100, True, True),
     "InpMaxMonthlyDD":      (0, 100, False, True),
     "InpCpThresholdPct":    (0, 50, False, True),
+    "InpPartialTPR":        (0, 10, False, True),
+    "InpPartialTPPct":      (1, 99, False, True),
+    "InpEqCurvePeriod":     (2, 200, True, True),
+    "InpMinTickVolume":     (0, 10000, True, True),
     "InpStartHour":         (0, 23, True,  True),
     "InpEndHour":           (0, 23, True,  True),
     "InpFridayCloseHour":   (0, 23, True,  True),
