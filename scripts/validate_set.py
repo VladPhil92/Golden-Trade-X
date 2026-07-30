@@ -30,6 +30,8 @@ REQUIRED = {
     "InpUseRegimeFilter", "InpUseSmcFilter", "InpMinConfidence",
     # v2.00 — Advanced Risk
     "InpMaxMonthlyDD", "InpCpThresholdPct",
+    # v2.40 — Kelly Criterion
+    "InpUseKelly", "InpKellyFraction", "InpKellyMinTrades",
     # v2.20 — Partial Take Profit
     "InpUsePartialTP", "InpPartialTPR", "InpPartialTPPct",
     # v2.20 — Equity Curve Filter
@@ -50,6 +52,8 @@ RANGE_CHECKS = {
     "InpMinConfidence":     (0, 100, True, True),
     "InpMaxMonthlyDD":      (0, 100, False, True),
     "InpCpThresholdPct":    (0, 50, False, True),
+    "InpKellyFraction":     (0.01, 1.0, False, True),
+    "InpKellyMinTrades":    (10, 500, True, True),
     "InpPartialTPR":        (0, 10, False, True),
     "InpPartialTPPct":      (1, 99, False, True),
     "InpEqCurvePeriod":     (2, 200, True, True),

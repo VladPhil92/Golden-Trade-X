@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
 //|                                                  RiskManager.mqh |
-//|   Golden Trade X v2.00 — Gestión de riesgo y capital             |
+//|   Golden Trade X v2.40 — Gestión de riesgo y capital             |
 //+------------------------------------------------------------------+
 #property strict
 
@@ -27,15 +27,85 @@ private:
    string  m_gvConsecLossKey;
 
    // v2.00: circuit breaker y capital preservation
-   double  m_maxMonthlyDD;          // % máximo mensual (0 = desactivado)
+   double  m_maxMonthlyDD;
    double  m_monthStartEquity;
    int     m_currentMonth;
    string  m_gvMonthKey;
    string  m_gvMonthEquityKey;
-   bool    m_killSwitch;            // parada de emergencia manual
+   bool    m_killSwitch;
    string  m_gvKillSwitchKey;       // v2.20: persiste kill switch entre reinicios
-   bool    m_capitalPreservation;   // modo conservador: reduce riesgo al 25%
-   double  m_cpThresholdPct;        // % DD que activa Capital Preservation (default 8%)
+   bool    m_capitalPreservation;
+   double  m_cpThresholdPct;
+
+   // v2.40: Kelly Criterion fraccional
+   bool    m_useKelly;
+   double  m_kellyFraction;         // 0.25 = Quarter-Kelly (recomendado)
+   int     m_kellyMinTrades;        // trades mínimos antes de activar Kelly
+
+   // Calcula W (win rate) y R (win/loss ratio) desde historial real del EA
+   bool CalcWinRateAndR(double &winRate, double &avgR)
+     {
+      datetime from = TimeCurrent() - 90 * 24 * 3600;   // ventana 90 días
+      if(!HistorySelect(from, TimeCurrent())) return false;
+
+      double sumWins = 0, sumLosses = 0;
+      int    wins = 0, losses = 0;
+
+      int total = HistoryDealsTotal();
+      for(int i = 0; i < total; i++)
+        {
+         ulong ticket = HistoryDealGetTicket(i);
+         if(HistoryDealGetInteger(ticket, DEAL_MAGIC) != (long)m_magic) continue;
+         long entry = HistoryDealGetInteger(ticket, DEAL_ENTRY);
+         if(entry != DEAL_ENTRY_OUT && entry != DEAL_ENTRY_INOUT) continue;
+
+         double net = HistoryDealGetDouble(ticket, DEAL_PROFIT)
+                    + HistoryDealGetDouble(ticket, DEAL_COMMISSION)
+                    + HistoryDealGetDouble(ticket, DEAL_SWAP);
+
+         if(net > 0) { sumWins   += net;         wins++;   }
+         else        { sumLosses += MathAbs(net); losses++; }
+        }
+
+      if(wins + losses < m_kellyMinTrades) return false;
+
+      winRate     = (double)wins / (wins + losses);
+      double avgW = wins    > 0 ? sumWins   / wins    : 0;
+      double avgL = losses  > 0 ? sumLosses / losses  : 1;
+      avgR        = avgW / avgL;
+
+      return (avgR > 0 && winRate > 0 && winRate < 1.0);
+     }
+
+   // Retorna el % de riesgo óptimo según Kelly (ya aplicado m_kellyFraction)
+   // Formula: f* = W - (1-W)/R  → fraccionada × 100 para obtener %
+   double CalcKellyRiskPct()
+     {
+      double winRate, avgR;
+      if(!CalcWinRateAndR(winRate, avgR))
+        {
+         Print("Kelly: historial insuficiente — usando riesgo fijo ", m_riskPercent, "%");
+         return m_riskPercent;
+        }
+
+      double kellyFull = winRate - (1.0 - winRate) / avgR;
+      if(kellyFull <= 0)
+        {
+         Print("Kelly: sin edge detectado (f*=", DoubleToString(kellyFull,4),
+               ") — reduciendo riesgo al 50%");
+         return m_riskPercent * 0.5;
+        }
+
+      double kellyPct = kellyFull * m_kellyFraction * 100.0;
+      double capped   = MathMin(kellyPct, m_riskPercent * 2.0);  // techo = 2× riesgo fijo
+
+      Print("Kelly f*=", DoubleToString(kellyFull*100,2), "% → ",
+            DoubleToString(m_kellyFraction*100,0), "% fracción → ",
+            DoubleToString(capped,3), "% riesgo efectivo",
+            " (W=", DoubleToString(winRate*100,1), "% R=", DoubleToString(avgR,2), ")");
+
+      return capped;
+     }
 
    void UpdateDay()
      {
@@ -121,6 +191,9 @@ public:
       m_killSwitch           = false;
       m_capitalPreservation  = false;
       m_cpThresholdPct       = cpThresholdPct;
+      m_useKelly             = false;
+      m_kellyFraction        = 0.25;
+      m_kellyMinTrades       = 30;
 
       long login = AccountInfoInteger(ACCOUNT_LOGIN);
       m_gvDayKey         = StringFormat("GTX_%d_%d_Day",         (int)login, (int)magic);
@@ -148,11 +221,23 @@ public:
       UpdateMonth();
      }
 
-   //--- Lote con multiplicador de riesgo adaptativo
+   // v2.40: activar Kelly Criterion
+   void InitKelly(bool useKelly, double fraction, int minTrades)
+     {
+      m_useKelly       = useKelly;
+      m_kellyFraction  = MathMax(0.01, MathMin(fraction, 1.0));
+      m_kellyMinTrades = MathMax(10, minTrades);
+      if(m_useKelly)
+         Print("RiskManager: Kelly Criterion ON — fracción=",
+               DoubleToString(m_kellyFraction*100,0), "% minTrades=", m_kellyMinTrades);
+     }
+
+   //--- Lote con multiplicador de riesgo adaptativo (v2.40: soporte Kelly)
    double CalculateLotSize(string symbol, double entryPrice, double slPrice)
      {
-      double equity     = AccountInfoDouble(ACCOUNT_EQUITY);
-      double effectiveRisk = m_capitalPreservation ? m_riskPercent * 0.25 : m_riskPercent;
+      double equity       = AccountInfoDouble(ACCOUNT_EQUITY);
+      double baseRisk     = m_useKelly ? CalcKellyRiskPct() : m_riskPercent;
+      double effectiveRisk = m_capitalPreservation ? baseRisk * 0.25 : baseRisk;
       double riskMoney  = equity * effectiveRisk / 100.0;
       double slDistance = MathAbs(entryPrice - slPrice);
       if(slDistance <= 0) return 0;

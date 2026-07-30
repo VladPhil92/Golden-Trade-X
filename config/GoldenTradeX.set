@@ -1,4 +1,4 @@
-; Golden Trade X v2.00 — preset por defecto (XAUUSD M15)
+; Golden Trade X v2.40 — preset por defecto (XAUUSD M15)
 ; Nota DST: StartHour/EndHour estan en hora del servidor del broker.
 ; La mayoria de brokers usa EET (GMT+2 verano / GMT+3 invierno).
 
@@ -58,6 +58,12 @@ InpUseNewsFilter=true
 InpNewsBufferBefore=30
 InpNewsBufferAfter=90
 InpPauseForNews=false
+
+; --- Kelly Criterion Fraccional (v2.40) ---
+; InpUseKelly=false por defecto. Activar solo tras >= InpKellyMinTrades en historial.
+InpUseKelly=false
+InpKellyFraction=0.25
+InpKellyMinTrades=30
 
 ; --- Partial Take Profit (v2.20) ---
 InpUsePartialTP=true

@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "CTG One Technology S.A.S."
 #property link      "https://github.com/VladPhil92/Golden-Trade-X"
-#property version   "2.30"
+#property version   "2.40"
 #property strict
 #property description "EA de precisión para Oro (XAUUSD): EMA+RSI+ADX+ATR+H4 + Market Regime + Smart Money Concepts + Fibonacci + Ensemble Confidence Score. Gestión de riesgo multicapa con circuit breaker mensual, kill switch persistente, Capital Preservation Mode, Partial TP, Equity Curve Filter y OrderManager production-grade con retry automático."
 
@@ -86,6 +86,12 @@ input double  InpPartialTPPct     = 50.0;
 input group "=== Equity Curve Filter ==="
 input bool    InpUseEqCurveFilter = true;
 input int     InpEqCurvePeriod    = 20;
+
+//--- Kelly Criterion (v2.40)
+input group "=== Kelly Criterion (v2.40) ==="
+input bool    InpUseKelly         = false;   // Activar Kelly Criterion fraccional
+input double  InpKellyFraction    = 0.25;    // Fracción de Kelly (0.25 = quarter-Kelly)
+input int     InpKellyMinTrades   = 30;      // Trades mínimos para activar Kelly
 
 //--- Order Manager (v2.30)
 input group "=== Order Manager (v2.30) ==="
@@ -208,6 +214,7 @@ int OnInit()
    eqCurveFilter.Init(InpUseEqCurveFilter, InpEqCurvePeriod, InpMagicNumber);
    orderMgr.Init(&trade, InpOrderMaxRetries, InpOrderRetryDelay);
    healthMonitor.Init(_Symbol, InpMagicNumber, InpMinMarginLevel);
+   riskManager.InitKelly(InpUseKelly, InpKellyFraction, InpKellyMinTrades);
 
    // ── Persistencia de barra ──────────────────────────────────────────
    g_gvLastBarKey = StringFormat("GTX_%d_LastBar", (int)InpMagicNumber);
@@ -218,11 +225,12 @@ int OnInit()
 
    newsFilter.PrintStatus();
    riskManager.PrintStatus();
-   Print("GoldenTradeX v2.30 inicializado en ", _Symbol,
+   Print("GoldenTradeX v2.40 inicializado en ", _Symbol,
          " | MinConf=",    InpMinConfidence,
          " | Retries=",    InpOrderMaxRetries,
          " | PartialTP=",  InpUsePartialTP  ? "ON" : "OFF",
-         " | EqFilter=",   InpUseEqCurveFilter ? "ON" : "OFF");
+         " | EqFilter=",   InpUseEqCurveFilter ? "ON" : "OFF",
+         " | Kelly=",      InpUseKelly ? StringFormat("ON(f=%.0f%%,min=%d)", InpKellyFraction*100, InpKellyMinTrades) : "OFF");
    return INIT_SUCCEEDED;
   }
 

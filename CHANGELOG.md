@@ -5,6 +5,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [2.40] — 2026-07-31
+
+### Added — Kelly Criterion Fraccional
+- **`RiskManager.mqh`** — Kelly Criterion fraccional dinámico:
+  - Calcula W (win rate) y R (avg win / avg loss) desde historial real de trades
+    del EA (últimos 90 días, filtrado por magic number).
+  - Fórmula: `f* = W − (1−W)/R` (Kelly completo), luego aplicada la fracción.
+  - `InpKellyFraction=0.25` por defecto (Quarter-Kelly — máxima seguridad).
+  - `InpKellyMinTrades=30` — fallback a riesgo fijo si historial insuficiente.
+  - Techo de seguridad: Kelly nunca supera `InpRiskPercent × 2`.
+  - Capital Preservation Mode reduce Kelly al 25% igual que riesgo fijo.
+  - Sin edge detectado (f*≤0): reduce riesgo al 50% automáticamente.
+  - Log en Journal: `W%`, `R`, `f*`, riesgo efectivo en cada apertura.
+- **Inputs nuevos:** `InpUseKelly`, `InpKellyFraction`, `InpKellyMinTrades`
+- `config/GoldenTradeX.set` actualizado con parámetros Kelly (off por defecto)
+- `scripts/validate_set.py` valida los 3 nuevos parámetros
+
+---
+
 ## [2.30] — 2026-07-30
 
 ### Added — MQL5 (Production-Grade Execution)
