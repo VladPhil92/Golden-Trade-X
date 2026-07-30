@@ -5,6 +5,68 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [2.30] — 2026-07-30
+
+### Added — MQL5 (Production-Grade Execution)
+- **`OrderManager.mqh`** — Gestor de órdenes production-grade (`COrderManager`):
+  - Retry automático hasta `InpOrderMaxRetries` veces con delay configurable.
+  - Clasificación de errores: retryable (requote, price_changed, price_off,
+    too_many_requests, connection), fatal (no_money, trade_disabled, frozen).
+  - Errores fatales activan automáticamente el Kill Switch.
+  - Validación obligatoria SL≠0 y TP≠0 antes de enviar cualquier orden.
+  - Validación de dirección SL/TP (BUY: SL<price y TP>price; SELL: inverso).
+  - Seguimiento de slippage: último y promedio (en puntos).
+  - Estadísticas de ejecución: intentos totales, éxitos, fallos.
+- **`HealthMonitor.mqh`** — Monitor de salud periódico (`CHealthMonitor`):
+  - Llamado desde `OnTimer()` cada 60 segundos.
+  - Detección y corrección automática de posiciones huérfanas (SL=0):
+    aplica SL de emergencia a 3×ATR por encima/debajo del precio de apertura.
+  - Verificación de nivel de margen: alerta si margin_level < umbral configurable.
+  - Verificación de conexión al broker.
+  - Escritura de archivo de estado CSV (`GTX_{magic}_status.csv`) en la carpeta
+    Files del terminal para lectura por `scripts/live_monitor.py`.
+- **`GoldenTradeX.mq5`** — v2.30:
+  - Integra `COrderManager` en todas las operaciones (open, modify, close).
+  - Integra `CHealthMonitor` vía `OnTimer()`.
+  - Añade `OnTimer()` con período de 60 segundos.
+  - Validación de cuenta en `OnInit()`: modo DEMO/REAL, trading permitido,
+    MQL_TRADE_ALLOWED. El EA imprime el tipo de cuenta al arrancar.
+  - Activación automática del Kill Switch ante errores fatales del broker.
+  - Nuevos inputs: `InpOrderMaxRetries` (3), `InpOrderRetryDelay` (500ms),
+    `InpMinMarginLevel` (200%).
+
+### Added — MQL5 Tests
+- **`TestOrderManager.mq5`** — 19 unit tests para `COrderManager`:
+  clasificación retryable/fatal/success de 7 códigos de retorno MQL5,
+  validación SL/TP con 10 casos (BUY y SELL con SL/TP válidos e inválidos),
+  estadísticas iniciales (success=0, fail=0, slippage=0).
+
+### Added — Python
+- **`scripts/live_monitor.py`** — Monitor en tiempo real con alertas Telegram:
+  - Detecta nuevos trades en `GoldenTradeX_*.csv` (polling configurable, default 10s).
+  - Envía alertas Telegram estructuradas (HTML) por cada trade cerrado.
+  - Alerta de racha de pérdidas consecutivas (umbral configurable).
+  - Lee archivo de estado del EA (`GTX_{magic}_status.csv`) y alerta sobre
+    condiciones de salud (margen bajo, desconexión, SL huérfano).
+  - Configuración completa via variables de entorno / `.env`.
+  - Modo `--dry-run` para probar alertas sin enviar al Telegram.
+- **`tests/test_backtest_analysis.py`** — 28 tests pytest para funciones críticas:
+  `equity_curve` (4), `max_drawdown` (4), `profit_factor` (4), `daily_sharpe`
+  (4 incluyendo agregación diaria y √252), `monte_carlo` (4 incluyendo bootstrap),
+  `max_consec_losses` (4), `Trade.net` y `Trade.is_win` (4).
+- **`.env.example`** — Plantilla de configuración completa para `live_monitor.py`:
+  `GTX_TELEGRAM_TOKEN`, `GTX_TELEGRAM_CHAT_ID`, thresholds y rutas.
+
+### Changed — Infrastructure
+- **`requirements.txt`** — Añadidos `yfinance>=0.2.36`, `python-dotenv>=1.0.0`,
+  `pytest>=8.0.0`, `pytest-cov>=5.0.0`.
+- **`.github/workflows/ci.yml`** — Nuevo job `python-tests` (pytest sobre `tests/`);
+  flake8 extendido a `tests/`; structure-check extendido a `OrderManager.mqh`,
+  `HealthMonitor.mqh`, `TestOrderManager.mq5`, `live_monitor.py`,
+  `tests/test_backtest_analysis.py`, `.env.example`.
+
+---
+
 ## [2.20] — 2026-07-30
 
 ### Fixed (bugs críticos)
