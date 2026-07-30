@@ -104,7 +104,10 @@ jobs:
             "scripts/session_analyzer.py" \
             "scripts/walk_forward_optimizer.py" \
             "scripts/live_monitor.py" \
+            "scripts/mql5_lint.py" \
+            "scripts/performance_report.py" \
             "tests/test_backtest_analysis.py" \
+            "tests/test_performance_report.py" \
             ".env.example" \
             "dashboard/index.html" \
             "config/GoldenTradeX.set" \

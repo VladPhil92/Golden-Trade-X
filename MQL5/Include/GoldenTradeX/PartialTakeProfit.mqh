@@ -62,7 +62,17 @@ public:
       double closeVol = MathFloor(lots * partialPct / 100.0 / lotStep) * lotStep;
       closeVol = MathMax(closeVol, minLot);
 
-      if(closeVol >= lots) return false;  // evitar cerrar el total
+      if(closeVol >= lots)
+        {
+         // v2.51: lote demasiado pequeño para partir (p.ej. 0.01 con minLot
+         // 0.01) — marcar como resuelto para no re-evaluar cada tick, y
+         // avisar UNA vez en el Journal (funcionalidad inactiva en esta cuenta).
+         MarkDone(ticket);
+         Print("PartialTP: lote ", DoubleToString(lots, 2), " no divisible ",
+               "(minLot=", DoubleToString(minLot, 2), ") — parcial omitido ",
+               "para ticket=", ticket, ". Aumentar riesgo/depósito para activarlo.");
+         return false;
+        }
 
       if(tradeObj.PositionClosePartial(ticket, closeVol))
         {

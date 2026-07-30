@@ -290,6 +290,33 @@ public:
       if(lots < minLot) return 0;
       lots = MathMin(maxLot, lots);
 
+      // v2.51: verificar margen libre ANTES de enviar. Sin esto, una cuenta
+      // justa de margen recibe 10019 NO_MONEY — clasificado como fatal —
+      // y el Kill Switch detiene el EA. Se usa máx. 80% del margen libre;
+      // si no alcanza, se reduce el lote (o se omite el trade con log).
+      ENUM_ORDER_TYPE ordType = (slPrice < entryPrice) ? ORDER_TYPE_BUY
+                                                       : ORDER_TYPE_SELL;
+      double marginReq = 0.0;
+      if(OrderCalcMargin(ordType, symbol, lots, entryPrice, marginReq) &&
+         marginReq > 0)
+        {
+         double marginCap = AccountInfoDouble(ACCOUNT_MARGIN_FREE) * 0.80;
+         if(marginReq > marginCap)
+           {
+            double scaled = MathFloor(lots * marginCap / marginReq / lotStep) * lotStep;
+            if(scaled < minLot)
+              {
+               Print("RiskManager: margen libre insuficiente (req=",
+                     DoubleToString(marginReq, 2), " cap=",
+                     DoubleToString(marginCap, 2), ") — trade omitido.");
+               return 0;
+              }
+            Print("RiskManager: lote reducido por margen libre ",
+                  DoubleToString(lots, 2), " → ", DoubleToString(scaled, 2));
+            lots = scaled;
+           }
+        }
+
       int decimals;
       if(lotStep >= 1.0)       decimals = 0;
       else if(lotStep >= 0.1)  decimals = 1;

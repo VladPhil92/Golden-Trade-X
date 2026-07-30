@@ -89,6 +89,33 @@ private:
       return(false);
      }
 
+   // v2.51: totales de la POSICIÓN — con Partial TP la posición genera
+   // varios deals de salida; loguear solo el último ocultaba la mitad
+   // del P/L al análisis. Retorna volumen de entrada, P/L total y
+   // comisión+swap total de todos los deals de salida.
+   bool GetPositionTotals(ulong positionId, double &entryVolume,
+                          double &totalProfit, double &totalCommSwap)
+     {
+      entryVolume = 0; totalProfit = 0; totalCommSwap = 0;
+      if(!HistorySelectByPosition(positionId)) return(false);
+
+      for(int i = 0; i < HistoryDealsTotal(); i++)
+        {
+         ulong ticket = HistoryDealGetTicket(i);
+         if(ticket == 0) continue;
+         long entry = HistoryDealGetInteger(ticket, DEAL_ENTRY);
+         if(entry == DEAL_ENTRY_IN)
+            entryVolume += HistoryDealGetDouble(ticket, DEAL_VOLUME);
+         else if(entry == DEAL_ENTRY_OUT || entry == DEAL_ENTRY_INOUT)
+           {
+            totalProfit   += HistoryDealGetDouble(ticket, DEAL_PROFIT);
+            totalCommSwap += HistoryDealGetDouble(ticket, DEAL_COMMISSION)
+                           + HistoryDealGetDouble(ticket, DEAL_SWAP);
+           }
+        }
+      return(entryVolume > 0);
+     }
+
 public:
    void Init(bool enabled, ulong magic)
      {
@@ -123,6 +150,15 @@ public:
       string   entryComment;
       GetEntryData(positionId, entryPrice, initialSL, initialTP,
                    openTime, entryComment);
+
+      // v2.51: totales de la posición (incluye deals de cierre parcial)
+      double entryVol, totProfit, totCommSwap;
+      if(GetPositionTotals(positionId, entryVol, totProfit, totCommSwap))
+        {
+         lots       = entryVol;
+         profit     = totProfit;
+         commission = totCommSwap;
+        }
 
       // BUY position = exited by a SELL deal; SELL position = exited by a BUY deal
       bool   isBuy   = (exitType == DEAL_TYPE_SELL);

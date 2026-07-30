@@ -1,11 +1,11 @@
 //+------------------------------------------------------------------+
 //|                                                 GoldenTradeX.mq5 |
-//|                    Golden Trade X v2.50 — Expert Advisor          |
+//|                    Golden Trade X v2.51 — Expert Advisor          |
 //|                    CTG One Technology S.A.S.                      |
 //+------------------------------------------------------------------+
 #property copyright "CTG One Technology S.A.S."
 #property link      "https://github.com/VladPhil92/Golden-Trade-X"
-#property version   "2.50"
+#property version   "2.51"
 #property strict
 #property description "EA de precisión para Oro (XAUUSD): EMA+RSI+ADX+ATR+H4 + Market Regime + Smart Money Concepts + Fibonacci + Ensemble Confidence Score. Gestión de riesgo multicapa con circuit breaker mensual, kill switch persistente, Capital Preservation Mode, Partial TP, Equity Curve Filter y OrderManager production-grade con retry automático."
 
@@ -230,7 +230,7 @@ int OnInit()
 
    newsFilter.PrintStatus();
    riskManager.PrintStatus();
-   Print("GoldenTradeX v2.50 inicializado en ", _Symbol,
+   Print("GoldenTradeX v2.51 inicializado en ", _Symbol,
          " | MinConf=",    InpMinConfidence,
          " | Retries=",    InpOrderMaxRetries,
          " | PartialTP=",  InpUsePartialTP  ? "ON" : "OFF",
@@ -427,12 +427,31 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
       return;
      }
 
-   // v2.50: resultado NETO (profit + comisión + swap) — misma definición de
-   // "ganador" que usa el cálculo de Kelly en RiskManager.
-   double net = HistoryDealGetDouble(dealTicket, DEAL_PROFIT)
-              + HistoryDealGetDouble(dealTicket, DEAL_COMMISSION)
-              + HistoryDealGetDouble(dealTicket, DEAL_SWAP);
-   riskManager.RegisterTradeResult(net);
+   // v2.51: resultado NETO de la POSICIÓN completa (todos sus deals de
+   // salida — el parcial + el cierre final), no solo el último deal.
+   // Sin esto, un trade con parcial de +0.5R que cierra el resto en BE
+   // se registraría como pérdida. Misma definición que usa Kelly.
+   double posNet = 0.0;
+   if(HistorySelectByPosition(posTicket))
+     {
+      for(int i = 0; i < HistoryDealsTotal(); i++)
+        {
+         ulong d = HistoryDealGetTicket(i);
+         if(d == 0) continue;
+         long e = HistoryDealGetInteger(d, DEAL_ENTRY);
+         if(e != DEAL_ENTRY_OUT && e != DEAL_ENTRY_INOUT) continue;
+         posNet += HistoryDealGetDouble(d, DEAL_PROFIT)
+                 + HistoryDealGetDouble(d, DEAL_COMMISSION)
+                 + HistoryDealGetDouble(d, DEAL_SWAP);
+        }
+     }
+   else
+     {
+      posNet = HistoryDealGetDouble(dealTicket, DEAL_PROFIT)
+             + HistoryDealGetDouble(dealTicket, DEAL_COMMISSION)
+             + HistoryDealGetDouble(dealTicket, DEAL_SWAP);
+     }
+   riskManager.RegisterTradeResult(posNet);
    tradeLogger.LogTrade(dealTicket);
    partialTP.Cleanup(posTicket);
   }

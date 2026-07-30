@@ -5,6 +5,47 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [2.51] — 2026-07-30
+
+Autoauditoría post-v2.50 + evaluación continua de desempeño.
+
+### Fixed — Autoauditoría
+- **Neto de la posición completa en `OnTradeTransaction`**: al cerrar un
+  trade que tuvo cierre parcial, `RegisterTradeResult` ahora recibe la suma
+  de TODOS los deals de salida de la posición (parcial + final). Antes, un
+  trade con parcial de +0.5R que cerraba el resto en break-even se contaba
+  como pérdida para el contador de pérdidas consecutivas.
+- **`TradeLogger` registra totales de la POSICIÓN**: `Lots` = volumen de
+  entrada, `ProfitLoss`/`Commission` = suma de todos los deals de salida
+  (incluye swap). Antes el CSV solo veía el deal final — un trade con
+  parcial ocultaba la mitad de su P/L a toda la capa analítica.
+- **Chequeo de margen libre en `CalculateLotSize`** (`OrderCalcMargin`,
+  tope 80% del margen libre): reduce el lote u omite el trade con log.
+  Antes, una cuenta justa de margen recibía `10019 NO_MONEY` — clasificado
+  como error fatal — y el Kill Switch detenía el EA.
+- **`PartialTP` marca como resuelto los lotes no divisibles** (p.ej. 0.01
+  con minLot 0.01) con un aviso único en el Journal, en vez de re-evaluar
+  la misma posición imposible de partir en cada tick.
+
+### Added — Evaluación continua de desempeño
+- **`scripts/performance_report.py`** — monitor de desempeño recurrente
+  sobre los CSV del TradeLogger:
+  - Ventana reciente (últimos N trades) vs baseline histórico → alertas de
+    DEGRADACIÓN (caída de win rate, expectancy negativa, PF < 1).
+  - Drawdown ACTUAL desde el pico (no solo el máximo histórico).
+  - Racha de pérdidas abierta.
+  - Breakdown por régimen de mercado y banda de confianza (columna
+    `Comment` v2.50) — muestra qué filtros aportan y cuáles restan.
+  - Breakdown por hora y día de APERTURA.
+  - `--watch N`: re-evaluación automática cada N segundos (modo monitor).
+  - `--json`: export para el dashboard u otras herramientas.
+  - Exit code 1 con alertas → integrable en cron/Task Scheduler.
+- **`tests/test_performance_report.py`** — 13 tests (parsing de Comment,
+  métricas de bloque, detección de degradación, breakdowns). Total: 41.
+- CI `structure-check` incluye los scripts y tests nuevos.
+
+---
+
 ## [2.50] — 2026-07-30
 
 Revisión crítica integral: 20+ correcciones de correctitud, ejecución,
