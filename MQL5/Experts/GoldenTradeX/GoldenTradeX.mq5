@@ -1,13 +1,13 @@
 //+------------------------------------------------------------------+
 //|                                                 GoldenTradeX.mq5 |
-//|                    Golden Trade X v2.00 — Expert Advisor          |
+//|                    Golden Trade X v2.20 — Expert Advisor          |
 //|                    CTG One Technology S.A.S.                      |
 //+------------------------------------------------------------------+
 #property copyright "CTG One Technology S.A.S."
 #property link      "https://github.com/VladPhil92/Golden-Trade-X"
-#property version   "2.10"
+#property version   "2.20"
 #property strict
-#property description "EA de precisión para Oro (XAUUSD): EMA+RSI+ADX+ATR+H4 + Market Regime + Smart Money Concepts + Ensemble Confidence Score. Gestión de riesgo multicapa con circuit breaker mensual, kill switch y Capital Preservation Mode."
+#property description "EA de precisión para Oro (XAUUSD): EMA+RSI+ADX+ATR+H4 + Market Regime + Smart Money Concepts + Fibonacci + Ensemble Confidence Score. Gestión de riesgo multicapa con circuit breaker mensual, kill switch persistente, Capital Preservation Mode, Partial TP y Equity Curve Filter."
 
 #include <Trade/Trade.mqh>
 #include <GoldenTradeX/RiskManager.mqh>
@@ -19,6 +19,8 @@
 #include <GoldenTradeX/SmartMoneyEngine.mqh>
 #include <GoldenTradeX/ConfidenceEngine.mqh>
 #include <GoldenTradeX/FibonacciEngine.mqh>
+#include <GoldenTradeX/PartialTakeProfit.mqh>
+#include <GoldenTradeX/EquityCurveFilter.mqh>
 
 //--- Identidad
 input group "=== Identidad ==="
@@ -39,6 +41,7 @@ input int     InpAtrPeriod        = 14;
 input double  InpAtrMinRatio      = 0.8;
 input double  InpAtrMaxRatio      = 3.0;
 input double  InpAdxMinLevel      = 25.0;
+input int     InpMinTickVolume    = 10;      // v2.20: volumen mínimo de ticks (0=off)
 
 //--- Filtro HTF
 input group "=== Filtro de Tendencia HTF ==="
@@ -71,6 +74,17 @@ input double  InpTrailAtrMult     = 1.5;
 input bool    InpUseBreakEven     = true;
 input double  InpBreakEvenR       = 0.5;
 
+//--- Partial Take Profit (v2.20)
+input group "=== Partial Take Profit (v2.20) ==="
+input bool    InpUsePartialTP     = true;    // Activar cierre parcial al alcanzar R objetivo
+input double  InpPartialTPR       = 1.0;     // R mínimo para cierre parcial (ej. 1.0 = 1R)
+input double  InpPartialTPPct     = 50.0;    // % del lote a cerrar parcialmente
+
+//--- Equity Curve Filter (v2.20)
+input group "=== Equity Curve Filter (v2.20) ==="
+input bool    InpUseEqCurveFilter = true;    // Reducir tamaño al 50% si equity < EMA
+input int     InpEqCurvePeriod    = 20;      // Período EMA de equity (en actualizaciones)
+
 //--- Sesiones
 input group "=== Sesiones ==="
 input bool    InpUseSessionFilter = true;
@@ -101,6 +115,8 @@ CMarketRegimeEngine regimeEngine;
 CSmartMoneyEngine  smcEngine;
 CConfidenceEngine  confEngine;
 CFibonacciEngine   fibEngine;
+CPartialTP         partialTP;
+CEquityCurveFilter eqCurveFilter;
 
 datetime  g_lastBarTime  = 0;
 string    g_gvLastBarKey = "";
@@ -133,7 +149,8 @@ int OnInit()
                          InpRsiLongMin, InpRsiShortMax,
                          InpAtrPeriod, InpAtrMinRatio,
                          InpAdxMinLevel, InpAtrMaxRatio,
-                         InpUseHtfFilter, InpHtfEmaPeriod))
+                         InpUseHtfFilter, InpHtfEmaPeriod,
+                         (long)InpMinTickVolume))
      { Print("GoldenTradeX: error inicializando SignalEngine"); return INIT_FAILED; }
 
    riskManager.Init(InpRiskPercent, InpMaxDailyDD, InpMaxPositions,
@@ -160,15 +177,19 @@ int OnInit()
      { Print("GoldenTradeX: error inicializando ConfidenceEngine"); return INIT_FAILED; }
 
    fibEngine.Init(_Symbol, InpTimeframe);
+   partialTP.Init(InpUsePartialTP, InpMagicNumber);
+   eqCurveFilter.Init(InpUseEqCurveFilter, InpEqCurvePeriod, InpMagicNumber);
 
    g_gvLastBarKey = StringFormat("GTX_%d_LastBar", (int)InpMagicNumber);
    g_lastBarTime  = (datetime)GlobalVariableGet(g_gvLastBarKey);
 
    newsFilter.PrintStatus();
-   Print("GoldenTradeX v2.10 inicializado en ", _Symbol,
+   Print("GoldenTradeX v2.20 inicializado en ", _Symbol,
          " | MinConf=", InpMinConfidence,
          " | Regime=", InpUseRegimeFilter ? "ON" : "OFF",
-         " | SMC=",    InpUseSmcFilter    ? "ON" : "OFF");
+         " | SMC=",    InpUseSmcFilter    ? "ON" : "OFF",
+         " | PartialTP=", InpUsePartialTP ? "ON" : "OFF",
+         " | EqFilter=",  InpUseEqCurveFilter ? "ON" : "OFF");
    return INIT_SUCCEEDED;
   }
 
@@ -237,8 +258,8 @@ void OnTick()
       smcScore = smcEngine.SmcScore(smcCtx, isBuy);
      }
 
-   SFibContext fibCtx  = fibEngine.Analyze();
-   int fibScore        = fibEngine.FibScore(fibCtx, isBuy);
+   SFibContext fibCtx = fibEngine.Analyze();
+   int fibScore       = fibEngine.FibScore(fibCtx, isBuy);
 
    SConfidenceResult conf = confEngine.Compute(true, isBuy, regScore, smcScore, fibScore);
    g_lastConfidence = conf.total;
@@ -270,6 +291,13 @@ void OnTick()
       price = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
       sl    = price - atr * InpAtrSlMultiplier;
       tp    = price + atr * InpAtrTpMultiplier;
+
+      // v2.20: anclar SL al swing low estructural (Fibonacci) si da más margen
+      if(fibCtx.swingLow > 0 && fibCtx.swingLow < price)
+        {
+         double structSL = fibCtx.swingLow - atr * 0.1;
+         sl = MathMin(sl, structSL);  // tomar el que deja más margen
+        }
      }
    else
      {
@@ -277,10 +305,28 @@ void OnTick()
       price = SymbolInfoDouble(_Symbol, SYMBOL_BID);
       sl    = price + atr * InpAtrSlMultiplier;
       tp    = price - atr * InpAtrTpMultiplier;
+
+      // v2.20: anclar SL al swing high estructural (Fibonacci) si da más margen
+      if(fibCtx.swingHigh > 0 && fibCtx.swingHigh > price)
+        {
+         double structSL = fibCtx.swingHigh + atr * 0.1;
+         sl = MathMax(sl, structSL);  // tomar el que deja más margen
+        }
      }
 
    double lots = riskManager.CalculateLotSize(_Symbol, price, sl);
    if(lots <= 0) return;
+
+   // v2.20: Equity Curve Filter — reducir tamaño al 50% si equity < EMA
+   double eqMult = eqCurveFilter.Update();
+   if(eqMult < 1.0)
+     {
+      double lotStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+      double minLot  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+      lots = MathFloor(lots * eqMult / lotStep) * lotStep;
+      if(lots < minLot) return;
+      Print("GoldenTradeX: EqCurveFilter activo — lote reducido al 50% (eq<EMA).");
+     }
 
    string comment = StringFormat("%s|Conf=%d|Reg=%s",
                                   InpTradeComment, conf.total,
@@ -312,6 +358,11 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    double profit = HistoryDealGetDouble(dealTicket, DEAL_PROFIT);
    riskManager.RegisterTradeResult(profit);
    tradeLogger.LogTrade(dealTicket);
+
+   // v2.20: limpiar GV de partial TP al cerrar posición completamente
+   ulong posTicket = HistoryDealGetInteger(dealTicket, DEAL_POSITION_ID);
+   if(entry == DEAL_ENTRY_OUT)
+      partialTP.Cleanup(posTicket);
   }
 
 //+------------------------------------------------------------------+
@@ -334,7 +385,7 @@ void ManageTrailing()
    if(atr <= 0) return;
 
    double trail        = atr * InpTrailAtrMult;
-   double trailActivation = atr * InpAtrSlMultiplier;
+   double trailActivation = atr;  // v2.20: activar trailing a 1 ATR (antes era 2×ATR)
    double beActivation = atr * InpAtrSlMultiplier * InpBreakEvenR;
 
    for(int i = PositionsTotal() - 1; i >= 0; i--)
@@ -349,11 +400,18 @@ void ManageTrailing()
       double tp        = PositionGetDouble(POSITION_TP);
       long   type      = PositionGetInteger(POSITION_TYPE);
 
+      // v2.20: Partial Take Profit — cerrar 50% al alcanzar 1R
+      partialTP.Check(trade, ticket, InpPartialTPR, InpPartialTPPct);
+
       if(type == POSITION_TYPE_BUY)
         {
          double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+
+         // v2.20: break-even NO usa continue — permite que trailing actúe en el mismo tick
          if(InpUseBreakEven && bid - openPrice >= beActivation && sl < openPrice)
-           { trade.PositionModify(ticket, NormalizeDouble(openPrice, _Digits), tp); continue; }
+            trade.PositionModify(ticket, NormalizeDouble(openPrice, _Digits), tp);
+
+         if(!InpUseTrailing) continue;
          if(bid - openPrice < trailActivation) continue;
          double newSl = NormalizeDouble(bid - trail, _Digits);
          if(newSl > sl && newSl < bid)
@@ -362,8 +420,12 @@ void ManageTrailing()
       else
         {
          double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+
+         // v2.20: break-even NO usa continue — permite que trailing actúe en el mismo tick
          if(InpUseBreakEven && openPrice - ask >= beActivation && (sl > openPrice || sl == 0))
-           { trade.PositionModify(ticket, NormalizeDouble(openPrice, _Digits), tp); continue; }
+            trade.PositionModify(ticket, NormalizeDouble(openPrice, _Digits), tp);
+
+         if(!InpUseTrailing) continue;
          if(openPrice - ask < trailActivation) continue;
          double newSl = NormalizeDouble(ask + trail, _Digits);
          if((newSl < sl || sl == 0) && newSl > ask)

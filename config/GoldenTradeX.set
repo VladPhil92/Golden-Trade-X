@@ -59,5 +59,17 @@ InpNewsBufferBefore=30
 InpNewsBufferAfter=90
 InpPauseForNews=false
 
+; --- Partial Take Profit (v2.20) ---
+InpUsePartialTP=true
+InpPartialTPR=1.0
+InpPartialTPPct=50.0
+
+; --- Equity Curve Filter (v2.20) ---
+InpUseEqCurveFilter=true
+InpEqCurvePeriod=20
+
+; --- Filtro volumen de ticks (v2.20) ---
+InpMinTickVolume=10
+
 ; --- Registro ---
 InpEnableTradeLog=true

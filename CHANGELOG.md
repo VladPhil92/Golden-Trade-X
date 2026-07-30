@@ -5,6 +5,65 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [2.20] — 2026-07-30
+
+### Fixed (bugs críticos)
+- **`RiskManager.mqh`** — Kill Switch ahora persiste via `GlobalVariable` entre reinicios
+  del EA. Antes `m_killSwitch = false` en `Init()` reseteaba silenciosamente el kill switch
+  al recargar el EA. Ahora `SetKillSwitch(true)` escribe `GTX_{login}_{magic}_KillSwitch=1`
+  y `Init()` lo restaura automáticamente.
+- **`GoldenTradeX.mq5`** — Trailing stop ahora se activa a **1 ATR** de ganancia
+  (antes era `atr × InpAtrSlMultiplier` = 2 ATR), reduciendo significativamente el tiempo
+  muerto antes de que el trailing proteja la posición.
+- **`GoldenTradeX.mq5`** — Break-even y trailing stop son ahora **secuenciales** en el mismo
+  tick. El `continue` que impedía que el trailing se ejecutara en el tick donde se movía a
+  break-even fue eliminado. Break-even mueve el SL; luego trailing lo mueve si corresponde.
+
+### Added — MQL5
+- **`PartialTakeProfit.mqh`** — Módulo de cierre parcial de posiciones (`CPartialTP`):
+  cierra `InpPartialTPPct`% del lote cuando el flotante supera `InpPartialTPR × riesgo`.
+  Estado persistido via `GlobalVariable` (`GTX_PTP_{login}_{magic}_{ticket}`).
+- **`EquityCurveFilter.mqh`** — Filtro de curva de equity (`CEquityCurveFilter`):
+  calcula EMA exponencial del equity; reduce el tamaño de posición al 50% cuando
+  `equity < EMA`. EMA persiste via `GlobalVariable` entre reinicios.
+- **`GoldenTradeX.mq5`** — Anclaje estructural de SL (Fibonacci swing points):
+  el SL se ancla al swing low/high de `FibonacciEngine` cuando éste da más margen
+  que el SL basado en ATR (mayor protección estructural).
+
+### Added — SignalEngine
+- **`SignalEngine.mqh`** — Filtro de volumen mínimo de ticks (`InpMinTickVolume`):
+  bloquea señales en barras con volumen de ticks inferior al umbral configurado,
+  evitando falsas señales en barras de escasa liquidez (default=10).
+
+### Added — Python
+- **`scripts/session_analyzer.py`** — Análisis de rendimiento por sesión y hora:
+  desglosa trades por sesión (Asian/London/NY/Overlap) y por hora de cierre.
+  Genera heatmap horario de texto, tabla por sesión (PF, WR%, NetP/L, AvgR).
+  Flags `--utc-offset` (default +3, EET/XM), `--output`.
+- **`scripts/walk_forward_optimizer.py`** — Optimizador walk-forward por ventana deslizante:
+  ventana IS + ventana OOS, grid search de `InpMinConfidence`, calcula eficiencia OOS/IS.
+  Flags `--is-months`, `--oos-months`, `--step-months`, `--threshold-step`, `--metric`,
+  `--output`. Recomienda el umbral más estable y valida en OOS combinado.
+
+### Changed — Python
+- **`scripts/backtest_analysis.py`** — Sharpe ratio ahora usa **buckets diarios** de P&L
+  con factor de anualización `sqrt(252)`, en lugar de Sharpe per-trade que sobreestima.
+- **`scripts/backtest_analysis.py`** — Monte Carlo ahora usa **bootstrap con reposición**
+  (`random.choice`) en lugar de solo permutación (shuffle), modelando correctamente
+  secuencias de retornos con reemplazo.
+
+### Changed — Infrastructure
+- **`.github/workflows/ci.yml`** — Syntax check extendido a `session_analyzer.py` y
+  `walk_forward_optimizer.py`; structure-check extendido a `PartialTakeProfit.mqh`,
+  `EquityCurveFilter.mqh`, `session_analyzer.py`, `walk_forward_optimizer.py`.
+- **`scripts/validate_set.py`** — Añadidos 6 nuevos parámetros v2.20 a `REQUIRED` y
+  `RANGE_CHECKS`: `InpUsePartialTP`, `InpPartialTPR`, `InpPartialTPPct`,
+  `InpUseEqCurveFilter`, `InpEqCurvePeriod`, `InpMinTickVolume`.
+- **`config/GoldenTradeX.set`** / **`config/GoldenTradeX_XAGUSD.set`** — Añadidos
+  los 6 nuevos parámetros v2.20 con valores por defecto recomendados.
+
+---
+
 ## [2.10] — 2026-07-30
 
 ### Added — MQL5
