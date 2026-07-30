@@ -7,7 +7,7 @@ MetaTrader5~=5.0
 requests~=2.31
 
 # Machine learning (scripts/ml_pipeline.py)
-xgboost~=2.0
+xgboost~=3.3
 scikit-learn~=1.4
 
 # Market data (scripts/correlation_engine.py)
