@@ -81,6 +81,7 @@ jobs:
             "MQL5/Scripts/Tests/TestRiskManager.mq5" \
             "MQL5/Scripts/Tests/TestMarketRegime.mq5" \
             "MQL5/Scripts/Tests/TestSessionFilter.mq5" \
+            "MQL5/Scripts/Tests/TestFibonacci.mq5" \
             "scripts/monitor.py" \
             "scripts/backtest_analysis.py" \
             "scripts/regime_analysis.py" \

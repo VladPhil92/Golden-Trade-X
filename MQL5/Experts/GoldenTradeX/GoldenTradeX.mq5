@@ -18,6 +18,7 @@
 #include <GoldenTradeX/MarketRegimeEngine.mqh>
 #include <GoldenTradeX/SmartMoneyEngine.mqh>
 #include <GoldenTradeX/ConfidenceEngine.mqh>
+#include <GoldenTradeX/FibonacciEngine.mqh>
 
 //--- Identidad
 input group "=== Identidad ==="
@@ -99,6 +100,7 @@ CTradeLogger       tradeLogger;
 CMarketRegimeEngine regimeEngine;
 CSmartMoneyEngine  smcEngine;
 CConfidenceEngine  confEngine;
+CFibonacciEngine   fibEngine;
 
 datetime  g_lastBarTime  = 0;
 string    g_gvLastBarKey = "";
@@ -154,14 +156,16 @@ int OnInit()
    if(InpUseSmcFilter)
      { smcEngine.Init(_Symbol, InpTimeframe); }
 
-   if(!confEngine.Init(_Symbol, InpTimeframe, InpUseHtfFilter, InpHtfEmaPeriod, InpAtrPeriod))
+   if(!confEngine.Init(_Symbol, InpTimeframe, InpUseHtfFilter, InpHtfEmaPeriod))
      { Print("GoldenTradeX: error inicializando ConfidenceEngine"); return INIT_FAILED; }
+
+   fibEngine.Init(_Symbol, InpTimeframe);
 
    g_gvLastBarKey = StringFormat("GTX_%d_LastBar", (int)InpMagicNumber);
    g_lastBarTime  = (datetime)GlobalVariableGet(g_gvLastBarKey);
 
    newsFilter.PrintStatus();
-   Print("GoldenTradeX v2.00 inicializado en ", _Symbol,
+   Print("GoldenTradeX v2.10 inicializado en ", _Symbol,
          " | MinConf=", InpMinConfidence,
          " | Regime=", InpUseRegimeFilter ? "ON" : "OFF",
          " | SMC=",    InpUseSmcFilter    ? "ON" : "OFF");
@@ -229,11 +233,14 @@ void OnTick()
    int smcScore = 0;
    if(InpUseSmcFilter)
      {
-      SSmcContext ctx = smcEngine.Analyze();
-      smcScore = smcEngine.SmcScore(ctx, isBuy);
+      SSmcContext smcCtx = smcEngine.Analyze();
+      smcScore = smcEngine.SmcScore(smcCtx, isBuy);
      }
 
-   SConfidenceResult conf = confEngine.Compute(true, isBuy, regScore, smcScore);
+   SFibContext fibCtx  = fibEngine.Analyze();
+   int fibScore        = fibEngine.FibScore(fibCtx, isBuy);
+
+   SConfidenceResult conf = confEngine.Compute(true, isBuy, regScore, smcScore, fibScore);
    g_lastConfidence = conf.total;
 
    if(conf.total < InpMinConfidence)
@@ -243,7 +250,7 @@ void OnTick()
               " Reg=", conf.regimeBonus,
               " SMC=", conf.smcBonus,
               " HTF=", conf.htfBonus,
-              " ATR=", conf.atrBonus);
+              " Fib=", conf.fibBonus);
       return;
      }
 

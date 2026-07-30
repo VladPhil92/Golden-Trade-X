@@ -42,7 +42,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **`.github/workflows/ci.yml`** — Python syntax check extended to cover
   `correlation_engine.py`, `optimize_confidence.py`, `fomc_calendar.py`;
   structure-check extended to cover `FibonacciEngine.mqh`,
-  `TestSessionFilter.mq5`, and all 3 new Python scripts.
+  `TestSessionFilter.mq5`, `TestFibonacci.mq5`, and all 3 new Python scripts.
+
+### Changed — ConfidenceEngine (arquitectura)
+- **`ConfidenceEngine.mqh`** — `atrBonus` (calidad ATR, 0-5) reemplazado por
+  `fibBonus` (confluencia Fibonacci, 0-5). Score total sigue siendo 0-100.
+  Mapeo: FibScore 0-20 → fibBonus 0-5 (÷4). `atrPeriod` eliminado de `Init()`.
+- **`GoldenTradeX.mq5`** — incluye `FibonacciEngine.mqh`, instancia
+  `CFibonacciEngine fibEngine`, llama `Analyze()` + `FibScore()` en cada señal
+  y pasa el resultado a `confEngine.Compute()` como 5to parámetro.
+- **`TestFibonacci.mq5`** — 21 unit tests: Init, contexto inválido, scores
+  por nivel, penalización Premium/Discount, cap en 20, simetría 38.2%↔61.8%.
 
 ---
 
