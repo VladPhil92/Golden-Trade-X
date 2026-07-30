@@ -5,6 +5,20 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Golden Trade X — Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+// v2.50: aviso visible si el CDN de Chart.js no cargó (uso sin conexión).
+// Sin esto el dashboard fallaba en silencio con la consola llena de errores.
+window.addEventListener('DOMContentLoaded', function () {
+  if (typeof Chart === 'undefined') {
+    var warn = document.createElement('div');
+    warn.style.cssText = 'background:#7f1d1d;color:#fecaca;padding:12px 24px;' +
+                         'font-size:.9rem;text-align:center;';
+    warn.textContent = 'No se pudo cargar Chart.js desde el CDN — los gráficos no ' +
+                       'estarán disponibles sin conexión a internet. Las tablas y KPIs sí funcionan.';
+    document.body.prepend(warn);
+  }
+});
+</script>
 <style>
   :root {
     --bg: #0f1117; --surface: #1a1d27; --surface2: #222535;

@@ -96,18 +96,33 @@ public:
       // Componente 3: SMC (0-30, ya calculado externamente)
       r.smcBonus = MathMin(smcScore, 30);
 
-      // Componente 4: alineación HTF H4 (0-15)
+      // Componente 4: alineación HTF H4 (0-15).
+      // v2.50: bonus GRADUADO. Con el filtro HTF duro activo en SignalEngine,
+      // toda señal que llega aquí ya está alineada con H4 — un bonus fijo de
+      // 15 era una constante sin poder discriminante. Ahora:
+      //   15 = alineado Y la EMA H4 tiene pendiente en la dirección del trade
+      //    8 = alineado pero la EMA H4 está plana o en contra (tendencia débil)
+      //    0 = contra-tendencia H4
       r.htfBonus = 0;
       if(m_useHtf && m_hHtfEma != INVALID_HANDLE)
         {
-         double htfEma;
+         double htfEma1;
          double htfClose = iClose(m_symbol, PERIOD_H4, 1);
-         if(CopyOne(m_hHtfEma, 0, 1, htfEma) && htfClose > 0)
+         if(CopyOne(m_hHtfEma, 0, 1, htfEma1) && htfClose > 0)
            {
-            bool htfBull = (htfClose > htfEma);
-            if((isBuySignal && htfBull) || (!isBuySignal && !htfBull))
-               r.htfBonus = 15;
-            // Contra-tendencia HTF: penalización total (bonus = 0)
+            bool htfBull  = (htfClose > htfEma1);
+            bool aligned  = (isBuySignal && htfBull) || (!isBuySignal && !htfBull);
+            if(aligned)
+              {
+               r.htfBonus = 8;
+               double htfEma5;
+               if(CopyOne(m_hHtfEma, 0, 5, htfEma5))
+                 {
+                  bool slopeAligned = isBuySignal ? (htfEma1 > htfEma5)
+                                                  : (htfEma1 < htfEma5);
+                  if(slopeAligned) r.htfBonus = 15;
+                 }
+              }
            }
         }
       else

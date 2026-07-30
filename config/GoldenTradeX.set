@@ -1,4 +1,4 @@
-; Golden Trade X v2.40 — preset por defecto (XAUUSD M15)
+; Golden Trade X v2.50 — preset por defecto (XAUUSD M15)
 ; Nota DST: StartHour/EndHour estan en hora del servidor del broker.
 ; La mayoria de brokers usa EET (GMT+2 verano / GMT+3 invierno).
 
@@ -64,6 +64,11 @@ InpPauseForNews=false
 InpUseKelly=false
 InpKellyFraction=0.25
 InpKellyMinTrades=30
+
+; --- Order Manager (v2.30) ---
+InpOrderMaxRetries=3
+InpOrderRetryDelay=500
+InpMinMarginLevel=200.0
 
 ; --- Partial Take Profit (v2.20) ---
 InpUsePartialTP=true

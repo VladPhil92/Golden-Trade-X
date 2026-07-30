@@ -60,7 +60,7 @@ void OnStart()
 
    //--- ConfidenceEngine: sin señal base → total = 0
    CConfidenceEngine conf;
-   AssertTrue(conf.Init(_Symbol, PERIOD_M15, false, 50, 14), "ConfidenceEngine.Init() exitoso");
+   AssertTrue(conf.Init(_Symbol, PERIOD_M15, false, 50), "ConfidenceEngine.Init() exitoso");
 
    SConfidenceResult r0 = conf.Compute(false, true, 20, 15);
    AssertEq(r0.total, 0, "Conf sin señal base → total=0");

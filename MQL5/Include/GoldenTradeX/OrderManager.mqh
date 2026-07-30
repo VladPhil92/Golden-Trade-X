@@ -62,6 +62,46 @@ private:
       return code == OM_RETCODE_DONE || code == OM_RETCODE_DONE_PARTIAL;
      }
 
+   // v2.50: distancia mínima broker para SL/TP (SYMBOL_TRADE_STOPS_LEVEL).
+   // Sin esto, órdenes con stops demasiado cerca devuelven 10016
+   // INVALID_STOPS (no-reintentable) y se descartan en silencio.
+   double StopsDistance(string symbol)
+     {
+      long lvl = SymbolInfoInteger(symbol, SYMBOL_TRADE_STOPS_LEVEL);
+      return lvl * SymbolInfoDouble(symbol, SYMBOL_POINT);
+     }
+
+   // Ajusta SL/TP a la distancia mínima del broker. BUY se valida contra Bid,
+   // SELL contra Ask (así lo evalúa el servidor). Loguea si tuvo que ajustar.
+   void EnforceStopsLevel(string symbol, ENUM_ORDER_TYPE type,
+                          double &sl, double &tp)
+     {
+      double d = StopsDistance(symbol);
+      if(d <= 0) return;
+
+      double bid = SymbolInfoDouble(symbol, SYMBOL_BID);
+      double ask = SymbolInfoDouble(symbol, SYMBOL_ASK);
+      double slAdj = sl, tpAdj = tp;
+
+      if(type == ORDER_TYPE_BUY)
+        {
+         if(sl > 0 && bid - sl < d) slAdj = bid - d;
+         if(tp > 0 && tp - bid < d) tpAdj = bid + d;
+        }
+      else
+        {
+         if(sl > 0 && sl - ask < d) slAdj = ask + d;
+         if(tp > 0 && ask - tp < d) tpAdj = ask - d;
+        }
+
+      if(slAdj != sl || tpAdj != tp)
+         Print("OrderManager: stops ajustados a stops_level del broker (",
+               d / SymbolInfoDouble(symbol, SYMBOL_POINT), " pts): SL ",
+               sl, "→", slAdj, " TP ", tp, "→", tpAdj);
+      sl = slAdj;
+      tp = tpAdj;
+     }
+
    void LogAttempt(const string &op, int attempt, uint code)
      {
       Print("OrderManager [", TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS), "] ",
@@ -99,6 +139,9 @@ public:
         { Print("OrderManager: REJECTED BUY — SL debe ser < price y TP > price."); return false; }
       if(type == ORDER_TYPE_SELL && (sl <= price || tp >= price))
         { Print("OrderManager: REJECTED SELL — SL debe ser > price y TP < price."); return false; }
+
+      // v2.50: respetar la distancia mínima de stops del broker
+      EnforceStopsLevel(symbol, type, sl, tp);
 
       int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
 
@@ -154,6 +197,12 @@ public:
       if(!PositionSelectByTicket(ticket)) return false;
       string symbol  = PositionGetString(POSITION_SYMBOL);
       int    digits  = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
+
+      // v2.50: respetar la distancia mínima de stops del broker en trailing/BE
+      long posType = PositionGetInteger(POSITION_TYPE);
+      EnforceStopsLevel(symbol,
+                        (posType == POSITION_TYPE_BUY) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL,
+                        newSL, newTP);
 
       for(int attempt = 1; attempt <= m_maxRetries + 1; attempt++)
         {

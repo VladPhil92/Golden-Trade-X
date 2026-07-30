@@ -1,4 +1,4 @@
-; Golden Trade X v1.42 — preset XAGUSD (Plata) M15
+; Golden Trade X v2.50 — preset XAGUSD (Plata) M15
 ; Arrastrar el EA al gráfico XAGUSD M15 con este preset.
 ; Magic number diferente (920261) para operar en paralelo con la instancia XAUUSD.
 ;
@@ -65,6 +65,17 @@ InpUseNewsFilter=true
 InpNewsBufferBefore=30
 InpNewsBufferAfter=90
 InpPauseForNews=false
+
+; --- Kelly Criterion Fraccional (v2.40) ---
+; InpUseKelly=false por defecto. Activar solo tras >= InpKellyMinTrades en historial.
+InpUseKelly=false
+InpKellyFraction=0.25
+InpKellyMinTrades=30
+
+; --- Order Manager (v2.30) ---
+InpOrderMaxRetries=3
+InpOrderRetryDelay=500
+InpMinMarginLevel=200.0
 
 ; --- Partial Take Profit (v2.20) ---
 InpUsePartialTP=true

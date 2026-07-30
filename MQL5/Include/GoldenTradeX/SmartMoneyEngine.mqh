@@ -66,15 +66,18 @@ private:
    int             m_fvgLookback;    // barras hacia atrás para FVGs (default 20)
    int             m_obLookback;     // barras hacia atrás para OBs (default 40)
    double          m_proxPct;        // % del ATR para considerar "precio cerca" de FVG/OB
+   int             m_hAtr;           // v2.50: handle ATR cacheado (creado en Init)
 
-   // Swing de N barras: high[i] es máximo si supera a las N barras de cada lado
+   // Swing de N barras: high[i] es máximo si supera a las N barras de cada lado.
+   // v2.50: la barra 0 (en formación) se excluye — incluirla hacía que el
+   // contexto SMC cambiara intra-barra según los ticks de la vela viva.
    bool IsSwingHigh(int bar, int n = 3)
      {
       double h = iHigh(m_symbol, m_tf, bar);
       for(int k = 1; k <= n; k++)
         {
          if(iHigh(m_symbol, m_tf, bar + k) >= h) return false;
-         if(bar - k >= 0 && iHigh(m_symbol, m_tf, bar - k) >= h) return false;
+         if(bar - k >= 1 && iHigh(m_symbol, m_tf, bar - k) >= h) return false;
         }
       return true;
      }
@@ -85,7 +88,7 @@ private:
       for(int k = 1; k <= n; k++)
         {
          if(iLow(m_symbol, m_tf, bar + k) <= l) return false;
-         if(bar - k >= 0 && iLow(m_symbol, m_tf, bar - k) <= l) return false;
+         if(bar - k >= 1 && iLow(m_symbol, m_tf, bar - k) <= l) return false;
         }
       return true;
      }
@@ -230,6 +233,8 @@ private:
      }
 
 public:
+                     CSmartMoneyEngine() { m_hAtr = INVALID_HANDLE; }
+
    bool Init(string symbol, ENUM_TIMEFRAMES tf,
              int swingLookback = 50,
              int fvgLookback   = 20,
@@ -242,7 +247,13 @@ public:
       m_fvgLookback  = fvgLookback;
       m_obLookback   = obLookback;
       m_proxPct      = proxPct;
-      return true;
+      m_hAtr         = iATR(symbol, tf, 14);
+      return (m_hAtr != INVALID_HANDLE);
+     }
+
+   void Release()
+     {
+      if(m_hAtr != INVALID_HANDLE) { IndicatorRelease(m_hAtr); m_hAtr = INVALID_HANDLE; }
      }
 
    SSmcContext Analyze()
@@ -252,12 +263,9 @@ public:
 
       double curPrice = iClose(m_symbol, m_tf, 1);
       double atr = 0.0;
-        {
-         int    _h = iATR(m_symbol, m_tf, 14);
-         double _b[];
-         if(_h != INVALID_HANDLE && CopyBuffer(_h, 0, 1, 1, _b) > 0) atr = _b[0];
-         if(_h != INVALID_HANDLE) IndicatorRelease(_h);
-        }
+      double atrBuf[1];
+      if(m_hAtr != INVALID_HANDLE && CopyBuffer(m_hAtr, 0, 1, 1, atrBuf) == 1)
+         atr = atrBuf[0];
       if(atr <= 0) atr = curPrice * 0.001;
 
       // BOS

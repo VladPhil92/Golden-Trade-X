@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
 //|                                                  RiskManager.mqh |
-//|   Golden Trade X v2.40 — Gestión de riesgo y capital             |
+//|   Golden Trade X v2.50 — Gestión de riesgo y capital             |
 //+------------------------------------------------------------------+
 #property strict
 
@@ -42,14 +42,19 @@ private:
    double  m_kellyFraction;         // 0.25 = Quarter-Kelly (recomendado)
    int     m_kellyMinTrades;        // trades mínimos antes de activar Kelly
 
-   // Calcula W (win rate) y R (win/loss ratio) desde historial real del EA
+   // Calcula W (win rate) y R (win/loss ratio) desde historial real del EA.
+   // v2.50: agrega los deals por POSITION_ID — un trade con cierre parcial
+   // genera varios deals DEAL_ENTRY_OUT pero cuenta como UN solo trade
+   // (sumando el neto de todos sus cierres). Sin esto, los parciales
+   // (ganadores por construcción) inflaban W sistemáticamente.
    bool CalcWinRateAndR(double &winRate, double &avgR)
      {
       datetime from = TimeCurrent() - 90 * 24 * 3600;   // ventana 90 días
       if(!HistorySelect(from, TimeCurrent())) return false;
 
-      double sumWins = 0, sumLosses = 0;
-      int    wins = 0, losses = 0;
+      ulong  posIds[];
+      double posNet[];
+      int    nPos = 0;
 
       int total = HistoryDealsTotal();
       for(int i = 0; i < total; i++)
@@ -63,15 +68,39 @@ private:
                     + HistoryDealGetDouble(ticket, DEAL_COMMISSION)
                     + HistoryDealGetDouble(ticket, DEAL_SWAP);
 
-         if(net > 0) { sumWins   += net;         wins++;   }
-         else        { sumLosses += MathAbs(net); losses++; }
+         ulong pid = (ulong)HistoryDealGetInteger(ticket, DEAL_POSITION_ID);
+         int   idx = -1;
+         for(int j = 0; j < nPos; j++)
+            if(posIds[j] == pid) { idx = j; break; }
+         if(idx < 0)
+           {
+            ArrayResize(posIds, nPos + 1);
+            ArrayResize(posNet, nPos + 1);
+            posIds[nPos] = pid;
+            posNet[nPos] = 0.0;
+            idx = nPos;
+            nPos++;
+           }
+         posNet[idx] += net;
+        }
+
+      double sumWins = 0, sumLosses = 0;
+      int    wins = 0, losses = 0;
+      for(int j = 0; j < nPos; j++)
+        {
+         if(posNet[j] > 0) { sumWins   += posNet[j];          wins++;   }
+         else              { sumLosses += MathAbs(posNet[j]); losses++; }
         }
 
       if(wins + losses < m_kellyMinTrades) return false;
+      // Sin pérdidas (o sin ganancias) no hay estimación válida de R:
+      // caer al riesgo fijo en lugar de inventar un ratio.
+      if(wins == 0 || losses == 0) return false;
 
       winRate     = (double)wins / (wins + losses);
-      double avgW = wins    > 0 ? sumWins   / wins    : 0;
-      double avgL = losses  > 0 ? sumLosses / losses  : 1;
+      double avgW = sumWins   / wins;
+      double avgL = sumLosses / losses;
+      if(avgL <= 0) return false;
       avgR        = avgW / avgL;
 
       return (avgR > 0 && winRate > 0 && winRate < 1.0);
@@ -127,9 +156,11 @@ private:
 
    void UpdateWeek()
      {
-      MqlDateTime dt;
-      TimeToStruct(TimeCurrent(), dt);
-      int weekIndex = dt.year * 100 + (dt.day_of_year + 1) / 7;
+      // v2.50: semana absoluta desde epoch (época Unix), alineada a lunes.
+      // La fórmula anterior (year*100 + day_of_year/7) partía la misma semana
+      // operativa en dos al cruzar el año → reset espurio del DD semanal.
+      // Epoch (1-ene-1970) fue jueves: +4 días alinea el corte al lunes 00:00.
+      int weekIndex = (int)((TimeCurrent() / 86400 + 4) / 7);
       if(weekIndex == m_currentWeek) return;
       if(GlobalVariableCheck(m_gvWeekKey))
         {

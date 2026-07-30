@@ -1,11 +1,11 @@
 //+------------------------------------------------------------------+
 //|                                                 GoldenTradeX.mq5 |
-//|                    Golden Trade X v2.30 — Expert Advisor          |
+//|                    Golden Trade X v2.50 — Expert Advisor          |
 //|                    CTG One Technology S.A.S.                      |
 //+------------------------------------------------------------------+
 #property copyright "CTG One Technology S.A.S."
 #property link      "https://github.com/VladPhil92/Golden-Trade-X"
-#property version   "2.40"
+#property version   "2.50"
 #property strict
 #property description "EA de precisión para Oro (XAUUSD): EMA+RSI+ADX+ATR+H4 + Market Regime + Smart Money Concepts + Fibonacci + Ensemble Confidence Score. Gestión de riesgo multicapa con circuit breaker mensual, kill switch persistente, Capital Preservation Mode, Partial TP, Equity Curve Filter y OrderManager production-grade con retry automático."
 
@@ -204,16 +204,21 @@ int OnInit()
      }
 
    if(InpUseSmcFilter)
-     { smcEngine.Init(_Symbol, InpTimeframe); }
+     {
+      if(!smcEngine.Init(_Symbol, InpTimeframe))
+        { Print("GoldenTradeX: error inicializando SmartMoneyEngine"); return INIT_FAILED; }
+     }
 
    if(!confEngine.Init(_Symbol, InpTimeframe, InpUseHtfFilter, InpHtfEmaPeriod))
      { Print("GoldenTradeX: error inicializando ConfidenceEngine"); return INIT_FAILED; }
 
-   fibEngine.Init(_Symbol, InpTimeframe);
+   if(!fibEngine.Init(_Symbol, InpTimeframe))
+     { Print("GoldenTradeX: error inicializando FibonacciEngine"); return INIT_FAILED; }
    partialTP.Init(InpUsePartialTP, InpMagicNumber);
    eqCurveFilter.Init(InpUseEqCurveFilter, InpEqCurvePeriod, InpMagicNumber);
    orderMgr.Init(&trade, InpOrderMaxRetries, InpOrderRetryDelay);
-   healthMonitor.Init(_Symbol, InpMagicNumber, InpMinMarginLevel);
+   if(!healthMonitor.Init(_Symbol, InpTimeframe, InpMagicNumber, InpMinMarginLevel))
+     { Print("GoldenTradeX: error inicializando HealthMonitor"); return INIT_FAILED; }
    riskManager.InitKelly(InpUseKelly, InpKellyFraction, InpKellyMinTrades);
 
    // ── Persistencia de barra ──────────────────────────────────────────
@@ -225,7 +230,7 @@ int OnInit()
 
    newsFilter.PrintStatus();
    riskManager.PrintStatus();
-   Print("GoldenTradeX v2.40 inicializado en ", _Symbol,
+   Print("GoldenTradeX v2.50 inicializado en ", _Symbol,
          " | MinConf=",    InpMinConfidence,
          " | Retries=",    InpOrderMaxRetries,
          " | PartialTP=",  InpUsePartialTP  ? "ON" : "OFF",
@@ -241,6 +246,9 @@ void OnDeinit(const int reason)
    signalEngine.Release();
    regimeEngine.Release();
    confEngine.Release();
+   smcEngine.Release();
+   fibEngine.Release();
+   healthMonitor.Release();
    orderMgr.PrintStats();
    Print("GoldenTradeX: deinit razón=", reason);
   }
@@ -262,6 +270,10 @@ void OnTick()
       ManageTrailing();
 
    if(!IsNewBar()) return;
+
+   // v2.50: muestrear la EMA de equity UNA vez por barra (no solo antes de
+   // abrir) — así la EMA(20) mide de verdad las últimas 20 barras de equity.
+   eqCurveFilter.Sample();
 
    // ── Guardianes de riesgo ──────────────────────────────────────────
    if(riskManager.IsKillSwitchActive())
@@ -360,8 +372,8 @@ void OnTick()
    double lots = riskManager.CalculateLotSize(_Symbol, price, sl);
    if(lots <= 0) return;
 
-   // v2.20: Equity Curve Filter
-   double eqMult = eqCurveFilter.Update();
+   // v2.20: Equity Curve Filter (v2.50: lee la EMA muestreada por barra)
+   double eqMult = eqCurveFilter.GetMultiplier();
    if(eqMult < 1.0)
      {
       double lotStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
@@ -402,13 +414,27 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    long entry = HistoryDealGetInteger(dealTicket, DEAL_ENTRY);
    if(entry != DEAL_ENTRY_OUT && entry != DEAL_ENTRY_INOUT) return;
 
-   double profit = HistoryDealGetDouble(dealTicket, DEAL_PROFIT);
-   riskManager.RegisterTradeResult(profit);
-   tradeLogger.LogTrade(dealTicket);
-
    ulong posTicket = HistoryDealGetInteger(dealTicket, DEAL_POSITION_ID);
-   if(entry == DEAL_ENTRY_OUT)
-      partialTP.Cleanup(posTicket);
+
+   // v2.50: un cierre parcial también genera DEAL_ENTRY_OUT. Si la posición
+   // sigue viva, NO es un trade cerrado: no cuenta para pérdidas consecutivas,
+   // no se registra en el CSV y no se borra el estado del Partial TP
+   // (borrar el flag reactivaría el parcial en cascada hasta agotar el lote).
+   if(PositionSelectByTicket(posTicket))
+     {
+      Print("GoldenTradeX: cierre parcial pos=", posTicket,
+            " — la posición sigue abierta, no cuenta como trade cerrado.");
+      return;
+     }
+
+   // v2.50: resultado NETO (profit + comisión + swap) — misma definición de
+   // "ganador" que usa el cálculo de Kelly en RiskManager.
+   double net = HistoryDealGetDouble(dealTicket, DEAL_PROFIT)
+              + HistoryDealGetDouble(dealTicket, DEAL_COMMISSION)
+              + HistoryDealGetDouble(dealTicket, DEAL_SWAP);
+   riskManager.RegisterTradeResult(net);
+   tradeLogger.LogTrade(dealTicket);
+   partialTP.Cleanup(posTicket);
   }
 
 //+------------------------------------------------------------------+
@@ -433,6 +459,9 @@ void ManageTrailing()
    double trail           = atr * InpTrailAtrMult;
    double trailActivation = atr;   // v2.20: 1 ATR
    double beActivation    = atr * InpAtrSlMultiplier * InpBreakEvenR;
+   // v2.50: buffer sobre el precio de apertura para que el break-even cubra
+   // spread + comisión (BE exacto en openPrice deja pérdida neta al saltar)
+   double beBuffer        = atr * 0.1;
 
    for(int i = PositionsTotal() - 1; i >= 0; i--)
      {
@@ -453,8 +482,9 @@ void ManageTrailing()
         {
          double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
          // v2.20: break-even sin continue → trailing actúa el mismo tick
-         if(InpUseBreakEven && bid - openPrice >= beActivation && sl < openPrice)
-            orderMgr.ModifyPosition(ticket, NormalizeDouble(openPrice, _Digits), tp);
+         double bePrice = NormalizeDouble(openPrice + beBuffer, _Digits);
+         if(InpUseBreakEven && bid - openPrice >= beActivation && sl < bePrice && bePrice < bid)
+            orderMgr.ModifyPosition(ticket, bePrice, tp);
 
          if(!InpUseTrailing) continue;
          if(bid - openPrice < trailActivation) continue;
@@ -466,8 +496,9 @@ void ManageTrailing()
         {
          double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
          // v2.20: break-even sin continue → trailing actúa el mismo tick
-         if(InpUseBreakEven && openPrice - ask >= beActivation && (sl > openPrice || sl == 0))
-            orderMgr.ModifyPosition(ticket, NormalizeDouble(openPrice, _Digits), tp);
+         double bePrice = NormalizeDouble(openPrice - beBuffer, _Digits);
+         if(InpUseBreakEven && openPrice - ask >= beActivation && (sl > bePrice || sl == 0) && bePrice > ask)
+            orderMgr.ModifyPosition(ticket, bePrice, tp);
 
          if(!InpUseTrailing) continue;
          if(openPrice - ask < trailActivation) continue;

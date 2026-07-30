@@ -1,4 +1,8 @@
-# Golden Trade X v2.00 — Arquitectura
+# Golden Trade X — Arquitectura
+
+> La versión vigente del EA es la del `#property version` de `GoldenTradeX.mq5`
+> y la primera entrada de `CHANGELOG.md` — este documento no fija versión
+> para evitar quedar desactualizado.
 
 ## Visión general
 

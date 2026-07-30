@@ -8,7 +8,9 @@
 //    3. Verificación de nivel de margen: alerta si margin_level < umbral.
 //    4. Escritura de archivo de estado CSV para el monitor Python.
 //
-//  El archivo de estado se escribe en la carpeta Files del terminal:
+//  El archivo de estado se escribe en Common\Files (FILE_COMMON), la misma
+//  carpeta que usa TradeLogger — así scripts/live_monitor.py encuentra
+//  ambos archivos en un único directorio:
 //    GTX_{magic}_status.csv — leído por scripts/live_monitor.py.
 //+------------------------------------------------------------------+
 #property strict
@@ -17,18 +19,20 @@
 class CHealthMonitor
   {
 private:
-   string   m_symbol;
-   ulong    m_magic;
-   string   m_statusFile;
-   double   m_minMarginLevel;    // % mínimo de nivel de margen (default 200%)
-   double   m_emergencyAtrMult;  // multiplicador ATR para SL de emergencia
-   datetime m_lastCheck;
-   int      m_checkIntervalSec;
-   int      m_orphanFixCount;
+   string          m_symbol;
+   ENUM_TIMEFRAMES m_tf;               // v2.50: timeframe del EA (antes: M15 fijo)
+   ulong           m_magic;
+   string          m_statusFile;
+   double          m_minMarginLevel;   // % mínimo de nivel de margen (default 200%)
+   double          m_emergencyAtrMult; // multiplicador ATR para SL de emergencia
+   datetime        m_lastCheck;
+   int             m_checkIntervalSec;
+   int             m_orphanFixCount;
+   int             m_hAtr;             // v2.50: handle ATR cacheado (creado en Init)
 
    void WriteStatusFile(bool connected, double equityPct, int openPos, string alert)
      {
-      int fh = FileOpen(m_statusFile, FILE_WRITE | FILE_CSV | FILE_ANSI, ',');
+      int fh = FileOpen(m_statusFile, FILE_WRITE | FILE_CSV | FILE_ANSI | FILE_COMMON, ',');
       if(fh == INVALID_HANDLE) return;
 
       FileWrite(fh, "timestamp",    "connected", "equity_pct_today",
@@ -43,20 +47,20 @@ private:
       FileClose(fh);
      }
 
-   // Obtiene el ATR actual usando el enfoque handle+CopyBuffer de MQL5
+   // ATR desde el handle cacheado en Init(). Crear y destruir el handle en
+   // cada llamada (patrón anterior) puede devolver 0 si el indicador aún no
+   // calculó, cayendo al fallback sin avisar.
    double GetCurrentATR()
      {
       double atr = 0.0;
-      int    h   = iATR(m_symbol, PERIOD_M15, 14);
-      if(h != INVALID_HANDLE)
-        {
-         double buf[];
-         if(CopyBuffer(h, 0, 1, 1, buf) > 0)
-            atr = buf[0];
-         IndicatorRelease(h);
-        }
+      double buf[1];
+      if(m_hAtr != INVALID_HANDLE && CopyBuffer(m_hAtr, 0, 1, 1, buf) == 1)
+         atr = buf[0];
       if(atr <= 0)
+        {
          atr = SymbolInfoDouble(m_symbol, SYMBOL_POINT) * 200;
+         Print("HealthMonitor: ATR no disponible — usando fallback ", atr);
+        }
       return atr;
      }
 
@@ -93,12 +97,15 @@ private:
      }
 
 public:
-   void Init(string symbol, ulong magic,
+                     CHealthMonitor() { m_hAtr = INVALID_HANDLE; }
+
+   bool Init(string symbol, ENUM_TIMEFRAMES tf, ulong magic,
              double minMarginLevel = 200.0,
              double emergencyAtrMult = 3.0,
              int checkIntervalSec = 60)
      {
       m_symbol           = symbol;
+      m_tf               = tf;
       m_magic            = magic;
       m_minMarginLevel   = minMarginLevel;
       m_emergencyAtrMult = emergencyAtrMult;
@@ -106,6 +113,13 @@ public:
       m_lastCheck        = 0;
       m_orphanFixCount   = 0;
       m_statusFile       = StringFormat("GTX_%d_status.csv", (int)magic);
+      m_hAtr             = iATR(symbol, tf, 14);
+      return (m_hAtr != INVALID_HANDLE);
+     }
+
+   void Release()
+     {
+      if(m_hAtr != INVALID_HANDLE) { IndicatorRelease(m_hAtr); m_hAtr = INVALID_HANDLE; }
      }
 
    // Llamar desde OnTimer(). Retorna true si se ejecutó el check.

@@ -1,4 +1,4 @@
-# Estrategia Golden Trade X v1.10
+# Estrategia Golden Trade X
 
 ## Tesis
 El oro en M15 presenta tendencias intradía aprovechables durante el solape

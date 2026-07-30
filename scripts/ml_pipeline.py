@@ -57,6 +57,8 @@ class Trade:
     commission:  float
     r_multiple:  float
     comment:     str = ""
+    open_date:   str = ""   # v2.50: hora de APERTURA (evita leakage temporal)
+    open_time:   str = ""
 
     @property
     def net(self) -> float:
@@ -66,19 +68,31 @@ class Trade:
     def is_win(self) -> bool:
         return self.net > 0
 
+    # v2.50: las features temporales usan la hora de APERTURA cuando el CSV
+    # la trae (TradeLogger >= v2.50). La hora de cierre no se conoce en el
+    # momento de decidir la entrada — usarla como feature es leakage.
+    # Fallback a close para CSVs antiguos (marcado en el log al cargar).
+    @property
+    def _feat_date(self) -> str:
+        return self.open_date or self.close_date
+
+    @property
+    def _feat_time(self) -> str:
+        return self.open_time or self.close_time
+
     @property
     def hour(self) -> int:
         try:
-            return int(self.close_time.split(":")[0])
+            return int(self._feat_time.split(":")[0])
         except (ValueError, IndexError):
             return -1
 
     @property
     def day_of_week(self) -> int:
-        # 0=Mon…6=Sun — calculado desde close_date YYYY-MM-DD
+        # 0=Mon…6=Sun — calculado desde fecha YYYY-MM-DD
         try:
             from datetime import date
-            y, m, d = map(int, self.close_date.split("-"))
+            y, m, d = map(int, self._feat_date.split("-"))
             return date(y, m, d).weekday()
         except Exception:
             return -1
@@ -86,7 +100,7 @@ class Trade:
     @property
     def month(self) -> int:
         try:
-            return int(self.close_date.split("-")[1])
+            return int(self._feat_date.split("-")[1])
         except (ValueError, IndexError):
             return -1
 
@@ -127,9 +141,18 @@ def load_csv(path: str) -> List[Trade]:
                     commission=float(row["Commission"]),
                     r_multiple=float(row["RMultiple"]),
                     comment=row.get("Comment", ""),
+                    open_date=row.get("OpenDate", ""),
+                    open_time=row.get("OpenTime", ""),
                 ))
             except (KeyError, ValueError):
                 continue
+    if trades and not any(t.open_date for t in trades):
+        print("  AVISO: CSV sin columnas OpenDate/OpenTime (TradeLogger < v2.50)."
+              " Features horarias usaran la hora de CIERRE (leakage temporal).")
+    if trades and not any(t.comment for t in trades):
+        print("  AVISO: CSV sin columna Comment (TradeLogger < v2.50)."
+              " confidence=50 y regime=UNKNOWN seran constantes — el modelo"
+              " no puede aprender de esas features.")
     return trades
 
 
@@ -242,6 +265,7 @@ def train_and_evaluate(trades: List[Trade], test_ratio: float,
 
     print(f"\n  Entrenamiento: {split} trades | Test OOS: {n - split} trades")
 
+    # use_label_encoder fue eliminado en XGBoost 2.0 (requirements pide >=2.0)
     model = xgb.XGBClassifier(
         n_estimators=200,
         max_depth=4,
@@ -249,7 +273,6 @@ def train_and_evaluate(trades: List[Trade], test_ratio: float,
         subsample=0.8,
         colsample_bytree=0.8,
         eval_metric="logloss",
-        use_label_encoder=False,
         random_state=42,
         verbosity=0,
     )

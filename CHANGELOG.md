@@ -5,6 +5,88 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [2.50] — 2026-07-30
+
+Revisión crítica integral: 20+ correcciones de correctitud, ejecución,
+calidad de datos y tooling. Sin cambios de estrategia de entrada.
+
+### Fixed — Crítico (comportamiento en vivo)
+- **Cascada de cierres parciales** (`GoldenTradeX.mq5` / OnTradeTransaction):
+  un cierre parcial genera un deal `DEAL_ENTRY_OUT` igual que un cierre total.
+  El EA lo trataba como trade cerrado: borraba el flag del Partial TP
+  (reactivándolo en cascada hasta agotar el lote), contaba el parcial como
+  trade ganador (desarmando el contador de pérdidas consecutivas e inflando
+  el win rate de Kelly) y lo registraba en el CSV. Ahora, si la posición
+  sigue viva tras el deal, no se procesa como cierre.
+- **Kelly agregado por posición** (`RiskManager.mqh`): W y R se calculan
+  agrupando deals por `POSITION_ID` — un trade con parciales cuenta una vez
+  con su neto total. Sin pérdidas (o sin ganancias) en la ventana → fallback
+  a riesgo fijo en vez de inventar un ratio con `avgL=1`.
+- **`SYMBOL_TRADE_STOPS_LEVEL` respetado** (`OrderManager.mqh`): SL/TP se
+  ajustan a la distancia mínima del broker antes de enviar (open y modify).
+  Antes, stops demasiado cercanos devolvían `10016 INVALID_STOPS`
+  (no-reintenable) y la orden/modificación se descartaba en silencio.
+- **Break-even con buffer** (`GoldenTradeX.mq5`): el BE ahora mueve el SL a
+  `openPrice ± 0.1×ATR` en vez de exactamente `openPrice` — BE exacto dejaba
+  pérdida neta (spread + comisión) al saltar.
+- **Índice de semana estable en cambio de año** (`RiskManager.mqh`): semana
+  absoluta desde epoch alineada a lunes. La fórmula anterior partía la misma
+  semana operativa en dos al cruzar el año (reset espurio del DD semanal).
+- **Resultado neto en pérdidas consecutivas** (`GoldenTradeX.mq5`):
+  `RegisterTradeResult` ahora recibe profit+comisión+swap — la misma
+  definición de "ganador" que usa Kelly.
+
+### Fixed — Indicadores y contexto
+- **Handles ATR cacheados** en `FibonacciEngine`, `SmartMoneyEngine` y
+  `HealthMonitor` (creados en `Init()`, liberados en `Release()`). El patrón
+  anterior (crear handle + CopyBuffer + release por barra) puede devolver 0
+  si el indicador no calculó aún → caía a fallbacks silenciosos.
+- **`HealthMonitor` usa el timeframe del EA** (antes: `PERIOD_M15` fijo).
+- **Swings solo sobre barras cerradas** (`SmartMoneyEngine`,
+  `FibonacciEngine`): la barra 0 en formación quedaba incluida en la
+  detección → el contexto SMC/Fib cambiaba intra-barra con cada tick.
+- **`EquityCurveFilter` muestreado por barra** (`Sample()` en cada barra
+  nueva + `GetMultiplier()` al abrir). Antes la "EMA(20) de equity" se
+  actualizaba solo antes de cada apertura → medía las últimas 20 aperturas,
+  no la curva de equity.
+- **`ConfidenceEngine`: bonus HTF graduado** (0/8/15 según alineación y
+  pendiente de la EMA H4). Con el filtro HTF duro activo, el bonus fijo de
+  15 era una constante sin poder discriminante.
+- **`NewsFilter`: aviso de cobertura FOMC agotada** — a partir de 2027 el
+  EA imprime una alerta única en el Journal en vez de fallar en silencio.
+
+### Fixed — Capa de datos y análisis
+- **`TradeLogger` añade columnas `OpenDate`, `OpenTime`, `Comment`**: el
+  Confidence Score y el régimen viajan ahora al CSV (antes `ml_pipeline.py`
+  leía una columna inexistente → confidence=50 y regime=UNKNOWN constantes).
+- **`ml_pipeline.py`: features temporales sin leakage** — hora/día/mes se
+  toman de la APERTURA (con fallback a cierre para CSVs antiguos, avisando).
+  Eliminado `use_label_encoder` (removido en XGBoost 2.0).
+- **`HealthMonitor` escribe el status CSV en `Common\Files`** (FILE_COMMON),
+  la misma carpeta que TradeLogger — `live_monitor.py` encuentra ambos
+  archivos en un único directorio.
+
+### Added — Tooling y CI
+- **`scripts/mql5_lint.py`** — linter estático MQL5 para CI: detecta las
+  clases de error que causaron los 77 errores de compilación de v2.30
+  (indicadores con firma MQL4, `->`, `ArraySetAsSeries` sobre arrays
+  estáticos, `ResultRetcodeDescription`). Nuevo job `mql5-lint`.
+- **CI migrado de flake8 a ruff** y Python 3.11 → 3.12.
+- **`.github/dependabot.yml`** — actualizaciones semanales de pip y actions.
+- **`requirements.txt` acotado con `~=`** para builds reproducibles.
+- **Dashboard: aviso visible si el CDN de Chart.js no carga** (uso offline).
+
+### Fixed — Configuración
+- `GoldenTradeX_XAGUSD.set` — añadidos parámetros Kelly (faltaban → CI en
+  rojo desde v2.40) y sección Order Manager.
+- `GoldenTradeX.set` — añadida sección Order Manager
+  (`InpOrderMaxRetries`, `InpOrderRetryDelay`, `InpMinMarginLevel`).
+- `validate_set.py` valida los 3 parámetros de Order Manager en ambos presets.
+- `docs/ARCHITECTURE.md` y `docs/STRATEGY.md` ya no fijan versión en el
+  título (quedaban desactualizados en cada release).
+
+---
+
 ## [2.40] — 2026-07-31
 
 ### Added — Kelly Criterion Fraccional

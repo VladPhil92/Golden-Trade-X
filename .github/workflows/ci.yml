@@ -9,42 +9,39 @@ on:
 jobs:
   # ── 1. Python lint ─────────────────────────────────────────────────
   python-lint:
-    name: Python lint (flake8)
+    name: Python lint (ruff)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
           cache: pip
 
       - name: Install dependencies
-        run: pip install flake8
+        run: pip install ruff
 
-      - name: Python syntax check
-        run: |
-          python -m py_compile \
-            scripts/monitor.py \
-            scripts/backtest_analysis.py \
-            scripts/validate_set.py \
-            scripts/regime_analysis.py \
-            scripts/ml_pipeline.py \
-            scripts/correlation_engine.py \
-            scripts/optimize_confidence.py \
-            scripts/fomc_calendar.py \
-            scripts/session_analyzer.py \
-            scripts/walk_forward_optimizer.py \
-            scripts/live_monitor.py
+      - name: ruff — scripts/ and tests/
+        run: ruff check scripts/ tests/ --line-length 120
 
-      - name: flake8 — scripts/ and tests/
-        run: |
-          flake8 scripts/ \
-            --max-line-length=120 \
-            --extend-ignore=E203,E221,W503
-          flake8 tests/ \
-            --max-line-length=120 \
-            --extend-ignore=E203,E221,W503,E402
+  # ── 1b. MQL5 lint (MQL4-ismos y API inexistente) ───────────────────
+  # No compila (MetaEditor no corre en Linux) pero detecta las clases de
+  # error que ya rompieron el build una vez: iATR/iMA con firma MQL4,
+  # operador '->', ArraySetAsSeries sobre arrays estáticos,
+  # ResultRetcodeDescription().
+  mql5-lint:
+    name: MQL5 lint (MQL4-isms)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Lint MQL5 sources
+        run: python scripts/mql5_lint.py
 
   # ── 2. Config validation ────────────────────────────────────────────
   config-validate:
@@ -55,7 +52,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Check all required parameters are present
         run: |
@@ -152,7 +149,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
           cache: pip
 
       - name: Install test dependencies

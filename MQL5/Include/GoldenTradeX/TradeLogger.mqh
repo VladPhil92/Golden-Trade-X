@@ -7,7 +7,13 @@
 //
 //  Columnas: CloseDate, CloseTime, PositionID, Symbol, Type, Lots,
 //            OpenPrice, InitialSL, InitialTP, ClosePrice,
-//            ProfitLoss, Commission, RMultiple
+//            ProfitLoss, Commission, RMultiple,
+//            OpenDate, OpenTime, Comment          (v2.50)
+//
+//  v2.50: OpenDate/OpenTime permiten construir features SIN leakage temporal
+//  (la hora de cierre no se conoce al decidir la entrada) y Comment lleva
+//  el Confidence Score y el régimen ("GoldenTradeX|Conf=72|Reg=TRENDING_BULL")
+//  que consume scripts/ml_pipeline.py.
 //
 //  Uso desde OnTradeTransaction del EA principal:
 //    tradeLogger.LogTrade(dealTicket);
@@ -45,7 +51,8 @@ private:
          FileWriteString(handle,
                          "CloseDate,CloseTime,PositionID,Symbol,Type,"
                          "Lots,OpenPrice,InitialSL,InitialTP,ClosePrice,"
-                         "ProfitLoss,Commission,RMultiple\n");
+                         "ProfitLoss,Commission,RMultiple,"
+                         "OpenDate,OpenTime,Comment\n");
       else if(FileSeek(handle, 0, SEEK_END) != 0)
         {
          Print("TradeLogger: FileSeek falló en '", filename, "' | Error: ", GetLastError());
@@ -56,11 +63,13 @@ private:
       return(handle);
      }
 
-   // Busca el deal de entrada de una posición para obtener precio y niveles
+   // Busca el deal de entrada de una posición para obtener precio, niveles,
+   // hora de apertura y comment (v2.50)
    bool GetEntryData(ulong positionId, double &entryPrice,
-                     double &initialSL, double &initialTP)
+                     double &initialSL, double &initialTP,
+                     datetime &openTime, string &comment)
      {
-      entryPrice = 0; initialSL = 0; initialTP = 0;
+      entryPrice = 0; initialSL = 0; initialTP = 0; openTime = 0; comment = "";
       if(!HistorySelectByPosition(positionId)) return(false);
 
       for(int i = 0; i < HistoryDealsTotal(); i++)
@@ -71,6 +80,10 @@ private:
          entryPrice = HistoryDealGetDouble(ticket, DEAL_PRICE);
          initialSL  = HistoryDealGetDouble(ticket, DEAL_SL);
          initialTP  = HistoryDealGetDouble(ticket, DEAL_TP);
+         openTime   = (datetime)HistoryDealGetInteger(ticket, DEAL_TIME);
+         comment    = HistoryDealGetString(ticket, DEAL_COMMENT);
+         // El CSV usa coma como separador: sanear el comment
+         StringReplace(comment, ",", ";");
          return(true);
         }
       return(false);
@@ -105,8 +118,11 @@ public:
       string   symbol     = HistoryDealGetString(exitDealTicket, DEAL_SYMBOL);
 
       // Datos del deal de entrada
-      double entryPrice, initialSL, initialTP;
-      GetEntryData(positionId, entryPrice, initialSL, initialTP);
+      double   entryPrice, initialSL, initialTP;
+      datetime openTime;
+      string   entryComment;
+      GetEntryData(positionId, entryPrice, initialSL, initialTP,
+                   openTime, entryComment);
 
       // BUY position = exited by a SELL deal; SELL position = exited by a BUY deal
       bool   isBuy   = (exitType == DEAL_TYPE_SELL);
@@ -128,12 +144,18 @@ public:
          return;
         }
 
+      MqlDateTime odt;
+      TimeToStruct(openTime, odt);
+
       string line = StringFormat(
-        "%04d-%02d-%02d,%02d:%02d:%02d,%s,%s,%s,%.2f,%.5f,%.5f,%.5f,%.5f,%.2f,%.2f,%.2f\n",
+        "%04d-%02d-%02d,%02d:%02d:%02d,%s,%s,%s,%.2f,%.5f,%.5f,%.5f,%.5f,%.2f,%.2f,%.2f,"
+        "%04d-%02d-%02d,%02d:%02d:%02d,%s\n",
         dt.year, dt.mon, dt.day, dt.hour, dt.min, dt.sec,
         IntegerToString((long)positionId), symbol, typeStr,
         lots, entryPrice, initialSL, initialTP, closePrice,
-        profit, commission, rMult
+        profit, commission, rMult,
+        odt.year, odt.mon, odt.day, odt.hour, odt.min, odt.sec,
+        entryComment
       );
 
       FileWriteString(handle, line);

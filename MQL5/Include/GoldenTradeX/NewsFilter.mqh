@@ -21,6 +21,11 @@ private:
    int   m_bufferBefore;    // minutos de bloqueo antes del evento
    int   m_bufferAfter;     // minutos de bloqueo después del evento
    int   m_serverOffset;    // horas: servidor - UTC (auto-detectado)
+   bool  m_fomcWarned;      // v2.50: aviso único de cobertura FOMC agotada
+
+   // Último año con fechas FOMC cargadas. Al superarlo, IsFomcDay deja de
+   // proteger — el EA avisa UNA vez en el Journal en lugar de fallar mudo.
+   static const int FOMC_LAST_YEAR;
 
    void DetectServerOffset()
      {
@@ -77,6 +82,13 @@ private:
    // Decisiones típicamente a las 19:00 UTC (verano) / 19:00 UTC (invierno)
    bool IsFomcDay(int year, int mon, int day)
      {
+      if(year > FOMC_LAST_YEAR && !m_fomcWarned)
+        {
+         m_fomcWarned = true;
+         Print("NewsFilter: ATENCION — sin fechas FOMC cargadas para ", year,
+               ". El filtro FOMC esta INACTIVO. Actualizar IsFomcDay() desde ",
+               "federalreserve.gov/monetarypolicy/fomccalendars.htm");
+        }
       if(year == 2025)
          return((mon==1  && day==29) || (mon==3  && day==19) ||
                 (mon==5  && day==7)  || (mon==6  && day==18) ||
@@ -104,6 +116,7 @@ public:
       m_enabled      = enabled;
       m_bufferBefore = bufferMinsBefore;
       m_bufferAfter  = bufferMinsAfter;
+      m_fomcWarned   = false;
       DetectServerOffset();
      }
 
@@ -152,4 +165,6 @@ public:
             " | CPI_proxy=", (IsCpiProxyWindow(dt) ? "SI" : "NO"));
      }
   };
+
+const int CNewsFilter::FOMC_LAST_YEAR = 2026;
 //+------------------------------------------------------------------+

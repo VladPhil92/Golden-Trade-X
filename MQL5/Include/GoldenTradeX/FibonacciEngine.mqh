@@ -43,16 +43,19 @@ private:
    ENUM_TIMEFRAMES m_tf;
    int             m_swingLookback;
    double          m_proxAtrMult;  // multiplicador ATR para "cerca de nivel"
+   int             m_hAtr;         // v2.50: handle ATR cacheado (creado en Init)
 
    static const double RATIOS[7];
 
+   // v2.50: la barra 0 (en formación) se excluye de la detección de swings —
+   // incluirla hacía que los niveles Fib cambiaran intra-barra.
    bool IsSwingHigh(int bar, int n = 3)
      {
       double h = iHigh(m_symbol, m_tf, bar);
       for(int k = 1; k <= n; k++)
         {
          if(bar + k < m_swingLookback && iHigh(m_symbol, m_tf, bar + k) >= h) return false;
-         if(bar - k >= 0             && iHigh(m_symbol, m_tf, bar - k) >= h) return false;
+         if(bar - k >= 1             && iHigh(m_symbol, m_tf, bar - k) >= h) return false;
         }
       return true;
      }
@@ -63,9 +66,18 @@ private:
       for(int k = 1; k <= n; k++)
         {
          if(bar + k < m_swingLookback && iLow(m_symbol, m_tf, bar + k) <= l) return false;
-         if(bar - k >= 0              && iLow(m_symbol, m_tf, bar - k) <= l) return false;
+         if(bar - k >= 1              && iLow(m_symbol, m_tf, bar - k) <= l) return false;
         }
       return true;
+     }
+
+   // ATR de la última vela cerrada desde el handle cacheado
+   double GetAtr()
+     {
+      double buf[1];
+      if(m_hAtr != INVALID_HANDLE && CopyBuffer(m_hAtr, 0, 1, 1, buf) == 1 && buf[0] > 0)
+         return buf[0];
+      return 0.0;
      }
 
    int FindSwingHigh()
@@ -83,6 +95,8 @@ private:
      }
 
 public:
+                     CFibonacciEngine() { m_hAtr = INVALID_HANDLE; }
+
    bool Init(string symbol, ENUM_TIMEFRAMES tf,
              int swingLookback = 100, double proxAtrMult = 0.5)
      {
@@ -90,7 +104,13 @@ public:
       m_tf            = tf;
       m_swingLookback = swingLookback;
       m_proxAtrMult   = proxAtrMult;
-      return true;
+      m_hAtr          = iATR(symbol, tf, 14);
+      return (m_hAtr != INVALID_HANDLE);
+     }
+
+   void Release()
+     {
+      if(m_hAtr != INVALID_HANDLE) { IndicatorRelease(m_hAtr); m_hAtr = INVALID_HANDLE; }
      }
 
    SFibContext Analyze()
@@ -136,14 +156,6 @@ public:
       ctx.inDiscountZone = (curPrice < mid);
 
       // Nivel más cercano al precio actual
-      double atr = 0.0;
-        {
-         int    _h = iATR(m_symbol, m_tf, 14);
-         double _b[];
-         if(_h != INVALID_HANDLE && CopyBuffer(_h, 0, 1, 1, _b) > 0) atr = _b[0];
-         if(_h != INVALID_HANDLE) IndicatorRelease(_h);
-        }
-      double proximity = atr * m_proxAtrMult;
       double minDist  = DBL_MAX;
       ctx.nearestLevel = 0;
       ctx.nearestRatio = 0;
@@ -164,13 +176,8 @@ public:
       if(ctx.swingHigh <= ctx.swingLow) return 0;
 
       double curPrice  = iClose(m_symbol, m_tf, 1);
-      double atr = 0.0;
-        {
-         int    _h = iATR(m_symbol, m_tf, 14);
-         double _b[];
-         if(_h != INVALID_HANDLE && CopyBuffer(_h, 0, 1, 1, _b) > 0) atr = _b[0];
-         if(_h != INVALID_HANDLE) IndicatorRelease(_h);
-        }
+      double atr       = GetAtr();
+      if(atr <= 0) return 0;   // sin ATR fiable no hay medida de proximidad
       double proximity = atr * m_proxAtrMult;
       double dist      = MathAbs(curPrice - ctx.nearestLevel);
 
