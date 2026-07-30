@@ -135,7 +135,7 @@ public:
       double bbw    = CalcBbw(bbUpper, bbLower, bbMid);
       double bbwSma = 0;
         {
-         double bbU[20], bbL[20], bbM[20];
+         double bbU[], bbL[], bbM[];
          ArraySetAsSeries(bbU, true); ArraySetAsSeries(bbL, true); ArraySetAsSeries(bbM, true);
          if(CopyBuffer(m_hBb, 1, 1, 20, bbU) == 20 &&
             CopyBuffer(m_hBb, 2, 1, 20, bbL) == 20 &&

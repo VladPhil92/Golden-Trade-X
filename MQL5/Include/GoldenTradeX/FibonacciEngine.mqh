@@ -136,7 +136,13 @@ public:
       ctx.inDiscountZone = (curPrice < mid);
 
       // Nivel más cercano al precio actual
-      double atr      = iATR(m_symbol, m_tf, 14, 1);
+      double atr = 0.0;
+        {
+         int    _h = iATR(m_symbol, m_tf, 14);
+         double _b[];
+         if(_h != INVALID_HANDLE && CopyBuffer(_h, 0, 1, 1, _b) > 0) atr = _b[0];
+         if(_h != INVALID_HANDLE) IndicatorRelease(_h);
+        }
       double proximity = atr * m_proxAtrMult;
       double minDist  = DBL_MAX;
       ctx.nearestLevel = 0;
@@ -158,7 +164,13 @@ public:
       if(ctx.swingHigh <= ctx.swingLow) return 0;
 
       double curPrice  = iClose(m_symbol, m_tf, 1);
-      double atr       = iATR(m_symbol, m_tf, 14, 1);
+      double atr = 0.0;
+        {
+         int    _h = iATR(m_symbol, m_tf, 14);
+         double _b[];
+         if(_h != INVALID_HANDLE && CopyBuffer(_h, 0, 1, 1, _b) > 0) atr = _b[0];
+         if(_h != INVALID_HANDLE) IndicatorRelease(_h);
+        }
       double proximity = atr * m_proxAtrMult;
       double dist      = MathAbs(curPrice - ctx.nearestLevel);
 

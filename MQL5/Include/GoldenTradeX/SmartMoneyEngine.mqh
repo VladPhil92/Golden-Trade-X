@@ -251,7 +251,13 @@ public:
       ZeroMemory(ctx);
 
       double curPrice = iClose(m_symbol, m_tf, 1);
-      double atr      = iATR(m_symbol, m_tf, 14, 1);
+      double atr = 0.0;
+        {
+         int    _h = iATR(m_symbol, m_tf, 14);
+         double _b[];
+         if(_h != INVALID_HANDLE && CopyBuffer(_h, 0, 1, 1, _b) > 0) atr = _b[0];
+         if(_h != INVALID_HANDLE) IndicatorRelease(_h);
+        }
       if(atr <= 0) atr = curPrice * 0.001;
 
       // BOS

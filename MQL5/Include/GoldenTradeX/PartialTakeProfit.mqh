@@ -34,7 +34,7 @@ public:
    // partialR:   flotante mínimo en R para activar el cierre (ej. 1.0)
    // partialPct: % del lote a cerrar (ej. 50.0)
    // Retorna true si ejecutó el cierre parcial este tick.
-   bool Check(CTrade &trade, ulong ticket, double partialR, double partialPct)
+   bool Check(CTrade &tradeObj, ulong ticket, double partialR, double partialPct)
      {
       if(!m_enabled || IsDone(ticket)) return false;
       if(!PositionSelectByTicket(ticket)) return false;
@@ -64,7 +64,7 @@ public:
 
       if(closeVol >= lots) return false;  // evitar cerrar el total
 
-      if(trade.PositionClosePartial(ticket, closeVol))
+      if(tradeObj.PositionClosePartial(ticket, closeVol))
         {
          MarkDone(ticket);
          Print("PartialTP ► ticket=", ticket,
