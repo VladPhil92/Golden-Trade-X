@@ -1,4 +1,4 @@
-; Golden Trade X v2.50 — preset XAGUSD (Plata) M15
+; Golden Trade X v2.60 — preset XAGUSD (Plata) M15
 ; Arrastrar el EA al gráfico XAGUSD M15 con este preset.
 ; Magic number diferente (920261) para operar en paralelo con la instancia XAUUSD.
 ;
@@ -30,10 +30,15 @@ InpAdxMinLevel=25.0
 InpUseHtfFilter=true
 InpHtfEmaPeriod=50
 
-; --- Smart Money & Ensemble (v2.00) ---
+; --- Confluence Score & Smart Money (heuristico, v2.00) ---
 InpUseRegimeFilter=true
 InpUseSmcFilter=true
 InpMinConfidence=55
+InpConfWeightBase=25
+InpConfWeightRegime=25
+InpConfWeightSmc=30
+InpConfWeightHtf=15
+InpConfWeightFib=5
 
 ; --- Riesgo ---
 InpRiskPercent=1.0
@@ -76,6 +81,13 @@ InpKellyMinTrades=30
 InpOrderMaxRetries=3
 InpOrderRetryDelay=500
 InpMinMarginLevel=200.0
+
+; --- Portfolio Risk Cap (v2.60) ---
+; Si corres esta instancia (XAGUSD) EN PARALELO con GoldenTradeX.set (XAUUSD),
+; activa InpUsePortfolioCap=true en AMBAS instancias con el MISMO
+; InpMaxPortfolioRiskPct — comparten el mismo presupuesto por cuenta.
+InpUsePortfolioCap=false
+InpMaxPortfolioRiskPct=1.5
 
 ; --- Partial Take Profit (v2.20) ---
 InpUsePartialTP=true

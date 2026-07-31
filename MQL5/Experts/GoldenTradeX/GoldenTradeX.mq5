@@ -1,13 +1,13 @@
 //+------------------------------------------------------------------+
 //|                                                 GoldenTradeX.mq5 |
-//|                    Golden Trade X v2.51 — Expert Advisor          |
+//|                    Golden Trade X v2.60 — Expert Advisor          |
 //|                    CTG One Technology S.A.S.                      |
 //+------------------------------------------------------------------+
 #property copyright "CTG One Technology S.A.S."
 #property link      "https://github.com/VladPhil92/Golden-Trade-X"
-#property version   "2.51"
+#property version   "2.60"
 #property strict
-#property description "EA de precisión para Oro (XAUUSD): EMA+RSI+ADX+ATR+H4 + Market Regime + Smart Money Concepts + Fibonacci + Ensemble Confidence Score. Gestión de riesgo multicapa con circuit breaker mensual, kill switch persistente, Capital Preservation Mode, Partial TP, Equity Curve Filter y OrderManager production-grade con retry automático."
+#property description "EA de precisión para Oro (XAUUSD): EMA+RSI+ADX+ATR+H4 + Market Regime + Smart Money Concepts + Fibonacci + Confluence Score heurístico (pesos configurables). Gestión de riesgo multicapa con circuit breaker mensual, kill switch persistente, Capital Preservation Mode, Portfolio Risk Cap entre símbolos, Partial TP, Equity Curve Filter y OrderManager production-grade con retry automático."
 
 #include <Trade/Trade.mqh>
 #include <GoldenTradeX/RiskManager.mqh>
@@ -51,10 +51,19 @@ input bool    InpUseHtfFilter     = true;
 input int     InpHtfEmaPeriod     = 50;
 
 //--- Módulos v2.00
-input group "=== Ensemble & Smart Money ==="
+// v2.60: renombrado de "Ensemble" a "Confluence Score" — es un puntaje
+// heurístico por confluencia de filtros, NO un ensemble estadístico
+// calibrado con datos. Los pesos son configurables para que puedan
+// optimizarse con datos reales via Strategy Tester.
+input group "=== Confluence Score & Smart Money (heurístico, v2.00) ==="
 input bool    InpUseRegimeFilter  = true;
 input bool    InpUseSmcFilter     = true;
 input int     InpMinConfidence    = 55;
+input int     InpConfWeightBase   = 25;  // Puntos por señal base EMA+RSI (máx)
+input int     InpConfWeightRegime = 25;  // Puntos por alineación de régimen (máx)
+input int     InpConfWeightSmc    = 30;  // Puntos por Smart Money Concepts (máx)
+input int     InpConfWeightHtf    = 15;  // Puntos por alineación H4 (máx)
+input int     InpConfWeightFib    = 5;   // Puntos por confluencia Fibonacci (máx)
 
 //--- Gestión de riesgo
 input group "=== Riesgo ==="
@@ -92,6 +101,11 @@ input group "=== Kelly Criterion (v2.40) ==="
 input bool    InpUseKelly         = false;   // Activar Kelly Criterion fraccional
 input double  InpKellyFraction    = 0.25;    // Fracción de Kelly (0.25 = quarter-Kelly)
 input int     InpKellyMinTrades   = 30;      // Trades mínimos para activar Kelly
+
+//--- Portfolio Risk Cap (v2.60)
+input group "=== Portfolio Risk Cap (v2.60) ==="
+input bool    InpUsePortfolioCap     = false;  // Limitar riesgo agregado entre instancias (XAUUSD+XAGUSD, etc.)
+input double  InpMaxPortfolioRiskPct = 1.5;    // % máximo de equity en riesgo simultáneo, TODAS las instancias
 
 //--- Order Manager (v2.30)
 input group "=== Order Manager (v2.30) ==="
@@ -209,7 +223,9 @@ int OnInit()
         { Print("GoldenTradeX: error inicializando SmartMoneyEngine"); return INIT_FAILED; }
      }
 
-   if(!confEngine.Init(_Symbol, InpTimeframe, InpUseHtfFilter, InpHtfEmaPeriod))
+   if(!confEngine.Init(_Symbol, InpTimeframe, InpUseHtfFilter, InpHtfEmaPeriod,
+                       InpConfWeightBase, InpConfWeightRegime, InpConfWeightSmc,
+                       InpConfWeightHtf, InpConfWeightFib))
      { Print("GoldenTradeX: error inicializando ConfidenceEngine"); return INIT_FAILED; }
 
    if(!fibEngine.Init(_Symbol, InpTimeframe))
@@ -220,6 +236,7 @@ int OnInit()
    if(!healthMonitor.Init(_Symbol, InpTimeframe, InpMagicNumber, InpMinMarginLevel))
      { Print("GoldenTradeX: error inicializando HealthMonitor"); return INIT_FAILED; }
    riskManager.InitKelly(InpUseKelly, InpKellyFraction, InpKellyMinTrades);
+   riskManager.InitPortfolioCap(InpUsePortfolioCap, InpMaxPortfolioRiskPct);
 
    // ── Persistencia de barra ──────────────────────────────────────────
    g_gvLastBarKey = StringFormat("GTX_%d_LastBar", (int)InpMagicNumber);
@@ -230,12 +247,13 @@ int OnInit()
 
    newsFilter.PrintStatus();
    riskManager.PrintStatus();
-   Print("GoldenTradeX v2.51 inicializado en ", _Symbol,
+   Print("GoldenTradeX v2.60 inicializado en ", _Symbol,
          " | MinConf=",    InpMinConfidence,
          " | Retries=",    InpOrderMaxRetries,
          " | PartialTP=",  InpUsePartialTP  ? "ON" : "OFF",
          " | EqFilter=",   InpUseEqCurveFilter ? "ON" : "OFF",
-         " | Kelly=",      InpUseKelly ? StringFormat("ON(f=%.0f%%,min=%d)", InpKellyFraction*100, InpKellyMinTrades) : "OFF");
+         " | Kelly=",      InpUseKelly ? StringFormat("ON(f=%.0f%%,min=%d)", InpKellyFraction*100, InpKellyMinTrades) : "OFF",
+         " | PortfolioCap=", InpUsePortfolioCap ? StringFormat("ON(max=%.2f%%)", InpMaxPortfolioRiskPct) : "OFF");
    return INIT_SUCCEEDED;
   }
 
@@ -392,6 +410,21 @@ void OnTick()
                                    NormalizeDouble(sl, _Digits),
                                    NormalizeDouble(tp, _Digits),
                                    comment);
+   if(ok && InpUsePortfolioCap)
+     {
+      // v2.60: registrar el riesgo REAL de la posición confirmada (SL/lote
+      // finales, que pueden diferir del propuesto por stops_level o
+      // redondeo) contra el presupuesto agregado del portafolio.
+      ulong newTicket = orderMgr.GetLastPositionTicket();
+      if(PositionSelectByTicket(newTicket))
+        {
+         double realSl   = PositionGetDouble(POSITION_SL);
+         double realOpen = PositionGetDouble(POSITION_PRICE_OPEN);
+         double realLots = PositionGetDouble(POSITION_VOLUME);
+         double riskPct  = riskManager.CalcRiskPctForPosition(_Symbol, realOpen, realSl, realLots);
+         riskManager.RegisterOpenRisk(newTicket, riskPct);
+        }
+     }
    if(!ok && orderMgr.LastErrorIsFatal())
      {
       Print("GoldenTradeX: error fatal al abrir posición — activando Kill Switch.");
@@ -452,6 +485,7 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
              + HistoryDealGetDouble(dealTicket, DEAL_SWAP);
      }
    riskManager.RegisterTradeResult(posNet);
+   riskManager.ReleaseOpenRisk(posTicket);   // v2.60: libera el cupo del Portfolio Risk Cap
    tradeLogger.LogTrade(dealTicket);
    partialTP.Cleanup(posTicket);
   }

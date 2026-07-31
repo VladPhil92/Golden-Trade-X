@@ -34,6 +34,11 @@ REQUIRED = {
     "InpUseKelly", "InpKellyFraction", "InpKellyMinTrades",
     # v2.30 — Order Manager
     "InpOrderMaxRetries", "InpOrderRetryDelay", "InpMinMarginLevel",
+    # v2.60 — Portfolio Risk Cap
+    "InpUsePortfolioCap", "InpMaxPortfolioRiskPct",
+    # v2.60 — Confluence Score weights (heurístico, configurable)
+    "InpConfWeightBase", "InpConfWeightRegime", "InpConfWeightSmc",
+    "InpConfWeightHtf", "InpConfWeightFib",
     # v2.20 — Partial Take Profit
     "InpUsePartialTP", "InpPartialTPR", "InpPartialTPPct",
     # v2.20 — Equity Curve Filter
@@ -59,6 +64,12 @@ RANGE_CHECKS = {
     "InpOrderMaxRetries":   (0, 10, True, True),
     "InpOrderRetryDelay":   (0, 10000, True, True),
     "InpMinMarginLevel":    (0, 10000, False, True),
+    "InpMaxPortfolioRiskPct": (0.01, 20, False, True),
+    "InpConfWeightBase":    (0, 100, True, True),
+    "InpConfWeightRegime":  (0, 100, True, True),
+    "InpConfWeightSmc":     (0, 100, True, True),
+    "InpConfWeightHtf":     (0, 100, True, True),
+    "InpConfWeightFib":     (0, 100, True, True),
     "InpPartialTPR":        (0, 10, False, True),
     "InpPartialTPPct":      (1, 99, False, True),
     "InpEqCurvePeriod":     (2, 200, True, True),

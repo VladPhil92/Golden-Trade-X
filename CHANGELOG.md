@@ -5,6 +5,71 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [2.60] — 2026-07-31
+
+Plan de trabajo ejecutado a partir de una revisión crítica externa (evaluación
+cuantitativa independiente del repositorio). Se implementó todo lo accionable
+por código; lo que requiere datos reales o infraestructura externa (backtest
+limpio, 300+ trades para Kelly, runner Windows para compilar en CI) queda
+documentado como pendiente, no simulado.
+
+### Added — Portfolio Risk Cap
+- **`RiskManager.mqh`**: límite de riesgo agregado entre TODAS las instancias
+  del EA en la misma cuenta (p.ej. XAUUSD + XAGUSD en paralelo, que están
+  correlacionados y antes gestionaban su drawdown de forma completamente
+  aislada). `RegisterOpenRisk`/`ReleaseOpenRisk`/`GetPortfolioRiskUsed` vía
+  GlobalVariable compartida por cuenta (no por magic number).
+  `CalculateLotSize` reduce u omite el trade si excede el presupuesto.
+- **`OrderManager.mqh`**: `GetLastPositionTicket()` para conocer el ticket
+  de la posición recién confirmada.
+- Nuevos inputs: `InpUsePortfolioCap` (OFF por defecto), `InpMaxPortfolioRiskPct`.
+- Tests unitarios para Register/Release/GetUsed/GetAvailable en `TestRiskManager.mq5`.
+
+### Changed — Confluence Score (antes "Ensemble")
+- **`ConfidenceEngine.mqh`** renombrado de "Ensemble Score" a **"Confluence
+  Score" heurístico** en toda la documentación — es un puntaje por
+  confluencia de filtros con pesos elegidos a mano, no un ensemble
+  estadístico calibrado con datos.
+- Los 5 pesos del score (`InpConfWeightBase/Regime/Smc/Htf/Fib`) ahora son
+  **inputs del EA**, para que puedan optimizarse con datos reales via
+  Strategy Tester. Los defaults (25/25/30/15/5) preservan exactamente el
+  comportamiento de versiones anteriores (factor de escala 1.0).
+
+### Added — Métricas de riesgo estadísticamente honestas
+- **`scripts/backtest_analysis.py`**:
+  - Sharpe/Sortino sobre **retornos % diarios** (no P&L absoluto) — evita
+    distorsión cuando el equity o el lote cambian durante el test (Kelly,
+    Equity Curve Filter).
+  - Nuevas métricas: Sortino ratio, Calmar ratio (CAGR/MaxDD), Ulcer Index,
+    Expected Shortfall (CVaR 95%).
+  - **Probabilistic Sharpe Ratio (PSR)** y **Deflated Sharpe Ratio (DSR)**
+    (Bailey & López de Prado): probabilidad de que el Sharpe real sea
+    positivo, corregida por sesgo de selección con `--trials N`.
+  - Monte Carlo con **block bootstrap** (`--block-size N`): preserva
+    autocorrelación/rachas que el bootstrap IID de trade individual (aún
+    el default, `--block-size 1`, sin cambios de comportamiento) ignora.
+  - Sección renombrada de "OBJETIVOS INSTITUCIONALES" a "OBJETIVOS
+    INTERNOS DE CALIDAD" — son umbrales propios del proyecto, no una
+    certificación institucional externa. Se agregó el check PSR ≥ 95%.
+  - Reporte HTML incluye las nuevas métricas de riesgo.
+- **28 tests nuevos** en `tests/test_backtest_analysis.py` (69 en total).
+
+### Fixed — Observabilidad
+- **`SessionFilter.mqh`**: detecta y advierte en el Journal cuando el
+  offset servidor-UTC cambia entre inicializaciones (cambio de DST) —
+  antes el desfase horario de la sesión Londres-NY pasaba en silencio.
+  No cambia el comportamiento de trading (sigue en hora de servidor por
+  diseño), solo alerta para que el operador revise `InpStartHour/EndHour`.
+
+### Fixed — Documentación
+- **`README.md`** reescrito por completo: describía la arquitectura de
+  v1.x (solo 5 módulos) mientras el código ya tenía 14. Ahora refleja
+  v2.60, incluye advertencias metodológicas explícitas (Confluence Score
+  heurístico, walk-forward real vs. desglose trimestral, bootstrap IID
+  vs. block) y elimina el ejemplo de backtest sin evidencia detrás.
+
+---
+
 ## [2.51] — 2026-07-30
 
 Autoauditoría post-v2.50 + evaluación continua de desempeño.

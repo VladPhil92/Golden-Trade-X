@@ -21,6 +21,15 @@ from scripts.backtest_analysis import (
     daily_sharpe,
     monte_carlo,
     max_consec_losses,
+    daily_pct_returns,
+    sharpe_from_returns,
+    sortino_ratio,
+    ulcer_index,
+    expected_shortfall,
+    annualized_return_pct,
+    calmar_ratio,
+    probabilistic_sharpe_ratio,
+    deflated_sharpe_ratio,
 )
 
 
@@ -234,3 +243,171 @@ def test_trade_is_win_net_negative_due_to_commission():
 
 def test_trade_is_win_exactly_zero():
     assert make_trade(0.0).is_win is False
+
+
+# ── monte_carlo block bootstrap (v2.60) ────────────────────────────────────────
+
+def test_monte_carlo_block_size_default_matches_legacy_iid():
+    # block_size=1 (default) must reproduce identical behavior to the
+    # original single-trade IID bootstrap for the same seed.
+    returns = [10.0, -20.0, 15.0, -5.0, 8.0, -12.0, 20.0, -8.0]
+    r_default = monte_carlo(returns, runs=50, seed=7)
+    r_block1  = monte_carlo(returns, runs=50, seed=7, block_size=1)
+    assert r_default == r_block1
+
+
+def test_monte_carlo_block_size_reported():
+    result = monte_carlo([10.0, -5.0, 8.0], runs=10, seed=1, block_size=3)
+    assert result["block_size"] == 3
+
+
+def test_monte_carlo_block_size_clamped_to_n():
+    # block_size larger than the sample must not crash — clamp to n.
+    result = monte_carlo([10.0, -5.0], runs=10, seed=1, block_size=99)
+    assert result["block_size"] == 2
+
+
+def test_monte_carlo_block_size_produces_valid_dd():
+    returns = [10.0, -20.0, 15.0, -5.0, 8.0, -12.0, 20.0, -8.0] * 3
+    result = monte_carlo(returns, runs=100, seed=3, block_size=4)
+    assert 0.0 <= result["dd_p50"] <= 100.0
+    assert result["dd_p5"] <= result["dd_p95"]
+
+
+# ── daily_pct_returns / sharpe_from_returns (v2.60) ────────────────────────────
+
+def test_daily_pct_returns_basic():
+    trades = [
+        make_trade(100.0, close_date="2025-01-01"),
+        make_trade(-50.0, close_date="2025-01-02"),
+    ]
+    rets = daily_pct_returns(trades, start=10_000.0)
+    assert len(rets) == 2
+    assert abs(rets[0] - 100.0 / 10_000.0) < 1e-9
+    assert abs(rets[1] - (-50.0 / 10_100.0)) < 1e-9
+
+
+def test_daily_pct_returns_empty():
+    assert daily_pct_returns([], start=10_000.0) == []
+
+
+def test_sharpe_from_returns_zero_mean():
+    assert sharpe_from_returns([0.01, -0.01, 0.01, -0.01]) == 0.0
+
+
+def test_sharpe_from_returns_insufficient_data():
+    assert sharpe_from_returns([0.01]) == 0.0
+
+
+def test_sharpe_from_returns_positive():
+    assert sharpe_from_returns([0.01, 0.02, 0.015, 0.018, 0.012]) > 0.0
+
+
+# ── sortino_ratio ──────────────────────────────────────────────────────────────
+
+def test_sortino_ignores_upside_volatility():
+    # Wild upside swings shouldn't hurt Sortino the way they hurt Sharpe.
+    upside_vol   = [0.05, -0.01, 0.20, -0.01, 0.08, -0.01]
+    steady_gains = [0.02, -0.01, 0.02, -0.01, 0.02, -0.01]
+    assert sortino_ratio(upside_vol) >= sortino_ratio(steady_gains)
+
+
+def test_sortino_zero_when_no_downside():
+    assert sortino_ratio([0.01, 0.02, 0.03]) == 0.0  # no downside → div by 0 guard
+
+
+def test_sortino_insufficient_data():
+    assert sortino_ratio([0.01]) == 0.0
+
+
+# ── ulcer_index ────────────────────────────────────────────────────────────────
+
+def test_ulcer_index_no_drawdown():
+    assert ulcer_index([100.0, 110.0, 120.0]) == 0.0
+
+
+def test_ulcer_index_positive_with_drawdown():
+    assert ulcer_index([100.0, 80.0, 90.0]) > 0.0
+
+
+def test_ulcer_index_empty():
+    assert ulcer_index([]) == 0.0
+
+
+def test_ulcer_index_deeper_dd_scores_higher():
+    shallow = ulcer_index([100.0, 95.0, 100.0])
+    deep    = ulcer_index([100.0, 50.0, 100.0])
+    assert deep > shallow
+
+
+# ── expected_shortfall ──────────────────────────────────────────────────────────
+
+def test_expected_shortfall_averages_worst_tail():
+    returns = [10.0, -100.0, 5.0, -90.0, 8.0, -80.0, 3.0, -10.0, 2.0, -5.0]
+    es = expected_shortfall(returns, alpha=0.95)
+    assert es < 0  # worst 5% (1 trade) should be the -100 outlier
+    assert abs(es - (-100.0)) < 1e-9
+
+
+def test_expected_shortfall_empty():
+    assert expected_shortfall([]) == 0.0
+
+
+def test_expected_shortfall_all_positive():
+    es = expected_shortfall([10.0, 20.0, 30.0])
+    assert es > 0
+
+
+# ── annualized_return_pct / calmar_ratio ───────────────────────────────────────
+
+def test_annualized_return_pct_one_year_doubling():
+    trades = [
+        make_trade(0.0, close_date="2024-01-01"),
+        make_trade(0.0, close_date="2025-01-01"),
+    ]
+    curve = [10_000.0, 20_000.0]
+    cagr = annualized_return_pct(trades, curve)
+    assert abs(cagr - 100.0) < 2.0  # ~100% over ~1 year
+
+
+def test_annualized_return_pct_insufficient_data():
+    assert annualized_return_pct([make_trade(0.0)], [10_000.0]) == 0.0
+
+
+def test_calmar_ratio_basic():
+    assert calmar_ratio(20.0, 10.0) == 2.0
+
+
+def test_calmar_ratio_no_drawdown_is_inf():
+    assert calmar_ratio(20.0, 0.0) == float("inf")
+
+
+# ── probabilistic / deflated Sharpe ratio ──────────────────────────────────────
+
+def test_psr_high_for_strong_consistent_edge():
+    # Strong, consistent positive returns with low variance → high PSR
+    rets = [0.02, 0.018, 0.021, 0.019, 0.022, 0.017, 0.020, 0.019, 0.021, 0.018] * 3
+    assert probabilistic_sharpe_ratio(rets) > 0.9
+
+
+def test_psr_near_half_for_symmetric_noise():
+    # Zero-mean symmetric noise → true Sharpe ≈ 0 → PSR ≈ 0.5 vs benchmark 0
+    rets = [0.01, -0.01] * 20
+    psr = probabilistic_sharpe_ratio(rets)
+    assert 0.3 < psr < 0.7
+
+
+def test_psr_insufficient_data():
+    assert probabilistic_sharpe_ratio([0.01, 0.02]) == 0.0
+
+
+def test_dsr_decreases_with_more_trials():
+    rets = [0.02, 0.018, 0.021, 0.019, 0.022, 0.017, 0.020, 0.019, 0.021, 0.018] * 3
+    dsr_1   = deflated_sharpe_ratio(rets, num_trials=1)
+    dsr_100 = deflated_sharpe_ratio(rets, num_trials=100)
+    assert dsr_100 <= dsr_1
+
+
+def test_dsr_equals_psr_for_single_trial():
+    rets = [0.02, 0.018, 0.021, 0.019, 0.022, 0.017, 0.020, 0.019, 0.021, 0.018]
+    assert deflated_sharpe_ratio(rets, num_trials=1) == probabilistic_sharpe_ratio(rets)
