@@ -10,7 +10,8 @@ REQUIRED = {
     # Signals
     "InpEmaFast", "InpEmaSlow", "InpRsiPeriod", "InpRsiUpper", "InpRsiLower",
     "InpRsiLongMin", "InpRsiShortMax", "InpTimeframe",
-    "InpAtrPeriod", "InpAtrMinRatio", "InpAtrMaxRatio", "InpAdxMinLevel",
+    "InpAtrPeriod", "InpAtrMinRatio", "InpAtrMaxRatio",
+    "InpAdxPeriod", "InpAdxMinLevel",
     # HTF filter
     "InpUseHtfFilter", "InpHtfEmaPeriod",
     # Risk
@@ -65,6 +66,7 @@ RANGE_CHECKS = {
     "InpOrderRetryDelay":   (0, 10000, True, True),
     "InpMinMarginLevel":    (0, 10000, False, True),
     "InpMaxPortfolioRiskPct": (0.01, 20, False, True),
+    "InpAdxPeriod":         (2, 100, True, True),
     "InpConfWeightBase":    (0, 100, True, True),
     "InpConfWeightRegime":  (0, 100, True, True),
     "InpConfWeightSmc":     (0, 100, True, True),

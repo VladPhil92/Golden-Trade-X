@@ -1,11 +1,11 @@
 //+------------------------------------------------------------------+
 //|                                                 GoldenTradeX.mq5 |
-//|                    Golden Trade X v2.60 — Expert Advisor          |
+//|                    Golden Trade X v2.61 — Expert Advisor          |
 //|                    CTG One Technology S.A.S.                      |
 //+------------------------------------------------------------------+
 #property copyright "CTG One Technology S.A.S."
 #property link      "https://github.com/VladPhil92/Golden-Trade-X"
-#property version   "2.60"
+#property version   "2.61"
 #property strict
 #property description "EA de precisión para Oro (XAUUSD): EMA+RSI+ADX+ATR+H4 + Market Regime + Smart Money Concepts + Fibonacci + Confluence Score heurístico (pesos configurables). Gestión de riesgo multicapa con circuit breaker mensual, kill switch persistente, Capital Preservation Mode, Portfolio Risk Cap entre símbolos, Partial TP, Equity Curve Filter y OrderManager production-grade con retry automático."
 
@@ -42,6 +42,7 @@ input ENUM_TIMEFRAMES InpTimeframe = PERIOD_M15;
 input int     InpAtrPeriod        = 14;
 input double  InpAtrMinRatio      = 0.8;
 input double  InpAtrMaxRatio      = 3.0;
+input int     InpAdxPeriod        = 14;     // v2.61: período ADX (antes 14 fijo)
 input double  InpAdxMinLevel      = 25.0;
 input int     InpMinTickVolume    = 10;      // v2.20: volumen mínimo de ticks (0=off)
 
@@ -197,7 +198,7 @@ int OnInit()
                          InpAtrPeriod, InpAtrMinRatio,
                          InpAdxMinLevel, InpAtrMaxRatio,
                          InpUseHtfFilter, InpHtfEmaPeriod,
-                         (long)InpMinTickVolume))
+                         (long)InpMinTickVolume, InpAdxPeriod))
      { Print("GoldenTradeX: error inicializando SignalEngine"); return INIT_FAILED; }
 
    riskManager.Init(InpRiskPercent, InpMaxDailyDD, InpMaxPositions,
@@ -213,13 +214,16 @@ int OnInit()
 
    if(InpUseRegimeFilter)
      {
-      if(!regimeEngine.Init(_Symbol, InpTimeframe, InpEmaFast, InpEmaSlow))
+      // v2.61: umbrales por defecto (25/20/2.0/0.70) + períodos ATR/ADX del EA
+      if(!regimeEngine.Init(_Symbol, InpTimeframe, InpEmaFast, InpEmaSlow,
+                            25.0, 20.0, 2.0, 0.70, InpAtrPeriod, InpAdxPeriod))
         { Print("GoldenTradeX: error inicializando MarketRegimeEngine"); return INIT_FAILED; }
      }
 
    if(InpUseSmcFilter)
      {
-      if(!smcEngine.Init(_Symbol, InpTimeframe))
+      // v2.61: lookbacks por defecto (50/20/40/1.0) + período ATR del EA
+      if(!smcEngine.Init(_Symbol, InpTimeframe, 50, 20, 40, 1.0, InpAtrPeriod))
         { Print("GoldenTradeX: error inicializando SmartMoneyEngine"); return INIT_FAILED; }
      }
 
@@ -228,12 +232,15 @@ int OnInit()
                        InpConfWeightHtf, InpConfWeightFib))
      { Print("GoldenTradeX: error inicializando ConfidenceEngine"); return INIT_FAILED; }
 
-   if(!fibEngine.Init(_Symbol, InpTimeframe))
+   // v2.61: lookback/proximidad por defecto (100/0.5) + período ATR del EA
+   if(!fibEngine.Init(_Symbol, InpTimeframe, 100, 0.5, InpAtrPeriod))
      { Print("GoldenTradeX: error inicializando FibonacciEngine"); return INIT_FAILED; }
    partialTP.Init(InpUsePartialTP, InpMagicNumber);
    eqCurveFilter.Init(InpUseEqCurveFilter, InpEqCurvePeriod, InpMagicNumber);
    orderMgr.Init(&trade, InpOrderMaxRetries, InpOrderRetryDelay);
-   if(!healthMonitor.Init(_Symbol, InpTimeframe, InpMagicNumber, InpMinMarginLevel))
+   // v2.61: emergencyAtrMult/checkInterval por defecto (3.0/60s) + período ATR
+   if(!healthMonitor.Init(_Symbol, InpTimeframe, InpMagicNumber, InpMinMarginLevel,
+                          3.0, 60, InpAtrPeriod))
      { Print("GoldenTradeX: error inicializando HealthMonitor"); return INIT_FAILED; }
    riskManager.InitKelly(InpUseKelly, InpKellyFraction, InpKellyMinTrades);
    riskManager.InitPortfolioCap(InpUsePortfolioCap, InpMaxPortfolioRiskPct);
@@ -247,7 +254,7 @@ int OnInit()
 
    newsFilter.PrintStatus();
    riskManager.PrintStatus();
-   Print("GoldenTradeX v2.60 inicializado en ", _Symbol,
+   Print("GoldenTradeX v2.61 inicializado en ", _Symbol,
          " | MinConf=",    InpMinConfidence,
          " | Retries=",    InpOrderMaxRetries,
          " | PartialTP=",  InpUsePartialTP  ? "ON" : "OFF",

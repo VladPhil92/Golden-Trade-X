@@ -98,13 +98,14 @@ public:
                      CFibonacciEngine() { m_hAtr = INVALID_HANDLE; }
 
    bool Init(string symbol, ENUM_TIMEFRAMES tf,
-             int swingLookback = 100, double proxAtrMult = 0.5)
+             int swingLookback = 100, double proxAtrMult = 0.5,
+             int atrPeriod = 14)
      {
       m_symbol        = symbol;
       m_tf            = tf;
       m_swingLookback = swingLookback;
       m_proxAtrMult   = proxAtrMult;
-      m_hAtr          = iATR(symbol, tf, 14);
+      m_hAtr          = iATR(symbol, tf, atrPeriod);   // v2.61: período propagado
       return (m_hAtr != INVALID_HANDLE);
      }
 

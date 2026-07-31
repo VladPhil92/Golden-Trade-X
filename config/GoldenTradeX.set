@@ -1,4 +1,4 @@
-; Golden Trade X v2.60 — preset por defecto (XAUUSD M15)
+; Golden Trade X v2.61 — preset por defecto (XAUUSD M15)
 ; Nota DST: StartHour/EndHour estan en hora del servidor del broker.
 ; La mayoria de brokers usa EET (GMT+2 verano / GMT+3 invierno).
 
@@ -17,6 +17,7 @@ InpTimeframe=15
 InpAtrPeriod=14
 InpAtrMinRatio=0.8
 InpAtrMaxRatio=3.0
+InpAdxPeriod=14
 InpAdxMinLevel=25.0
 
 ; --- Filtro HTF ---

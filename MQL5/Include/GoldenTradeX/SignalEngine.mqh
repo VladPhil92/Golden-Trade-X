@@ -63,7 +63,8 @@ public:
              int atrPeriod, double atrMinRatio,
              double adxMinLevel, double atrMaxRatio,
              bool useHtfFilter, int htfEmaPeriod,
-             long minTickVolume = 0)
+             long minTickVolume = 0,
+             int adxPeriod = 14)
      {
       m_symbol       = symbol;
       m_tf           = tf;
@@ -90,8 +91,8 @@ public:
          m_hRsi == INVALID_HANDLE || m_hAtr == INVALID_HANDLE)
          return(false);
 
-      // Crear handle de ADX para filtro de régimen
-      m_hAdx = iADX(symbol, tf, 14);
+      // Crear handle de ADX para filtro de régimen (v2.61: período configurable)
+      m_hAdx = iADX(symbol, tf, adxPeriod);
       if(m_hAdx == INVALID_HANDLE) return(false);
 
       if(m_useHtfFilter)

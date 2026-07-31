@@ -286,9 +286,55 @@ public:
       m_usePortfolioCap     = enabled;
       m_maxPortfolioRiskPct = MathMax(0.01, maxPortfolioRiskPct);
       if(m_usePortfolioCap)
+        {
+         ReconcilePortfolioRisk();   // v2.61: limpiar reservas huérfanas
          Print("RiskManager: Portfolio Risk Cap ON — máximo ",
                DoubleToString(m_maxPortfolioRiskPct, 2),
                "% de riesgo agregado entre todas las instancias del EA.");
+        }
+     }
+
+   // v2.61: reconciliación del presupuesto de riesgo compartido.
+   // Si una posición se cierra con el terminal APAGADO (SL/TP se ejecutan
+   // en el servidor del broker), OnTradeTransaction nunca se dispara al
+   // reiniciar → ReleaseOpenRisk() no se llama y la reserva queda escrita
+   // en la GlobalVariable para siempre. Sin esta pasada, el presupuesto se
+   // llena de posiciones fantasma y el cap termina bloqueando trades
+   // legítimos. Aquí se enumeran todas las reservas GTX_<login>_PR_*,
+   // se eliminan las de tickets que ya no existen, y se RECONSTRUYE el
+   // total desde las reservas supervivientes (corrige cualquier deriva).
+   void ReconcilePortfolioRisk()
+     {
+      double rebuiltTotal = 0.0;
+      int    released     = 0;
+      int    prefixLen    = StringLen(m_gvPortfolioPrefix);
+
+      // Recorrer hacia atrás: GlobalVariableDel reindexa la lista
+      for(int i = GlobalVariablesTotal() - 1; i >= 0; i--)
+        {
+         string name = GlobalVariableName(i);
+         if(StringSubstr(name, 0, prefixLen) != m_gvPortfolioPrefix) continue;
+
+         ulong ticket = (ulong)StringToInteger(StringSubstr(name, prefixLen));
+         if(ticket > 0 && PositionSelectByTicket(ticket))
+           {
+            rebuiltTotal += GlobalVariableGet(name);   // posición viva: conservar
+           }
+         else
+           {
+            released++;
+            Print("RiskManager: reserva huérfana liberada (ticket=", ticket,
+                  " riesgo=", DoubleToString(GlobalVariableGet(name), 3),
+                  "% — posición ya no existe).");
+            GlobalVariableDel(name);
+           }
+        }
+
+      GlobalVariableSet(m_gvPortfolioRiskKey, rebuiltTotal);
+      if(released > 0)
+         Print("RiskManager: reconciliación — ", released,
+               " reserva(s) huérfana(s) liberada(s). Riesgo comprometido real: ",
+               DoubleToString(rebuiltTotal, 3), "%");
      }
 
    // Riesgo % actualmente comprometido por TODAS las instancias del EA

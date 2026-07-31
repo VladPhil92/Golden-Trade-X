@@ -102,7 +102,8 @@ public:
    bool Init(string symbol, ENUM_TIMEFRAMES tf, ulong magic,
              double minMarginLevel = 200.0,
              double emergencyAtrMult = 3.0,
-             int checkIntervalSec = 60)
+             int checkIntervalSec = 60,
+             int atrPeriod = 14)
      {
       m_symbol           = symbol;
       m_tf               = tf;
@@ -113,7 +114,7 @@ public:
       m_lastCheck        = 0;
       m_orphanFixCount   = 0;
       m_statusFile       = StringFormat("GTX_%d_status.csv", (int)magic);
-      m_hAtr             = iATR(symbol, tf, 14);
+      m_hAtr             = iATR(symbol, tf, atrPeriod);   // v2.61: período propagado
       return (m_hAtr != INVALID_HANDLE);
      }
 
