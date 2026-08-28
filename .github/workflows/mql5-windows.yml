@@ -42,3 +42,16 @@ jobs:
           name: mql5-automated-tests
           if-no-files-found: warn
           path: ${{ env.GTX_MQL5_TEST_EVIDENCE }}
+
+  mql5-required:
+    name: MQL5 required gate
+    if: always()
+    needs: [mql5-verification]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce MetaTrader verification result
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ needs.mql5-verification.result }}" = "success"
+          echo "MQL5 REQUIRED GATE PASS"
