@@ -37,6 +37,8 @@ GoldenTradeX_signals_<account>_<magic>_<symbol>_<year>.csv
 
 The schema records strategy-funnel observations such as signal stage, decision/rejection reason, direction, confidence/regime components, spread, ATR, requested geometry, initial RR, lots and later execution identifiers where available.
 
+The EA records one terminal decision for each new-bar path it evaluates. Guard rejections are explicit (`KILL_SWITCH`, `SESSION_BLOCKED`, `SPREAD_TOO_WIDE`, drawdown/circuit-breaker limits, news, max positions, ownership, connection and volatile-regime guards). Once a base signal exists, confluence candidates and their rejection reasons, geometry/RR/sizing decisions, order requests and final server-confirmed/open-failed outcomes are recorded separately. This preserves negative observations instead of collecting only trades that survived every filter.
+
 ### Execution ledger
 
 Pattern:
@@ -46,6 +48,8 @@ GoldenTradeX_executions_<account>_<magic>_<symbol>_<year>.csv
 ```
 
 The schema supports both request/result observations and immutable broker deal observations. It carries requested vs executed prices/volume, server retcode/result class, slippage, order/deal/position identities and broker costs when available.
+
+`OrderManager` remains the execution authority. After `OpenPosition()` returns, the EA records the server result and only marks executed price/volume/slippage as confirmed when `OrderManager` itself classified the opening as server-confirmed. Separately, `OnTradeTransaction` admits immutable broker deals: entry deals must carry the EA magic; exit deals may be manual/broker-side only after position-history ownership has been proven exclusively to Golden Trade X.
 
 ### Position outcome ledger
 
@@ -65,7 +69,7 @@ NetPnL
 RealizedR
 ```
 
-No MFE, MAE or R value is to be synthesized when PositionState cannot be reconstructed safely.
+At final closure the EA loads the still-live `PositionState` before cleanup and exports its immutable Initial R plus its accumulated MFE/MAE. `RealizedR` is calculated from the same final net P/L and immutable `InitialRiskMoney`. If final PositionState cannot be proven, the outcome row is omitted and a diagnostic is printed; MFE, MAE or R are never synthesized.
 
 ## SQLite ingestion
 
@@ -113,8 +117,8 @@ v2.70 is complete only when all of the following are integrated and verified:
 - [x] deterministic MQL5 writer smoke test exists;
 - [x] idempotent SQLite schema/importer exists;
 - [x] Python ingestion tests exist;
-- [ ] EA emits signal-funnel observations;
-- [ ] EA emits request/result and broker-deal execution observations;
-- [ ] final position outcomes export PositionState MFE/MAE and Realized R;
+- [x] EA emits signal-funnel observations;
+- [x] EA emits request/result and broker-deal execution observations;
+- [x] final position outcomes export PositionState MFE/MAE and Realized R;
 - [ ] dashboard/research summary consumes the database without inventing metrics;
 - [ ] all CI/Security/MQL5 required gates pass on the integrated PR.
