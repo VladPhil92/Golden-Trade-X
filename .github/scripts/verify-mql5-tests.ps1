@@ -60,7 +60,7 @@ function Read-TestJournal {
 function Get-TestSummary {
     param([string]$Journal, [string]$Base)
 
-    # Most tests use: === TestX END | PASS=N FAIL=N ===
+    # Canonical v2.63 format: === TestX END | PASS=N FAIL=N ===
     $canonical = [regex]::Match(
         $Journal,
         "===\s+" + [regex]::Escape($Base) + "\s+END\s+\|\s+PASS=(\d+)\s+FAIL=(\d+)\s+==="
@@ -72,7 +72,7 @@ function Get-TestSummary {
         }
     }
 
-    # v2.62 tests added later use: TestX: N tests | P PASS | F FAIL
+    # v2.62 counted format: TestX: N tests | P PASS | F FAIL
     $counted = [regex]::Match(
         $Journal,
         [regex]::Escape($Base) + ":\s+\d+\s+tests\s+\|\s+(\d+)\s+PASS\s+\|\s+(\d+)\s+FAIL"
@@ -81,6 +81,19 @@ function Get-TestSummary {
         return [pscustomobject]@{
             Pass = [int]$counted.Groups[1].Value
             Fail = [int]$counted.Groups[2].Value
+        }
+    }
+
+    # Older suite format retained during migration:
+    # PASS: P / FAIL: F / TOTAL: N
+    $legacy = [regex]::Match(
+        $Journal,
+        "PASS:\s*(\d+)\s*/\s*FAIL:\s*(\d+)\s*/\s*TOTAL:\s*(\d+)"
+    )
+    if ($legacy.Success) {
+        return [pscustomobject]@{
+            Pass = [int]$legacy.Groups[1].Value
+            Fail = [int]$legacy.Groups[2].Value
         }
     }
 
