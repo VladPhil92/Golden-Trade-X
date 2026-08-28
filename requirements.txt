@@ -17,5 +17,5 @@ yfinance~=0.2
 python-dotenv~=1.0
 
 # Testing
-pytest~=8.0
+pytest~=9.1
 pytest-cov~=7.1
