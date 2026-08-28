@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Golden Trade X v2.80 — quantitative research baseline gate.
 
-This module consumes the v2.70 SQLite telemetry database in read-only mode and
-produces a reproducible *descriptive* baseline. It deliberately separates three
-states:
+Consumes the v2.70 SQLite telemetry database in read-only mode and produces a
+reproducible descriptive baseline. The gate separates three states:
 
 - INVALID_DATA: structural/semantic integrity violations were observed;
 - INSUFFICIENT_EVIDENCE: data are internally consistent but do not meet the
@@ -23,9 +22,9 @@ import math
 import sqlite3
 import statistics
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 REQUIRED_TABLES = {"signal_events", "execution_events", "position_outcomes"}
 REQUIRED_MANIFEST_FIELDS = {
@@ -71,9 +70,7 @@ class EvidenceThresholds:
 def open_readonly(path: Path) -> sqlite3.Connection:
     if not path.is_file():
         raise FileNotFoundError(path)
-    conn = sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True)
-    conn.row_factory = sqlite3.Row
-    return conn
+    return sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True)
 
 
 def validate_schema(conn: sqlite3.Connection) -> None:
@@ -103,49 +100,55 @@ def load_manifest(path: Path | None) -> tuple[dict[str, Any] | None, list[str]]:
     if missing:
         errors.append(f"manifest missing field(s): {', '.join(missing)}")
 
+    for field in REQUIRED_MANIFEST_FIELDS - {"symbols"}:
+        if field not in manifest:
+            continue
+        value = manifest[field]
+        if value is None or (isinstance(value, str) and not value.strip()):
+            errors.append(f"manifest field {field} must not be null/empty")
+
     source_type = manifest.get("source_type")
     if source_type is not None and source_type not in ALLOWED_SOURCE_TYPES:
         errors.append(
             "manifest source_type must be one of: " + ", ".join(sorted(ALLOWED_SOURCE_TYPES))
         )
 
-    git_sha = str(manifest.get("git_sha", ""))
-    if git_sha and not _is_hex(git_sha, 7, 40):
+    git_sha = manifest.get("git_sha")
+    if git_sha is not None and str(git_sha).strip() and not _is_hex(str(git_sha), 7, 40):
         errors.append("manifest git_sha must be a 7-40 character hexadecimal Git commit id")
 
-    preset_sha = str(manifest.get("preset_sha256", ""))
-    if preset_sha and not _is_hex(preset_sha, 64, 64):
+    preset_sha = manifest.get("preset_sha256")
+    if preset_sha is not None and str(preset_sha).strip() and not _is_hex(str(preset_sha), 64, 64):
         errors.append("manifest preset_sha256 must be a 64 character SHA-256 hex digest")
 
     symbols = manifest.get("symbols")
-    if symbols is not None:
-        if not isinstance(symbols, list) or not symbols or not all(
-            isinstance(symbol, str) and symbol.strip() for symbol in symbols
-        ):
-            errors.append("manifest symbols must be a non-empty array of non-empty strings")
+    if not isinstance(symbols, list) or not symbols or not all(
+        isinstance(symbol, str) and symbol.strip() for symbol in symbols
+    ):
+        errors.append("manifest symbols must be a non-empty array of non-empty strings")
 
-    for field in REQUIRED_MANIFEST_FIELDS - {"symbols"}:
-        if field in manifest and not str(manifest[field]).strip():
-            errors.append(f"manifest field {field} must not be empty")
-
+    parsed_periods: dict[str, datetime] = {}
     for field in ("period_start", "period_end"):
         value = manifest.get(field)
-        if value:
-            try:
-                _parse_datetime(str(value))
-            except ValueError:
-                errors.append(f"manifest {field} is not a recognized ISO/MT5 datetime")
-
-    if manifest.get("period_start") and manifest.get("period_end"):
+        if value is None or (isinstance(value, str) and not value.strip()):
+            continue
         try:
-            if _parse_datetime(str(manifest["period_end"])) <= _parse_datetime(
-                str(manifest["period_start"])
-            ):
-                errors.append("manifest period_end must be later than period_start")
+            parsed_periods[field] = _parse_datetime(str(value))
         except ValueError:
-            pass
+            errors.append(f"manifest {field} is not a recognized ISO/MT5 datetime")
 
-    return manifest, errors
+    if "period_start" in parsed_periods and "period_end" in parsed_periods:
+        start, end, awareness_error = _normalize_datetime_pair(
+            parsed_periods["period_start"], parsed_periods["period_end"]
+        )
+        if awareness_error:
+            errors.append(
+                "manifest period_start and period_end must either both include timezone offsets or both omit them"
+            )
+        elif end <= start:
+            errors.append("manifest period_end must be later than period_start")
+
+    return manifest, list(dict.fromkeys(errors))
 
 
 def _is_hex(value: str, minimum: int, maximum: int) -> bool:
@@ -178,8 +181,33 @@ def _parse_datetime(value: str) -> datetime:
     raise ValueError(value)
 
 
+def _normalize_datetime_pair(first: datetime, second: datetime) -> tuple[datetime, datetime, bool]:
+    first_aware = first.tzinfo is not None and first.utcoffset() is not None
+    second_aware = second.tzinfo is not None and second.utcoffset() is not None
+    if first_aware != second_aware:
+        return first, second, True
+    if first_aware:
+        return first.astimezone(timezone.utc), second.astimezone(timezone.utc), False
+    return first, second, False
+
+
 def _finite(value: Any) -> bool:
-    return value is not None and isinstance(value, (int, float)) and math.isfinite(float(value))
+    if value is None or isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
+def _positive_int(value: Any) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return parsed if parsed > 0 else None
 
 
 def _ratio(numerator: int, denominator: int) -> float:
@@ -201,7 +229,7 @@ def _quantile(values: Sequence[float], q: float) -> float | None:
     return ordered[lower] * (1.0 - weight) + ordered[upper] * weight
 
 
-def _dataset_fingerprint(rows: Iterable[sqlite3.Row], manifest: dict[str, Any] | None) -> str:
+def _dataset_fingerprint(rows: Iterable[Mapping[str, Any]], manifest: dict[str, Any] | None) -> str:
     digest = hashlib.sha256()
     digest.update(b"GoldenTradeX-v2.80-baseline-v1\n")
     if manifest is not None:
@@ -217,8 +245,8 @@ def _dataset_fingerprint(rows: Iterable[sqlite3.Row], manifest: dict[str, Any] |
     return digest.hexdigest()
 
 
-def _outcome_rows(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    return conn.execute(
+def _outcome_rows(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    cursor = conn.execute(
         """
         SELECT row_hash, event_id, close_time, symbol, position_id, direction,
                entry_time, initial_risk_money, confidence, regime, mfe_r, mae_r,
@@ -226,7 +254,9 @@ def _outcome_rows(conn: sqlite3.Connection) -> list[sqlite3.Row]:
         FROM position_outcomes
         ORDER BY COALESCE(close_time, ''), COALESCE(position_id, 0), row_hash
         """
-    ).fetchall()
+    )
+    names = [column[0] for column in cursor.description or ()]
+    return [dict(zip(names, row, strict=True)) for row in cursor.fetchall()]
 
 
 def evaluate_data_quality(
@@ -243,11 +273,10 @@ def evaluate_data_quality(
     integrity_errors: list[str] = []
     evidence_gaps: list[str] = list(manifest_errors)
 
-    position_ids = [row["position_id"] for row in rows]
-    null_position_ids = sum(position_id is None or int(position_id) <= 0 for position_id in position_ids)
-    duplicate_position_ids = len([p for p in position_ids if p is not None]) - len(
-        {int(p) for p in position_ids if p is not None}
-    )
+    normalized_position_ids = [_positive_int(row["position_id"]) for row in rows]
+    null_position_ids = sum(position_id is None for position_id in normalized_position_ids)
+    valid_position_ids = [position_id for position_id in normalized_position_ids if position_id is not None]
+    duplicate_position_ids = len(valid_position_ids) - len(set(valid_position_ids))
     if null_position_ids:
         integrity_errors.append(f"{null_position_ids} outcome row(s) have missing/invalid position_id")
     if duplicate_position_ids:
@@ -267,7 +296,7 @@ def evaluate_data_quality(
     observed_symbols: set[str] = set()
 
     for row in rows:
-        symbol = (row["symbol"] or "").strip()
+        symbol = str(row["symbol"] or "").strip()
         if symbol:
             observed_symbols.add(symbol)
 
@@ -275,10 +304,8 @@ def evaluate_data_quality(
         if not _finite(risk) or float(risk) <= 0:
             invalid_risk += 1
 
-        realized = row["realized_r"]
-        if not _finite(realized):
+        if not _finite(row["realized_r"]):
             invalid_realized += 1
-
         if not _finite(row["net_pnl"]):
             invalid_net_pnl += 1
 
@@ -292,15 +319,19 @@ def evaluate_data_quality(
 
         confidence = row["confidence"]
         if confidence is not None:
-            confidence = int(confidence)
-            if confidence == -1:
-                pass
-            elif 0 <= confidence <= 100:
-                confidence_known += 1
-            else:
+            try:
+                parsed_confidence = int(confidence)
+            except (TypeError, ValueError, OverflowError):
                 invalid_confidence += 1
+            else:
+                if parsed_confidence == -1:
+                    pass
+                elif 0 <= parsed_confidence <= 100:
+                    confidence_known += 1
+                else:
+                    invalid_confidence += 1
 
-        direction = (row["direction"] or "").upper()
+        direction = str(row["direction"] or "").upper()
         if direction not in {"BUY", "SELL"}:
             invalid_direction += 1
 
@@ -308,7 +339,14 @@ def evaluate_data_quality(
             try:
                 entry_time = _parse_datetime(str(row["entry_time"]))
                 close_time = _parse_datetime(str(row["close_time"]))
-                if close_time < entry_time:
+                entry_time, close_time, awareness_error = _normalize_datetime_pair(
+                    entry_time, close_time
+                )
+                if awareness_error:
+                    integrity_errors.append(
+                        f"position_id={row['position_id']} mixes timezone-aware and naive timestamps"
+                    )
+                elif close_time < entry_time:
                     integrity_errors.append(
                         f"position_id={row['position_id']} closes before its entry time"
                     )
@@ -330,7 +368,13 @@ def evaluate_data_quality(
         if value:
             integrity_errors.append(f"{value} outcome row(s) have invalid {label}")
 
-    manifest_symbols = set(manifest.get("symbols", [])) if manifest else set()
+    manifest_symbols: set[str] = set()
+    if manifest:
+        raw_symbols = manifest.get("symbols")
+        if isinstance(raw_symbols, list):
+            manifest_symbols = {
+                symbol.strip() for symbol in raw_symbols if isinstance(symbol, str) and symbol.strip()
+            }
     if manifest and observed_symbols and observed_symbols - manifest_symbols:
         integrity_errors.append(
             "database contains symbol(s) outside manifest scope: "
@@ -373,11 +417,11 @@ def evaluate_data_quality(
         "status": status,
         "outcomes": count,
         "observed_symbols": sorted(observed_symbols),
-        "unique_position_ids": len({int(p) for p in position_ids if p is not None and int(p) > 0}),
+        "unique_position_ids": len(set(valid_position_ids)),
         "confidence_coverage": confidence_coverage,
         "excursion_coverage": excursion_coverage,
         "time_coverage": time_coverage,
-        "integrity_errors": integrity_errors,
+        "integrity_errors": list(dict.fromkeys(integrity_errors)),
         "evidence_gaps": list(dict.fromkeys(evidence_gaps)),
         "thresholds": asdict(thresholds),
     }
@@ -411,14 +455,18 @@ def _summary(values: Sequence[float]) -> dict[str, Any]:
     }
 
 
-def _segment(rows: Sequence[sqlite3.Row], thresholds: EvidenceThresholds) -> dict[str, Any]:
+def _segment(rows: Sequence[Mapping[str, Any]], thresholds: EvidenceThresholds) -> dict[str, Any]:
     realized = [float(row["realized_r"]) for row in rows if _finite(row["realized_r"])]
     positive = sum(value > 0 for value in realized)
     negative = sum(value < 0 for value in realized)
     gross_positive = sum(value for value in realized if value > 0)
     gross_negative = abs(sum(value for value in realized if value < 0))
     return {
-        "status": DESCRIPTIVE_SEGMENT if len(realized) >= thresholds.min_segment_outcomes else INSUFFICIENT_SEGMENT,
+        "status": (
+            DESCRIPTIVE_SEGMENT
+            if len(realized) >= thresholds.min_segment_outcomes
+            else INSUFFICIENT_SEGMENT
+        ),
         "observations": len(realized),
         "positive": positive,
         "negative": negative,
@@ -430,18 +478,22 @@ def _segment(rows: Sequence[sqlite3.Row], thresholds: EvidenceThresholds) -> dic
     }
 
 
-def _confidence_bucket(confidence: int | None) -> str:
-    if confidence is None or confidence < 0:
+def _confidence_bucket(confidence: Any) -> str:
+    try:
+        parsed = int(confidence)
+    except (TypeError, ValueError, OverflowError):
         return "UNKNOWN"
-    if confidence < 50:
+    if parsed < 0:
+        return "UNKNOWN"
+    if parsed < 50:
         return "00-49"
-    if confidence < 60:
+    if parsed < 60:
         return "50-59"
-    if confidence < 70:
+    if parsed < 70:
         return "60-69"
-    if confidence < 80:
+    if parsed < 80:
         return "70-79"
-    if confidence < 90:
+    if parsed < 90:
         return "80-89"
     return "90-100"
 
@@ -475,11 +527,12 @@ def build_baseline(
     gross_positive = sum(value for value in realized if value > 0)
     gross_negative = abs(sum(value for value in realized if value < 0))
 
-    confidence_groups: dict[str, list[sqlite3.Row]] = {}
-    regime_groups: dict[str, list[sqlite3.Row]] = {}
+    confidence_groups: dict[str, list[Mapping[str, Any]]] = {}
+    regime_groups: dict[str, list[Mapping[str, Any]]] = {}
     for row in valid_rows:
         confidence_groups.setdefault(_confidence_bucket(row["confidence"]), []).append(row)
-        regime_groups.setdefault(str(row["regime"] if row["regime"] is not None else "UNKNOWN"), []).append(row)
+        regime = row["regime"] if row["regime"] is not None else "UNKNOWN"
+        regime_groups.setdefault(str(regime), []).append(row)
 
     close_times: list[datetime] = []
     for row in valid_rows:
@@ -488,10 +541,11 @@ def build_baseline(
                 close_times.append(_parse_datetime(str(row["close_time"])))
             except ValueError:
                 pass
+    comparable_close_times = _normalize_datetime_collection(close_times)
 
     return {
         "schema_version": REPORT_SCHEMA_VERSION,
-        "generated_at": generated_at or datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "generated_at": generated_at or datetime.now(timezone.utc).isoformat(),
         "research_status": quality["status"],
         "evidence_scope": (
             "Descriptive in-sample telemetry baseline only. READY_FOR_EXPLORATORY_RESEARCH means the "
@@ -502,8 +556,8 @@ def build_baseline(
             "fingerprint_sha256": _dataset_fingerprint(rows, manifest),
             "manifest": manifest,
             "observed_period": {
-                "first_close": min(close_times).isoformat() if close_times else None,
-                "last_close": max(close_times).isoformat() if close_times else None,
+                "first_close": min(comparable_close_times).isoformat() if comparable_close_times else None,
+                "last_close": max(comparable_close_times).isoformat() if comparable_close_times else None,
             },
         },
         "data_quality": quality,
@@ -541,6 +595,17 @@ def build_baseline(
             ),
         },
     }
+
+
+def _normalize_datetime_collection(values: Sequence[datetime]) -> list[datetime]:
+    if not values:
+        return []
+    aware = [value.tzinfo is not None and value.utcoffset() is not None for value in values]
+    if any(aware) and not all(aware):
+        return []
+    if all(aware):
+        return [value.astimezone(timezone.utc) for value in values]
+    return list(values)
 
 
 def write_report(report: dict[str, Any], output: Path) -> None:
