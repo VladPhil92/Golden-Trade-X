@@ -1,13 +1,6 @@
-; Golden Trade X v2.61 — preset XAGUSD (Plata) M15
-; Arrastrar el EA al gráfico XAGUSD M15 con este preset.
-; Magic number diferente (920261) para operar en paralelo con la instancia XAUUSD.
-;
-; Diferencias clave vs XAUUSD:
-;   - InpMagicNumber  : 920261  (evita colisiones de GlobalVariables)
-;   - InpMaxSpreadPoints: 500   (spreads de plata son más amplios: 120-400 pts)
-;   - El cálculo de lote usa ATR del símbolo, por lo que se adapta
-;     automáticamente a la mayor volatilidad de la plata.
-;   - Ajuste fino de RSI y ATR recomendado tras backtest en XAGUSD.
+; Golden Trade X v2.62 — preset XAGUSD (Plata) M15
+; Magic number diferente (920261) para operar en paralelo con XAUUSD.
+; Este preset NO constituye validacion de edge para XAGUSD.
 
 InpMagicNumber=920261
 InpTradeComment=GoldenTradeX_XAGUSD
@@ -31,7 +24,7 @@ InpAdxMinLevel=25.0
 InpUseHtfFilter=true
 InpHtfEmaPeriod=50
 
-; --- Confluence Score & Smart Money (heuristico, v2.00) ---
+; --- Confluence Score & Smart Money (heuristico, no calibrado) ---
 InpUseRegimeFilter=true
 InpUseSmcFilter=true
 InpMinConfidence=55
@@ -52,6 +45,7 @@ InpAtrSlMultiplier=2.0
 InpAtrTpMultiplier=3.0
 InpMaxSpreadPoints=500
 InpCpThresholdPct=8.0
+InpMinInitialRR=0.0
 
 ; --- Trailing y Break-Even ---
 InpUseTrailing=true
@@ -70,36 +64,33 @@ InpFridayCloseHour=19
 InpUseNewsFilter=true
 InpNewsBufferBefore=30
 InpNewsBufferAfter=90
+InpNewsCalendarPolicy=0
 InpPauseForNews=false
 
-; --- Kelly Criterion Fraccional (v2.40) ---
-; InpUseKelly=false por defecto. Activar solo tras >= InpKellyMinTrades en historial.
+; --- Kelly Criterion Fraccional ---
 InpUseKelly=false
 InpKellyFraction=0.25
 InpKellyMinTrades=30
 
-; --- Order Manager (v2.30) ---
+; --- Order Manager ---
 InpOrderMaxRetries=3
 InpOrderRetryDelay=500
 InpMinMarginLevel=200.0
 
-; --- Portfolio Risk Cap (v2.60) ---
-; Si corres esta instancia (XAGUSD) EN PARALELO con GoldenTradeX.set (XAUUSD),
-; activa InpUsePortfolioCap=true en AMBAS instancias con el MISMO
-; InpMaxPortfolioRiskPct — comparten el mismo presupuesto por cuenta.
+; --- Portfolio Risk Cap ---
 InpUsePortfolioCap=false
 InpMaxPortfolioRiskPct=1.5
 
-; --- Partial Take Profit (v2.20) ---
+; --- Partial Take Profit ---
 InpUsePartialTP=true
 InpPartialTPR=1.0
 InpPartialTPPct=50.0
 
-; --- Equity Curve Filter (v2.20) ---
+; --- Equity Curve Filter ---
 InpUseEqCurveFilter=true
 InpEqCurvePeriod=20
 
-; --- Filtro volumen de ticks (v2.20) ---
+; --- Filtro volumen de ticks ---
 InpMinTickVolume=10
 
 ; --- Registro ---
