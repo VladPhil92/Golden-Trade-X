@@ -43,43 +43,83 @@ jobs:
         run: python -m pip_audit -r requirements.txt --progress-spinner off
 
   dependency-review:
-    name: Dependency review capability
+    name: Dependency review (public REST)
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     steps:
-      - uses: actions/checkout@v7
-      - name: Detect Dependency Graph availability
-        id: depgraph
+      - name: Review dependency diff and vulnerabilities
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
+          GTX_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GTX_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          code=$(curl --silent --show-error --output /tmp/gtx-sbom.json \
+          set -euo pipefail
+          endpoint="https://api.github.com/repos/${GITHUB_REPOSITORY}/dependency-graph/compare/${GTX_BASE_SHA}...${GTX_HEAD_SHA}"
+          code=$(curl -L --silent --show-error --output /tmp/gtx-dependency-diff.json \
             --write-out "%{http_code}" \
             -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/dependency-graph/sbom")
-          if [ "$code" = "200" ]; then
-            echo "supported=true" >> "$GITHUB_OUTPUT"
-            echo "Dependency Graph available — dependency review is blocking."
-          elif [ "$code" = "403" ] || [ "$code" = "404" ]; then
-            echo "supported=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::Dependency Graph is disabled/unavailable; Dependency Review cannot be enforced yet."
-          else
-            echo "Unexpected Dependency Graph API status: $code"
-            cat /tmp/gtx-sbom.json || true
+            -H "X-GitHub-Api-Version: 2026-03-10" \
+            "$endpoint")
+
+          if [ "$code" != "200" ]; then
+            echo "::error::Dependency review API unavailable (HTTP $code). Failing closed."
+            cat /tmp/gtx-dependency-diff.json || true
             exit 1
           fi
-      - name: Review dependency changes
-        if: steps.depgraph.outputs.supported == 'true'
-        uses: actions/dependency-review-action@v4
-        with:
-          fail-on-severity: moderate
-      - name: Record external security gap
-        if: steps.depgraph.outputs.supported != 'true'
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          changes = json.loads(Path('/tmp/gtx-dependency-diff.json').read_text(encoding='utf-8'))
+          severity_rank = {'low': 1, 'moderate': 2, 'high': 3, 'critical': 4}
+          findings = []
+
+          for change in changes:
+              if change.get('change_type') == 'removed':
+                  continue
+              for vuln in change.get('vulnerabilities') or []:
+                  severity = str(vuln.get('severity', '')).lower()
+                  if severity_rank.get(severity, 0) >= severity_rank['moderate']:
+                      findings.append({
+                          'package': change.get('name'),
+                          'version': change.get('version'),
+                          'severity': severity,
+                          'ghsa': vuln.get('advisory_ghsa_id'),
+                          'summary': vuln.get('advisory_summary'),
+                      })
+
+          print(f"Dependency changes reviewed: {len(changes)}")
+          if findings:
+              print('Dependency review rejected moderate+ vulnerabilities:')
+              for item in findings:
+                  print(
+                      f"- {item['package']}@{item['version']} "
+                      f"[{item['severity']}] {item['ghsa']}: {item['summary']}"
+                  )
+              raise SystemExit(1)
+
+          print('DEPENDENCY REVIEW PASS — no added/updated dependency has a known moderate+ vulnerability')
+          PY
+
+  security-required:
+    name: Security required gate
+    if: always()
+    needs:
+      - codeql
+      - python-dependency-audit
+      - dependency-review
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce security job conclusions
+        shell: bash
         run: |
-          echo "DEPENDENCY_REVIEW=BLOCKED_EXTERNAL"
-          echo "Enable GitHub Dependency Graph to make dependency-review-action a blocking gate."
+          set -euo pipefail
+          test "${{ needs.codeql.result }}" = "success"
+          test "${{ needs.python-dependency-audit.result }}" = "success"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            test "${{ needs.dependency-review.result }}" = "success"
+          else
+            test "${{ needs.dependency-review.result }}" = "skipped"
+          fi
+          echo "SECURITY REQUIRED GATE PASS"
