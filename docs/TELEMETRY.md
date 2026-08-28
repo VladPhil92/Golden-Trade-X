@@ -19,6 +19,12 @@ MT5 / EA
                                 |
                                 v
                          SQLite research DB
+                                |
+                                v
+                       telemetry_report.py
+                                |
+                                v
+                    dashboard/research.html
 ```
 
 A telemetry write failure must never be interpreted as permission to trade or as evidence that an event occurred. Missing observations stay missing.
@@ -95,6 +101,20 @@ The importer is idempotent. Each canonical source row is hashed with SHA-256 and
 
 Malformed files fail fast when required headers are absent or a row contains more fields than its header. Empty numeric fields become SQL `NULL`; they are not replaced with zero unless the source explicitly wrote zero.
 
+## Reproducible descriptive report
+
+The SQLite database is read in read-only mode and converted to a versioned JSON summary:
+
+```bash
+python scripts/telemetry_report.py \
+  --db data/gtx_research.sqlite \
+  --output data/gtx_research_report.json
+```
+
+The report contains observed row counts, signal-stage/decision counts, rejection reasons, execution status counts, confirmed-open slippage observations and descriptive final-outcome aggregates. Empty datasets remain empty/`null`; the report generator does not create placeholder trades or substitute missing values.
+
+Open `dashboard/research.html` locally and select the generated JSON file. The dashboard is offline and does not query brokers or external services. Its evidence banner explicitly states that displayed summaries are descriptive telemetry only and are not OOS, forward-demo, profitability or statistical-significance evidence.
+
 ## Identity rules
 
 The same identity rules used by the trading plane apply to research joins:
@@ -121,4 +141,5 @@ v2.70 is complete only when all of the following are integrated and verified:
 - [x] EA emits request/result and broker-deal execution observations;
 - [x] final position outcomes export PositionState MFE/MAE and Realized R;
 - [ ] dashboard/research summary consumes the database without inventing metrics;
+- [x] dashboard/research summary consumes the database without inventing metrics;
 - [ ] all CI/Security/MQL5 required gates pass on the integrated PR.
