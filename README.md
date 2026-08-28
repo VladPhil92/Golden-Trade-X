@@ -1,190 +1,266 @@
 # Golden Trade X
 
 [![CI](https://github.com/VladPhil92/Golden-Trade-X/actions/workflows/ci.yml/badge.svg)](https://github.com/VladPhil92/Golden-Trade-X/actions/workflows/ci.yml)
+[![MQL5 Windows Build](https://github.com/VladPhil92/Golden-Trade-X/actions/workflows/mql5-windows.yml/badge.svg)](https://github.com/VladPhil92/Golden-Trade-X/actions/workflows/mql5-windows.yml)
 [![Licencia: MIT](https://img.shields.io/badge/Licencia-MIT-blue.svg)](LICENSE)
 ![MQL5](https://img.shields.io/badge/MQL5-MetaTrader%205-orange)
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB)
 
-**Sistema algorítmico de trading para metales preciosos (XAUUSD) sobre MetaTrader 5**, con gestión de riesgo multicapa, ejecución con tolerancia a fallos y una plataforma completa de análisis estadístico y monitoreo continuo.
+**Golden Trade X** es una plataforma experimental de trading sistemático para MetaTrader 5, orientada inicialmente a XAUUSD M15. Combina un EA modular en MQL5 con herramientas Python para validación estadística, research, monitoreo y futura operación controlada.
 
 Desarrollado y mantenido por **CTG One Technology S.A.S.**
 
----
+## Estado del proyecto
 
-## Aviso legal y de riesgo
+> **Experimental / quantitative validation pending.** La ingeniería del sistema tiene un nivel de madurez avanzado, pero todavía **no existe evidencia empírica reproducible suficiente** para afirmar que la estrategia posee un edge rentable y estable fuera de muestra. No debe interpretarse un CI verde, una compilación correcta ni una métrica de backtest aislada como evidencia de rentabilidad futura.
 
-> ⚠️ El trading apalancado en metales conlleva un **riesgo elevado de pérdida parcial o total del capital**. Este software se distribuye "tal cual" (*as is*), con fines educativos y de investigación. Debe probarse siempre en **cuenta demo** y validarse con backtesting exhaustivo antes de considerar capital real. Nada en este repositorio constituye asesoría financiera ni una oferta de servicios de inversión.
->
-> **Estado del proyecto:** sistema experimental en etapa de validación. La infraestructura de software se encuentra en un estado de madurez avanzado; sin embargo, **no existe todavía evidencia empírica reproducible** (backtest auditado, forward test prolongado) de que la estrategia posea una ventaja estadística rentable. Este repositorio documenta sus limitaciones metodológicas de forma explícita — ver [Advertencias metodológicas](#advertencias-metodológicas-conocidas).
+El trading apalancado puede producir pérdida parcial o total del capital. Este repositorio no constituye asesoría financiera.
 
----
+## Objetivo técnico
 
-## Acerca de CTG One Technology S.A.S.
+El programa de desarrollo prioriza, en este orden:
 
-CTG One Technology S.A.S. es una sociedad de tecnología dentro de cuyo portafolio se desarrolla Golden Trade X como plataforma de investigación, ejecución y gestión de riesgo para estrategias sistemáticas sobre metales preciosos.
+```text
+CORRECTNESS
+→ DATA QUALITY
+→ REPRODUCIBILITY
+→ QUANTITATIVE VALIDATION
+→ OPTIMIZATION
+→ ML
+→ FORWARD VALIDATION
+→ CONTROLLED PRODUCTION
+```
 
-| | |
+No se añaden indicadores o modelos por complejidad nominal. Cada cambio de estrategia debe convertirse en una hipótesis falsable y validarse OOS.
+
+## Arquitectura actual
+
+```text
+Market / Broker
+      │
+      ▼
+SignalEngine
+      │
+      ├── MarketRegimeEngine
+      ├── SmartMoneyEngine
+      ├── FibonacciEngine
+      └── ConfidenceEngine (heuristic Confluence Score)
+      │
+      ▼
+RiskManager
+      │
+      ▼
+OrderManager ── server-side confirmation
+      │
+      ▼
+Broker
+      │
+      ├── PositionStateManager
+      ├── PartialTakeProfit
+      ├── Break-Even / ATR Trailing
+      ├── HealthMonitor
+      └── TradeLogger
+```
+
+### Componentes MQL5 principales
+
+| Módulo | Responsabilidad |
 |---|---|
-| **Sitio web** | [ctgone.com](https://ctgone.com) |
-| **Contacto** | [ctgone@gmail.com](mailto:ctgone@gmail.com) |
-| **Repositorio** | [github.com/VladPhil92/Golden-Trade-X](https://github.com/VladPhil92/Golden-Trade-X) |
+| `SignalEngine.mqh` | EMA 21/55, RSI, ADX, ATR, volumen, filtro H4 |
+| `MarketRegimeEngine.mqh` | clasificación heurística de régimen |
+| `SmartMoneyEngine.mqh` | BOS, CHOCH, FVG, order blocks, liquidity sweep |
+| `FibonacciEngine.mqh` | contexto/swing y confluencia Fibonacci |
+| `ConfidenceEngine.mqh` | Confluence Score heurístico configurable |
+| `RiskManager.mqh` | sizing, DD, kill switch, Kelly opcional, portfolio cap |
+| `OrderManager.mqh` | ejecución, retries y confirmación server-side |
+| `PositionStateManager.mqh` | Initial R inmutable, identidad y estado persistente |
+| `PartialTakeProfit.mqh` | cierre parcial basado en Initial R |
+| `EquityCurveFilter.mqh` | reducción de tamaño según curva de equity |
+| `NewsFilter.mqh` | ventanas FOMC verificadas + proxies NFP/CPI |
+| `SessionFilter.mqh` | sesión y protección de viernes |
+| `HealthMonitor.mqh` | conexión, margen, SL huérfano |
+| `TradeLogger.mqh` | ledger CSV por posición cerrada |
 
----
+## Correctness v2.62
 
-## Descripción del producto
+La versión 2.62 introduce una capa explícita de integridad de trading:
 
-Golden Trade X es un Expert Advisor (EA) para MetaTrader 5 orientado a Oro (XAUUSD) en timeframe M15, acompañado de un ecosistema de herramientas Python para análisis, validación y observabilidad. El sistema se estructura en tres planos:
+- `CTrade::PositionOpen()/Close()/Modify()` no se consideran exitosos únicamente porque el wrapper retorne `true`; se exige evidencia server-side apropiada.
+- Se distinguen `order ticket`, `deal ticket`, `POSITION_IDENTIFIER` y `position ticket`.
+- El estado durable se indexa por `POSITION_IDENTIFIER`.
+- El riesgo inicial es inmutable durante la vida de la posición.
+- Partial TP y break-even dejan de depender del SL móvil.
+- `RMultiple` se define como `net P/L completo / initial monetary risk`.
+- sizing y riesgo monetario usan `OrderCalcProfit()` para respetar el contrato del símbolo.
+- cuentas netting con ownership ambiguo fallan cerrado.
+- `InpMinInitialRR` existe como guard, pero permanece en `0.0` por defecto hasta disponer de evidencia OOS para elegir un umbral.
 
-1. **Motor de decisión (MQL5)** — señal técnica multicapa con clasificación de régimen de mercado, análisis de estructura (Smart Money Concepts), confluencia Fibonacci y un puntaje de confluencia configurable.
-2. **Gestión de riesgo y ejecución (MQL5)** — límites de drawdown diario/semanal/mensual persistentes, kill switch, control de riesgo agregado entre instancias, validación de margen y ejecución con reintentos y validación de restricciones del broker.
-3. **Plataforma de análisis y monitoreo (Python)** — estadística de desempeño con métricas ajustadas por riesgo (Sortino, Calmar, PSR/DSR), Monte Carlo con block bootstrap, optimización walk-forward, evaluación continua con alertas de degradación y notificaciones Telegram.
+## Gestión de riesgo por defecto
 
-### Arquitectura del repositorio
+| Control | Default |
+|---|---:|
+| Riesgo por operación | 1.0 % |
+| DD diario | 4 % |
+| DD semanal | 8 % |
+| DD mensual | 15 % |
+| Pérdidas consecutivas | 3 |
+| SL base | ATR × 2 |
+| TP base | ATR × 3 |
+| Partial TP | 50 % a +1 Initial R |
+| Break-even | +0.5 Initial R |
+| Portfolio Risk Cap | OFF, 1.5 % si se activa |
+| Kelly | OFF |
+| Minimum Initial RR | OFF (`0.0`) |
 
+Estos valores son configuración de referencia, **no parámetros demostrados como óptimos**.
+
+## NewsFilter
+
+FOMC 2025–2027 utiliza fechas de decisión publicadas por la Federal Reserve y convierte 14:00 US Eastern a UTC teniendo en cuenta DST. `InpNewsCalendarPolicy` permite:
+
+- `0 = WARN`
+- `1 = FAIL_CLOSED`
+- `2 = FAIL_OPEN`
+
+NFP y CPI todavía usan **proxies de fecha**. Su hora sí se convierte desde 08:30 US Eastern con DST. Antes de usar backtests históricos como evidencia oficial debe incorporarse el calendar cache histórico exacto; no debe asumirse que el filtro actual reproduce perfectamente eventos 2020–2024.
+
+## CI y verificación
+
+### CI Linux
+
+En cada push/PR se ejecutan gates para:
+
+- integridad de dependencias;
+- `pip check`;
+- compilación Python;
+- Ruff;
+- tests Python + coverage;
+- XGBoost/scikit-learn compatibility;
+- análisis estático MQL5;
+- presets y invariantes cruzadas;
+- estructura del repositorio;
+- consistencia EA/CHANGELOG;
+- dashboard.
+
+### MetaEditor Windows
+
+`.github/workflows/mql5-windows.yml` instala MetaTrader 5 oficial en `windows-latest` y compila realmente:
+
+```text
+GoldenTradeX.mq5
+→ MetaEditor
+→ 0 errors required
+→ GoldenTradeX.ex5
+→ SHA-256
+→ build artifact
 ```
-golden-trade-x/
-├── MQL5/
-│   ├── Experts/GoldenTradeX/
-│   │   └── GoldenTradeX.mq5          ← EA principal (orquestador)
-│   ├── Include/GoldenTradeX/
-│   │   ├── SignalEngine.mqh          ← Señal base: EMA21/55 + RSI + ADX + ATR + H4
-│   │   ├── MarketRegimeEngine.mqh    ← Clasificación de régimen (tendencia/rango/volátil)
-│   │   ├── SmartMoneyEngine.mqh      ← BOS/CHOCH/FVG/Order Blocks/Liquidity Sweep
-│   │   ├── FibonacciEngine.mqh       ← Confluencia con niveles Fibonacci
-│   │   ├── ConfidenceEngine.mqh      ← Confluence Score heurístico (pesos configurables)
-│   │   ├── RiskManager.mqh           ← Riesgo, DD multicapa, Kelly, Portfolio Risk Cap
-│   │   ├── OrderManager.mqh          ← Ejecución con retry, validación, stops_level
-│   │   ├── HealthMonitor.mqh         ← Monitor periódico: margen, conexión, SL huérfano
-│   │   ├── PartialTakeProfit.mqh     ← Cierre parcial al alcanzar R objetivo
-│   │   ├── EquityCurveFilter.mqh     ← Reduce lote si equity < su propia EMA
-│   │   ├── SessionFilter.mqh         ← Filtro de sesiones, fin de semana y aviso DST
-│   │   ├── NewsFilter.mqh            ← Filtro NFP / FOMC (2025–2027) / CPI
-│   │   └── TradeLogger.mqh           ← Registro CSV auditable por operación cerrada
-│   └── Scripts/Tests/                ← Tests unitarios MQL5 (ejecución manual en MT5)
-├── scripts/
-│   ├── backtest_analysis.py          ← Estadística, Monte Carlo, PSR/DSR, reporte HTML
-│   ├── performance_report.py         ← Evaluación continua con alertas de degradación
-│   ├── walk_forward_optimizer.py     ← Walk-forward real (ventanas IS/OOS deslizantes)
-│   ├── ml_pipeline.py                ← Pipeline XGBoost sobre el historial de trades
-│   ├── correlation_engine.py         ← Correlaciones macro (DXY, VIX, US10Y, SP500)
-│   ├── fomc_calendar.py              ← Actualizador del calendario FOMC → código MQL5
-│   ├── mql5_lint.py                  ← Linter estático MQL5 (integrado en CI)
-│   ├── validate_set.py               ← Validador de presets .set (integrado en CI)
-│   └── live_monitor.py / monitor.py  ← Monitoreo en vivo con alertas Telegram
-├── config/                           ← Presets del Strategy Tester (XAUUSD / XAGUSD)
-├── dashboard/                        ← Dashboard offline (carga CSV del TradeLogger)
-├── docs/                             ← STRATEGY.md · ARCHITECTURE.md
-├── tests/                            ← Suite pytest (69 tests) de la capa estadística
-└── CHANGELOG.md                      ← Historial completo de versiones (fuente de verdad)
+
+Un linter MQL5 no sustituye este gate.
+
+### Próximo nivel de testing
+
+La existencia de scripts en `MQL5/Scripts/Tests/` no significa todavía que todos se ejecuten automáticamente. El roadmap inmediato incluye un harness que diferencie:
+
+```text
+L1 MQL5 unit tests
+L2 EA integration tests
+L3 MetaTrader Strategy Tester
 ```
 
-### Flujo de decisión
+## Python / Quant tooling
 
+`scripts/` incluye actualmente:
+
+- `backtest_analysis.py` — métricas, retornos diarios, Monte Carlo, PSR/DSR;
+- `performance_report.py` — degradación y evaluación recurrente;
+- `walk_forward_optimizer.py` — análisis post-hoc por threshold;
+- `ml_pipeline.py` — scaffold XGBoost;
+- `regime_analysis.py`;
+- `session_analyzer.py`;
+- `correlation_engine.py`;
+- `fomc_calendar.py`;
+- `live_monitor.py` / `monitor.py`.
+
+### Advertencia importante sobre walk-forward
+
+El `walk_forward_optimizer.py` existente opera sobre trades ya generados y filtra retrospectivamente por confidence. Es útil como **diagnóstico**, pero **no constituye el verdadero walk-forward definitivo del EA**, porque eliminar un trade cambia equity, drawdown, rachas, sizing y estados futuros.
+
+El walk-forward oficial deberá ser:
+
+```text
+IS Strategy Tester optimization
+→ freeze parameters
+→ independent OOS Strategy Tester run
+→ roll window
 ```
-Nueva vela → Guardianes: kill switch / sesión / spread / DD diario-semanal-mensual /
-             pérdidas consecutivas / noticias / margen
-          → Señal base: EMA21/55 + RSI + ADX + ATR + tendencia H4
-          → Régimen de mercado (bloqueo total en régimen VOLATILE)
-          → Confluence Score ≥ umbral configurado
-          → Dimensionamiento: % de riesgo (o Kelly fraccional), Portfolio Risk Cap,
-             validación de margen libre
-          → Ejecución: SL/TP validados contra restricciones del broker, retry automático
-          → Gestión: break-even con buffer, partial TP, trailing ATR, cierre de viernes
-```
-
----
-
-## Proceso de desarrollo
-
-El proyecto sigue prácticas de ingeniería verificables en el propio repositorio:
-
-- **Versionado documentado** — cada versión queda registrada en [`CHANGELOG.md`](CHANGELOG.md) (formato *Keep a Changelog*), incluyendo causas raíz de los defectos corregidos.
-- **Integración continua** — 7 verificaciones automáticas en cada push: lint Python (ruff), linter estático MQL5, suite pytest, validación de presets, consistencia de versiones, estructura del repositorio y validación del dashboard.
-- **Auditorías críticas iterativas** — el código ha sido sometido a revisiones internas y externas sucesivas (correctitud de ejecución, seguridad, control de riesgo, metodología estadística), con los hallazgos y su resolución documentados en el CHANGELOG.
-- **Honestidad metodológica** — las limitaciones conocidas se documentan en lugar de ocultarse; los nombres de los componentes reflejan lo que realmente son (p. ej. *Confluence Score heurístico*, no "ensemble estadístico").
-
-### Gestión de riesgo por defecto
-
-| Control | Valor por defecto |
-|---|---|
-| Riesgo por operación | 1 % del equity (Kelly fraccional opcional, desactivado) |
-| Stop Loss / Take Profit | ATR(14) × 2 / ATR(14) × 3 |
-| Drawdown diario / semanal / mensual | 4 % / 8 % / 15 % — persistentes entre reinicios |
-| Pérdidas consecutivas | Pausa tras 3 (neto de posición completa) |
-| Kill switch | Automático ante errores fatales del broker; persistente |
-| Portfolio Risk Cap | Opcional — riesgo agregado entre instancias correlacionadas |
-| Validación de margen | Máx. 80 % del margen libre antes de enviar |
-
-> Estos son valores por defecto configurables, no objetivos de rendimiento validados. Para capital real se recomienda iniciar con riesgo sustancialmente menor (0.25–0.5 %).
-
----
 
 ## Instalación
 
-1. Abra MetaTrader 5 → **Archivo → Abrir carpeta de datos**.
-2. Copie:
-   - `MQL5/Experts/GoldenTradeX/` → carpeta `MQL5/Experts/` del terminal
-   - `MQL5/Include/GoldenTradeX/` → carpeta `MQL5/Include/` del terminal
-3. Abra **MetaEditor** (F4) y compile `GoldenTradeX.mq5` (F7). Debe compilar con 0 errores.
-4. En MT5, arrastre el EA al gráfico **XAUUSD M15** y habilite *Algo Trading*.
-5. Verifique el nombre exacto del símbolo de su broker (`XAUUSD`, `GOLD`, `XAUUSD.m`, etc.).
+1. MetaTrader 5 → **Archivo → Abrir carpeta de datos**.
+2. Copiar `MQL5/Experts/GoldenTradeX/` a `MQL5/Experts/`.
+3. Copiar `MQL5/Include/GoldenTradeX/` a `MQL5/Include/`.
+4. Compilar `GoldenTradeX.mq5` en MetaEditor.
+5. Cargar `config/GoldenTradeX.set` sobre XAUUSD M15.
+6. Operar únicamente en demo mientras no se hayan superado los gates cuantitativos y forward.
 
-## Validación y backtesting (obligatorio antes de demo/real)
+## Backtesting
 
-1. **Ver → Probador de estrategias** (Ctrl+R), símbolo de oro de su broker, M15.
-2. En **Inputs**: engranaje ⚙ → **Load Settings** → `config/GoldenTradeX.set`.
-3. Modelo *1 minute OHLC* para exploración; *Every tick based on real ticks* para el resultado final.
-4. Analice el CSV generado por el TradeLogger:
+Exploración:
 
-```bash
-pip install -r requirements.txt
-
-# Análisis estadístico completo (Monte Carlo, Sharpe %, Sortino, PSR/DSR)
-python scripts/backtest_analysis.py trades.csv --html-output report.html
-python scripts/backtest_analysis.py --block-size 5 --trials 20
-
-# Walk-forward real (ventanas in-sample / out-of-sample deslizantes)
-python scripts/walk_forward_optimizer.py trades.csv
-
-# Evaluación continua en demo/real (alertas de degradación)
-python scripts/performance_report.py --watch 300
+```text
+1 minute OHLC
 ```
 
-Este repositorio no publica resultados de ejemplo: genere su propia evidencia con `--html-output` y consérvela junto con el `.set` utilizado, el build de MT5, el broker y el periodo exacto.
+Evidencia final:
 
-## Operación multi-símbolo (XAGUSD)
-
-1. Gráfico **XAGUSD M15** → arrastre el EA → preset `config/GoldenTradeX_XAGUSD.set` (magic `920261`).
-2. Active `InpUsePortfolioCap=true` en **ambas** instancias con el mismo límite: XAUUSD y XAGUSD están correlacionados y, sin este control, cada instancia gestiona su riesgo de forma aislada aunque la exposición macro real esté sumada.
-
-## Monitoreo continuo
-
-```bash
-python scripts/live_monitor.py --dry-run        # alertas Telegram (trades, salud del EA)
-python scripts/performance_report.py --watch 300  # degradación de desempeño
+```text
+Every tick based on real ticks
 ```
 
-Configure las credenciales en `.env` (plantilla en `.env.example`). Requiere el terminal MT5 abierto en la misma máquina Windows para `monitor.py`.
+Conservar siempre:
 
----
+- EA/Git SHA;
+- preset y hash;
+- broker;
+- símbolo exacto;
+- MT5 build;
+- periodo;
+- capital/leverage;
+- spread;
+- comisión;
+- swap;
+- slippage assumption;
+- número de configuraciones probadas.
 
-## Advertencias metodológicas conocidas
+## Gates antes de capital real
 
-- El **Confluence Score** es un puntaje heurístico por confluencia de filtros, no un ensemble estadístico calibrado. Sus pesos (`InpConfWeight*`) son configurables precisamente para optimizarse con datos reales.
-- El desglose trimestral de `backtest_analysis.py` es descriptivo; el walk-forward de entrenamiento/prueba real es `walk_forward_optimizer.py`.
-- El Monte Carlo por defecto asume independencia entre operaciones; use `--block-size 5` o mayor para preservar rachas.
-- Los "objetivos internos de calidad" del reporte son umbrales propios del proyecto, no una certificación externa.
-- Las fechas FOMC 2027 son proyectadas, pendientes de confirmación por la Reserva Federal.
-- El CI no compila MQL5 (MetaEditor no existe para Linux); el linter estático cubre las clases de error conocidas y la compilación final se verifica en MetaEditor.
+Los umbrales son criterios internos de investigación, no garantías. Como referencia, una candidata no debería promoverse sin:
 
-## Soporte y contribuciones
+- expectancy OOS > 0;
+- PF OOS aproximadamente > 1.25–1.30;
+- Max DD < 15 %;
+- PSR ≥ 95 %;
+- DSR > 0;
+- parameter stability;
+- walk-forward robusto;
+- stress de costes;
+- robustez entre brokers;
+- forward demo suficiente;
+- observabilidad y recovery operacional.
 
-- **Consultas y soporte:** [ctgone@gmail.com](mailto:ctgone@gmail.com)
-- **Defectos y sugerencias:** [Issues del repositorio](https://github.com/VladPhil92/Golden-Trade-X/issues)
-- **Historial de cambios:** [`CHANGELOG.md`](CHANGELOG.md)
+## Roadmap
+
+```text
+v2.62  Trading Correctness
+v2.63  Automated MQL5 Verification
+v2.70  Research Telemetry / Event Ledger
+v2.80  Quant Research / Ablation
+v2.90  Reproducible Validation
+v3.0-rc1  OOS validated
+v3.0-rc2  Forward validated
+v3.0      Controlled production
+```
 
 ## Licencia
 
-MIT © 2026 [CTG One Technology S.A.S.](https://ctgone.com) — ver [`LICENSE`](LICENSE).
-
-El uso de este software implica la aceptación de que el usuario es el único responsable de las decisiones de inversión tomadas con él.
+MIT © 2026 CTG One Technology S.A.S.
