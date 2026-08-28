@@ -19,33 +19,35 @@ REQUIRED = {
     "InpRiskPercent", "InpMaxDailyDD", "InpMaxWeeklyDD",
     "InpMaxConsecLosses", "InpMaxPositions",
     "InpAtrSlMultiplier", "InpAtrTpMultiplier", "InpMaxSpreadPoints",
+    "InpMinInitialRR",
     # Trailing / break-even
     "InpUseTrailing", "InpTrailAtrMult", "InpUseBreakEven", "InpBreakEvenR",
     # Sessions
     "InpUseSessionFilter", "InpStartHour", "InpEndHour",
     "InpCloseOnFriday", "InpFridayCloseHour",
     # News
-    "InpUseNewsFilter", "InpNewsBufferBefore", "InpNewsBufferAfter", "InpPauseForNews",
+    "InpUseNewsFilter", "InpNewsBufferBefore", "InpNewsBufferAfter",
+    "InpNewsCalendarPolicy", "InpPauseForNews",
     # Logging
     "InpEnableTradeLog",
-    # v2.00 — Confluence & Smart Money
+    # Confluence & Smart Money
     "InpUseRegimeFilter", "InpUseSmcFilter", "InpMinConfidence",
-    # v2.00 — Advanced Risk
+    # Advanced Risk
     "InpMaxMonthlyDD", "InpCpThresholdPct",
-    # v2.40 — Kelly Criterion
+    # Kelly Criterion
     "InpUseKelly", "InpKellyFraction", "InpKellyMinTrades",
-    # v2.30 — Order Manager
+    # Order Manager
     "InpOrderMaxRetries", "InpOrderRetryDelay", "InpMinMarginLevel",
-    # v2.60 — Portfolio Risk Cap
+    # Portfolio Risk Cap
     "InpUsePortfolioCap", "InpMaxPortfolioRiskPct",
-    # v2.60 — Confluence Score weights
+    # Confluence Score weights
     "InpConfWeightBase", "InpConfWeightRegime", "InpConfWeightSmc",
     "InpConfWeightHtf", "InpConfWeightFib",
-    # v2.20 — Partial Take Profit
+    # Partial Take Profit
     "InpUsePartialTP", "InpPartialTPR", "InpPartialTPPct",
-    # v2.20 — Equity Curve Filter
+    # Equity Curve Filter
     "InpUseEqCurveFilter", "InpEqCurvePeriod",
-    # v2.20 — Signal quality
+    # Signal quality
     "InpMinTickVolume",
 }
 
@@ -80,6 +82,7 @@ RANGE_CHECKS = {
     "InpAtrSlMultiplier":     (0, 20, False, False),
     "InpAtrTpMultiplier":     (0, 20, False, False),
     "InpMaxSpreadPoints":     (0, 100000, False, False),
+    "InpMinInitialRR":        (0, 10, False, True),
     "InpTrailAtrMult":        (0, 20, False, False),
     "InpBreakEvenR":          (0, 10, False, False),
     "InpMinConfidence":       (0, 100, True, True),
@@ -105,6 +108,7 @@ RANGE_CHECKS = {
     "InpFridayCloseHour":     (0, 23, True, True),
     "InpNewsBufferBefore":    (0, 240, True, True),
     "InpNewsBufferAfter":     (0, 480, True, True),
+    "InpNewsCalendarPolicy":  (0, 2, True, True),
 }
 
 WEIGHT_KEYS = (
@@ -184,10 +188,8 @@ def validate_params(params: dict[str, str], label: str) -> list[str]:
     if None not in (dd_daily, dd_weekly, dd_monthly) and not (dd_daily <= dd_weekly <= dd_monthly):
         errors.append(f"{label}: drawdown limits must satisfy daily <= weekly <= monthly")
 
-    break_even = _number(params, "InpBreakEvenR")
-    sl_mult = _number(params, "InpAtrSlMultiplier")
-    if break_even is not None and sl_mult is not None and break_even > sl_mult:
-        errors.append(f"{label}: InpBreakEvenR must be <= InpAtrSlMultiplier")
+    # v2.62: BreakEvenR is expressed in immutable Initial R, while
+    # AtrSlMultiplier is an ATR distance. They are intentionally not compared.
 
     if all(key in params for key in WEIGHT_KEYS):
         try:
