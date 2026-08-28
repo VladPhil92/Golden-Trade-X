@@ -11,6 +11,7 @@ from confidence_research import (
     ConfidenceThresholds,
     build_confidence_report,
     chronological_split,
+    purge_holdout_overlaps,
     select_threshold,
     threshold_metrics,
     training_grid,
@@ -32,10 +33,19 @@ def _manifest() -> dict:
     }
 
 
-def _outcome(position_id: int, hour: int, confidence: int, realized_r: float) -> ConfidenceOutcome:
+def _outcome(
+    position_id: int,
+    hour: int,
+    confidence: int,
+    realized_r: float,
+    *,
+    entry_time: datetime | None = None,
+) -> ConfidenceOutcome:
+    close_time = datetime(2026, 1, 1) + timedelta(hours=hour)
     return ConfidenceOutcome(
         position_id=position_id,
-        close_time=datetime(2026, 1, 1) + timedelta(hours=hour),
+        entry_time=entry_time or close_time - timedelta(minutes=30),
+        close_time=close_time,
         confidence=confidence,
         realized_r=realized_r,
     )
@@ -121,6 +131,25 @@ def test_chronological_split_keeps_equal_timestamp_on_one_side() -> None:
     assert train[-1].close_time < holdout[0].close_time
 
 
+def test_holdout_purges_entries_not_strictly_after_final_train_close() -> None:
+    cutoff = datetime(2026, 1, 1, 10, 0, 0)
+    train = [
+        ConfidenceOutcome(1, cutoff - timedelta(hours=2), cutoff, 70, 0.5),
+    ]
+    holdout = [
+        ConfidenceOutcome(2, cutoff - timedelta(hours=1), cutoff + timedelta(hours=1), 70, 0.2),
+        ConfidenceOutcome(3, cutoff, cutoff + timedelta(hours=2), 75, 0.3),
+        ConfidenceOutcome(4, cutoff + timedelta(minutes=1), cutoff + timedelta(hours=3), 80, 0.4),
+    ]
+
+    clean, purged, observed_cutoff = purge_holdout_overlaps(train, holdout)
+
+    assert observed_cutoff == cutoff
+    assert purged == 2
+    assert [row.position_id for row in clean] == [4]
+    assert all(row.entry_time > cutoff for row in clean)
+
+
 def test_training_selection_uses_train_only_not_holdout() -> None:
     train = [
         *[_outcome(i, i, 60, -0.2) for i in range(1, 41)],
@@ -176,6 +205,8 @@ def test_end_to_end_report_freezes_train_choice_before_holdout(tmp_path: Path) -
     assert report["counts"] == {
         "eligible_confidence_outcomes": 120,
         "train": 84,
+        "holdout_before_overlap_purge": 36,
+        "holdout_overlap_purged": 0,
         "holdout": 36,
     }
     assert report["selected_threshold"] == 65
