@@ -29,8 +29,32 @@ function Resolve-Mql5Root {
 }
 
 function Stop-MetaTraderProcesses {
-    Get-Process terminal64, terminal, metaeditor64, metaeditor -ErrorAction SilentlyContinue |
-        Stop-Process -Force -ErrorAction SilentlyContinue
+    $names = @("terminal64", "terminal", "metaeditor64", "metaeditor", "metatester64", "metatester")
+    $running = @(Get-Process -Name $names -ErrorAction SilentlyContinue)
+    if ($running.Count -gt 0) {
+        $ids = @($running | ForEach-Object { $_.Id })
+        $running | Stop-Process -Force -ErrorAction SilentlyContinue
+        foreach ($id in $ids) {
+            try { Wait-Process -Id $id -Timeout 10 -ErrorAction SilentlyContinue } catch { }
+        }
+    }
+
+    $deadline = (Get-Date).AddSeconds(10)
+    while ((Get-Date) -lt $deadline) {
+        $left = @(Get-Process -Name $names -ErrorAction SilentlyContinue)
+        if ($left.Count -eq 0) { break }
+        Start-Sleep -Milliseconds 250
+    }
+
+    $left = @(Get-Process -Name $names -ErrorAction SilentlyContinue)
+    if ($left.Count -gt 0) {
+        throw "MetaTrader/MetaEditor processes did not terminate cleanly: $($left.Name -join ', ')"
+    }
+
+    # MetaTrader uses a single-instance/data-directory lock. Give Windows a
+    # bounded grace interval so the next /config startup cannot inherit the
+    # previous test process or stale profile lock.
+    Start-Sleep -Milliseconds 750
 }
 
 function Assert-CompileLog {
@@ -156,6 +180,11 @@ Write-Host "MQL5 TEST COMPILE PASS — $($testSources.Count) scripts, 0 errors"
 # launcher race, not a passing test. We retry a missing-summary launch up to
 # three times while preserving every attempt's journal. Any emitted FAIL>0 is
 # never retried and remains an immediate hard failure.
+# Gate 2: execute every script through the documented [StartUp] configuration
+# interface. Assertions are never retried: FAIL>0 fails immediately. A single
+# clean retry is allowed only when MetaTrader fails to emit any recognizable
+# summary, which is treated as terminal-startup infrastructure flakiness. Two
+# missing summaries remain a hard failure.
 $journalRoots = @(
     (Join-Path $installDir "Logs"),
     (Join-Path $mql5Root "Logs")
@@ -166,6 +195,25 @@ foreach ($source in $testSources) {
     $base = [System.IO.Path]::GetFileNameWithoutExtension($source.Name)
     $configPath = Join-Path $evidenceDir "$base.ini"
     @"
+$maxStartupAttempts = 2
+$runtimeTimeoutSeconds = 45
+
+foreach ($source in $testSources) {
+    $base = [System.IO.Path]::GetFileNameWithoutExtension($source.Name)
+    $summary = $null
+
+    for ($attempt = 1; $attempt -le $maxStartupAttempts; $attempt++) {
+        Stop-MetaTraderProcesses
+
+        foreach ($root in $journalRoots) {
+            if (Test-Path $root) {
+                Get-ChildItem -Path $root -Filter "*.log" -File -ErrorAction SilentlyContinue |
+                    Remove-Item -Force -ErrorAction SilentlyContinue
+            }
+        }
+
+        $configPath = Join-Path $evidenceDir "$base-attempt$attempt.ini"
+        @"
 [Charts]
 ProfileLast=default
 MaxBars=50000
@@ -184,8 +232,38 @@ Period=M1
 Template=default.tpl
 "@ | Set-Content -Path $configPath -Encoding ascii
 
-    $args = @("/config:$configPath")
-    if ($portableMode) { $args += "/portable" }
+        $args = @("/config:$configPath")
+        if ($portableMode) { $args += "/portable" }
+
+        Write-Host "Running $base through MetaTrader [StartUp] (attempt $attempt/$maxStartupAttempts)..."
+        $terminalProc = Start-Process -FilePath $terminal -ArgumentList $args -PassThru
+        $deadline = (Get-Date).AddSeconds($runtimeTimeoutSeconds)
+        $journal = ""
+        $attemptSummary = $null
+
+        try {
+            while ((Get-Date) -lt $deadline) {
+                Start-Sleep -Milliseconds 500
+                $journal = Read-TestJournal -LogRoots $journalRoots
+                $attemptSummary = Get-TestSummary -Journal $journal -Base $base
+                if ($null -ne $attemptSummary) { break }
+
+                if ($terminalProc.HasExited) {
+                    # Give MetaTrader one bounded flush interval before deciding
+                    # that this startup produced no usable test evidence.
+                    Start-Sleep -Seconds 1
+                    $journal = Read-TestJournal -LogRoots $journalRoots
+                    $attemptSummary = Get-TestSummary -Journal $journal -Base $base
+                    break
+                }
+            }
+        }
+        finally {
+            if ($terminalProc -and -not $terminalProc.HasExited) {
+                Stop-Process -Id $terminalProc.Id -Force -ErrorAction SilentlyContinue
+            }
+            Stop-MetaTraderProcesses
+        }
 
     $summary = $null
     $attemptEvidence = @()
@@ -262,6 +340,30 @@ Template=default.tpl
     }
 
     Write-Host "$base runtime result: PASS=$($summary.Pass) FAIL=$($summary.Fail)"
+        $journalPath = Join-Path $evidenceDir "$base-runtime-attempt$attempt.log"
+        $journal | Set-Content -Path $journalPath -Encoding utf8
+
+        if ($null -ne $attemptSummary) {
+            Write-Host "$base runtime result: PASS=$($attemptSummary.Pass) FAIL=$($attemptSummary.Fail)"
+            if ($attemptSummary.Fail -ne 0) {
+                throw "$base reported $($attemptSummary.Fail) failed assertion(s)"
+            }
+            if ($attemptSummary.Pass -le 0) {
+                throw "$base reported no passing assertions"
+            }
+            $summary = $attemptSummary
+            break
+        }
+
+        if ($attempt -lt $maxStartupAttempts) {
+            Write-Warning "$base emitted no recognized summary on attempt $attempt; performing one clean MetaTrader startup retry. Evidence: $journalPath"
+            Start-Sleep -Seconds 2
+        }
+    }
+
+    if ($null -eq $summary) {
+        throw "$base did not emit a recognized test summary after $maxStartupAttempts clean startup attempts"
+    }
 }
 
 Write-Host "MQL5 AUTOMATED TESTS PASS — $($testSources.Count) scripts compiled and executed"
