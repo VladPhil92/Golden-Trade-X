@@ -144,11 +144,18 @@ chronological observed outcomes
        │      └── threshold grid
        │             └── freeze one threshold using TRAIN only
        │
-       └── later HOLDOUT partition
-              └── evaluate the frozen threshold once
+       └── candidate HOLDOUT partition
+              ├── purge trades whose entry/confidence decision was
+              │   on or before the final TRAIN close
+              └── evaluate the frozen threshold once on the remaining
+                  strictly-later holdout trades
 ```
 
-Default internal minimums are 70 train outcomes, 30 holdout outcomes, 20 observations for a train candidate and 10 holdout observations for the selected candidate. These are research-operability floors, not proof of statistical sufficiency.
+The temporal purge matters when positions overlap. A trade is eligible for holdout only when its `entry_time` is **strictly later** than the latest `close_time` used in training. This prevents a holdout decision that already existed before training outcomes were known from being presented as an untouched future decision. The report records the cutoff plus counts before/after the overlap purge; if too few holdout observations survive, the result remains insufficient rather than relaxing the boundary.
+
+Default internal minimums are 70 train outcomes, 30 post-purge holdout outcomes, 20 observations for a train candidate and 10 post-purge holdout observations for the selected candidate. These are research-operability floors, not proof of statistical sufficiency.
+
+Exact metric plateaus are resolved deterministically in favor of the **lowest equivalent threshold**, avoiding an arbitrary preference for a stricter cutoff when multiple grid points select the same observed subset.
 
 Important boundary: even a favorable untouched holdout result is still a **post-hoc discrimination diagnostic among trades that actually occurred**. It does not prove that changing `InpMinConfidence` would have produced the same realized trade sequence. Rejecting trades can alter equity, drawdown, sizing, loss streaks and subsequent EA state. Therefore every confidence report carries:
 
@@ -169,7 +176,7 @@ v2.80 is complete only when:
 - [x] data-quality/provenance gate exists;
 - [x] reproducible descriptive baseline exists;
 - [x] legacy confidence optimizer no longer presents in-sample selection as validated optimization;
-- [x] confidence research uses explicit chronological train/holdout and counterfactual semantics;
+- [x] confidence research uses explicit chronological train/holdout, temporal overlap purge and counterfactual semantics;
 - [ ] ablation experiment matrix is reproducible and one-change-at-a-time;
 - [ ] exit research distinguishes descriptive MFE/MAE diagnostics from counterfactual reruns;
 - [ ] controlled experiment outputs are registered without fabricating missing evidence;
