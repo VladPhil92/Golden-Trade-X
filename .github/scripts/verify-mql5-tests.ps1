@@ -57,6 +57,36 @@ function Read-TestJournal {
     return ($parts -join "`n")
 }
 
+function Get-TestSummary {
+    param([string]$Journal, [string]$Base)
+
+    # Most tests use: === TestX END | PASS=N FAIL=N ===
+    $canonical = [regex]::Match(
+        $Journal,
+        "===\s+" + [regex]::Escape($Base) + "\s+END\s+\|\s+PASS=(\d+)\s+FAIL=(\d+)\s+==="
+    )
+    if ($canonical.Success) {
+        return [pscustomobject]@{
+            Pass = [int]$canonical.Groups[1].Value
+            Fail = [int]$canonical.Groups[2].Value
+        }
+    }
+
+    # v2.62 tests added later use: TestX: N tests | P PASS | F FAIL
+    $counted = [regex]::Match(
+        $Journal,
+        [regex]::Escape($Base) + ":\s+\d+\s+tests\s+\|\s+(\d+)\s+PASS\s+\|\s+(\d+)\s+FAIL"
+    )
+    if ($counted.Success) {
+        return [pscustomobject]@{
+            Pass = [int]$counted.Groups[1].Value
+            Fail = [int]$counted.Groups[2].Value
+        }
+    }
+
+    return $null
+}
+
 $metaEditor = Resolve-Executable -Candidates @(
     (Join-Path $installDir "metaeditor64.exe"),
     (Join-Path $installDir "MetaEditor64.exe"),
@@ -83,7 +113,7 @@ New-Item -ItemType Directory -Force -Path $testsDst | Out-Null
 Copy-Item -Path (Join-Path $repoMql5 "Include\GoldenTradeX\*") -Destination $includeDst -Recurse -Force
 Copy-Item -Path (Join-Path $repoMql5 "Scripts\Tests\*") -Destination $testsDst -Recurse -Force
 
-$testSources = Get-ChildItem -Path $testsDst -Filter "Test*.mq5" -File | Sort-Object Name
+$testSources = @(Get-ChildItem -Path $testsDst -Filter "Test*.mq5" -File | Sort-Object Name)
 if ($testSources.Count -eq 0) { throw "No MQL5 test scripts found" }
 
 Stop-MetaTraderProcesses
@@ -112,9 +142,8 @@ foreach ($source in $testSources) {
 Write-Host "MQL5 TEST COMPILE PASS — $($testSources.Count) scripts, 0 errors"
 
 # Gate 2: execute every script through the documented [StartUp] configuration
-# interface. Tests already print a canonical END | PASS=N FAIL=N marker. The
-# runner polls the terminal/MQL5 journals and fails closed on timeout, missing
-# marker, or FAIL>0. No live trading is allowed.
+# interface. The runner polls terminal/MQL5 journals and fails closed on
+# timeout, missing summary, or FAIL>0. Live trading and DLL imports are off.
 $journalRoots = @(
     (Join-Path $installDir "Logs"),
     (Join-Path $mql5Root "Logs")
@@ -164,12 +193,9 @@ Template=default.tpl
         while ((Get-Date) -lt $deadline) {
             Start-Sleep -Milliseconds 500
             $journal = Read-TestJournal -LogRoots $journalRoots
-            $match = [regex]::Match($journal, "===\s+" + [regex]::Escape($base) + "\s+END\s+\|\s+PASS=(\d+)\s+FAIL=(\d+)\s+===")
-            if ($match.Success) {
-                $summary = $match
-                break
-            }
-            if ($terminalProc.HasExited -and -not $match.Success) { break }
+            $summary = Get-TestSummary -Journal $journal -Base $base
+            if ($null -ne $summary) { break }
+            if ($terminalProc.HasExited) { break }
         }
     }
     finally {
@@ -182,15 +208,13 @@ Template=default.tpl
     $journalPath = Join-Path $evidenceDir "$base-runtime.log"
     $journal | Set-Content -Path $journalPath -Encoding utf8
 
-    if (-not $summary -or -not $summary.Success) {
-        throw "$base did not emit its canonical test summary before timeout/exit — see $journalPath"
+    if ($null -eq $summary) {
+        throw "$base did not emit a recognized test summary before timeout/exit — see $journalPath"
     }
 
-    $passCount = [int]$summary.Groups[1].Value
-    $failCount = [int]$summary.Groups[2].Value
-    Write-Host "$base runtime result: PASS=$passCount FAIL=$failCount"
-    if ($failCount -ne 0) { throw "$base reported $failCount failed assertion(s)" }
-    if ($passCount -le 0) { throw "$base reported no passing assertions" }
+    Write-Host "$base runtime result: PASS=$($summary.Pass) FAIL=$($summary.Fail)"
+    if ($summary.Fail -ne 0) { throw "$base reported $($summary.Fail) failed assertion(s)" }
+    if ($summary.Pass -le 0) { throw "$base reported no passing assertions" }
 }
 
 Write-Host "MQL5 AUTOMATED TESTS PASS — $($testSources.Count) scripts compiled and executed"
