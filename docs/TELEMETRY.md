@@ -141,4 +141,4 @@ v2.70 is complete only when all of the following are integrated and verified:
 - [x] EA emits request/result and broker-deal execution observations;
 - [x] final position outcomes export PositionState MFE/MAE and Realized R;
 - [x] dashboard/research summary consumes the database without inventing metrics;
-- [ ] all CI/Security/MQL5 required gates pass on the integrated PR.
+- [x] CI/Security/MQL5 required gates passed on the integrated v2.70 pull requests.

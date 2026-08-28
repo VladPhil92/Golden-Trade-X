@@ -230,30 +230,42 @@ Los pesos necesitan ablation/sensitivity/OOS antes de promoverse como calibrados
 
 ## Python / Research plane
 
-Actual:
+Actual desde v2.70:
 
 ```text
-TradeLogger CSV
-  ├─ backtest_analysis.py
-  ├─ performance_report.py
-  ├─ regime_analysis.py
-  ├─ session_analyzer.py
-  ├─ walk_forward_optimizer.py (diagnóstico post-hoc)
-  └─ ml_pipeline.py (scaffold, no live)
+MT5 / EA
+  ├─ signal funnel observations
+  ├─ order request/result observations
+  ├─ immutable broker deals
+  └─ final PositionState outcome (Initial R + MFE/MAE + Realized R)
+          │
+          ▼
+ResearchTelemetry append-only CSV
+          │
+          ▼
+telemetry_db.py
+          │
+          ▼
+SQLite research DB
+          │
+          ├─ research_report.py → versioned JSON summary
+          └─ dashboard/research.html
 ```
 
-Target:
+La capa de research es observacional y no autoriza trading. Valores faltantes permanecen faltantes; no se sustituyen por resultados sintéticos ni se convierten en evidencia de rentabilidad, OOS o forward.
+
+Target de las siguientes fases:
 
 ```text
-MT5 events
+SQLite telemetry
    ↓
-Event Collector
+Baseline / Ablation / Confidence / Exit research
    ↓
-SQLite → PostgreSQL when justified
+Experiment Registry
    ↓
-Signals / Decisions / Orders / Deals / Positions / Trades
+True Strategy Tester Walk-Forward / robustness
    ↓
-Analytics / Dashboard / Alerts / Experiment Registry
+OOS gates / forward demo gates
 ```
 
 ## Verificación
@@ -264,24 +276,25 @@ Dependency integrity, Ruff, Python tests/coverage, ML compatibility, config vali
 
 ### Windows CI
 
-MetaTrader 5 + MetaEditor compilan realmente `GoldenTradeX.mq5`; el gate requiere `0 errors` y genera EX5 + SHA-256 artifact.
+MetaTrader 5 + MetaEditor compilan realmente `GoldenTradeX.mq5` y todos los `MQL5/Scripts/Tests/Test*.mq5`. Los scripts se ejecutan mediante MetaTrader; el gate falla ante error de compilación, timeout, ausencia de resumen o cualquier `FAIL>0`.
 
-### Pendiente inmediato
+### Próximo nivel de testing
 
-El siguiente milestone debe automatizar:
+La automatización MQL5 L1/L2 quedó cubierta en v2.63. Los siguientes niveles permanecen separados para no confundir software verification con evidencia cuantitativa:
 
-1. compilación de TODOS los scripts de tests MQL5;
-2. ejecución automatizada de tests MQL5/integration donde MT5 lo permita;
-3. Strategy Tester smoke tests separados de unit tests.
+1. Strategy Tester smoke/research runs reproducibles;
+2. true walk-forward con optimización IS y ejecución OOS independiente;
+3. stress de costes, estabilidad paramétrica y robustez entre brokers;
+4. forward demo antes de cualquier promoción a producción controlada.
 
 ## Roadmap técnico
 
 | Milestone | Alcance | Estado |
 |---|---|---|
-| v2.62 | Trading Correctness | En integración |
-| v2.63 | Automated MQL5 Verification | Pendiente |
-| v2.70 | Event Ledger / Research Telemetry | Pendiente |
-| v2.80 | Baseline + ablation + exit research | Pendiente |
+| v2.62 | Trading Correctness | Completado |
+| v2.63 | Automated MQL5 Verification | Completado |
+| v2.70 | Event Ledger / Research Telemetry | Completado |
+| v2.80 | Baseline + ablation + exit research | Siguiente fase |
 | v2.90 | Experiment Registry + true WF + robustness | Pendiente |
 | v3.0-rc1 | OOS gates | NOT VALIDATED |
 | v3.0-rc2 | Forward demo gates | NOT VALIDATED |
