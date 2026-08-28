@@ -4,12 +4,10 @@ Set-StrictMode -Version Latest
 $installDir = Join-Path $env:RUNNER_TEMP "MetaTrader5"
 $installer = Join-Path $env:RUNNER_TEMP "mt5setup.exe"
 $installerUrl = "https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe"
-$source = Join-Path $env:GITHUB_WORKSPACE "MQL5\Experts\GoldenTradeX\GoldenTradeX.mq5"
-$includeRoot = Join-Path $env:GITHUB_WORKSPACE "MQL5"
+$repoMql5 = Join-Path $env:GITHUB_WORKSPACE "MQL5"
 $compileLog = Join-Path $env:RUNNER_TEMP "GoldenTradeX-compile.log"
 
-# Export evidence paths up-front so the artifact step can collect diagnostics
-# even when installation/compilation fails before the EX5 exists.
+# Export evidence path before any operation so failures can still upload logs.
 "GTX_COMPILE_LOG=$compileLog" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
 Write-Host "Downloading official MetaTrader 5 installer..."
@@ -22,7 +20,7 @@ $install = Start-Process -FilePath $installer -ArgumentList @(
 ) -PassThru -Wait
 Write-Host "MetaTrader installer process exit code: $($install.ExitCode)"
 if ($install.ExitCode -ne 0) {
-    Write-Warning "Installer returned non-zero. The gate will verify the installed MetaEditor executable instead of trusting the installer exit code."
+    Write-Warning "Installer returned non-zero. The gate verifies installed files instead of trusting the installer exit code."
 }
 
 # The installer may launch the terminal after setup. CI only needs MetaEditor.
@@ -53,8 +51,43 @@ if (-not $metaEditor) {
     throw "MetaEditor executable was not found after automated installation (installer exit code $($install.ExitCode))"
 }
 
+# Locate the MQL5 tree that contains MetaQuotes' standard library. Compiling
+# against the repository root alone would shadow <Trade/Trade.mqh>.
+$standardTrade = Get-ChildItem -Path $installDir -Filter "Trade.mqh" -File -Recurse -ErrorAction SilentlyContinue |
+    Where-Object { $_.FullName -match "[\\/]MQL5[\\/]Include[\\/]Trade[\\/]Trade\.mqh$" } |
+    Select-Object -First 1
+if (-not $standardTrade) {
+    foreach ($root in $searchRoots | Select-Object -Unique) {
+        if (-not (Test-Path $root)) { continue }
+        $standardTrade = Get-ChildItem -Path $root -Filter "Trade.mqh" -File -Recurse -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match "[\\/]MQL5[\\/]Include[\\/]Trade[\\/]Trade\.mqh$" } |
+            Select-Object -First 1
+        if ($standardTrade) { break }
+    }
+}
+if (-not $standardTrade) {
+    throw "MetaQuotes standard MQL5 library was not found after installation (missing Include\Trade\Trade.mqh)"
+}
+
+# Trade.mqh -> Trade -> Include -> MQL5
+$installedMql5 = $standardTrade.Directory.Parent.Parent.FullName
+$installedInclude = Join-Path $installedMql5 "Include"
+$installedExperts = Join-Path $installedMql5 "Experts"
+$customIncludeDst = Join-Path $installedInclude "GoldenTradeX"
+$expertDst = Join-Path $installedExperts "GoldenTradeX"
+
+Write-Host "Installed MQL5 root: $installedMql5"
+Write-Host "Standard Trade.mqh:  $($standardTrade.FullName)"
+
+New-Item -ItemType Directory -Force -Path $customIncludeDst | Out-Null
+New-Item -ItemType Directory -Force -Path $expertDst | Out-Null
+Copy-Item -Path (Join-Path $repoMql5 "Include\GoldenTradeX\*") -Destination $customIncludeDst -Recurse -Force
+Copy-Item -Path (Join-Path $repoMql5 "Experts\GoldenTradeX\*") -Destination $expertDst -Recurse -Force
+
+$source = Join-Path $expertDst "GoldenTradeX.mq5"
+$includeRoot = $installedMql5
 if (-not (Test-Path $source)) {
-    throw "EA source not found: $source"
+    throw "EA source was not staged into installed MQL5 tree: $source"
 }
 
 Write-Host "MetaEditor: $metaEditor"
