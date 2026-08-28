@@ -50,12 +50,12 @@ from backtest_analysis import (  # noqa: E402
 )
 
 # ── Umbrales de alerta (ajustables por CLI) ───────────────────────────────────
-DEFAULT_WINDOW          = 20    # trades de la ventana reciente
-MIN_TRADES_FOR_BASELINE = 30    # mínimo histórico para comparar
-WR_DEGRADATION_PTS      = 15.0  # caída de win rate (pts) reciente vs baseline
-PF_ALERT                = 1.0   # PF reciente por debajo → alerta
-DD_ALERT_PCT            = 10.0  # drawdown actual desde el pico → alerta
-CONSEC_LOSS_ALERT       = 4     # racha de pérdidas en la ventana reciente
+DEFAULT_WINDOW          = 20
+MIN_TRADES_FOR_BASELINE = 30
+WR_DEGRADATION_PTS      = 15.0
+PF_ALERT                = 1.0
+DD_ALERT_PCT            = 10.0
+CONSEC_LOSS_ALERT       = 4
 
 
 # ── Carga (schema v2.50: OpenDate/OpenTime/Comment opcionales) ────────────────
@@ -78,7 +78,7 @@ def load_trades(path: str) -> List[dict]:
                     commission=float(row["Commission"]),
                     r_multiple=float(row["RMultiple"]),
                 )
-            except (KeyError, ValueError):
+            except (KeyError, TypeError, ValueError):
                 continue
             rows.append({
                 "trade":     t,
@@ -142,7 +142,7 @@ def block_stats(trades: List[Trade]) -> Dict:
         "net":        sum(rets),
         "expectancy": sum(rets) / len(trades),
         "avg_r":      sum(t.r_multiple for t in trades) / len(trades),
-        "consec_losses_end": consec,       # racha ABIERTA al final del bloque
+        "consec_losses_end": consec,
         "max_consec_losses": best_consec,
     }
 
@@ -160,8 +160,7 @@ def evaluate(rows: List[dict], window: int, args) -> Dict:
     trades = [r["trade"] for r in rows]
     result: Dict = {"total": block_stats(trades), "alerts": []}
 
-    # Ventana reciente vs baseline
-    recent  = trades[-window:]
+    recent = trades[-window:]
     baseline = trades[:-window]
     result["recent"] = block_stats(recent)
     result["recent"]["window"] = min(window, len(trades))
@@ -196,13 +195,11 @@ def evaluate(rows: List[dict], window: int, args) -> Dict:
             f"RACHA ABIERTA de {result['recent']['consec_losses_end']} perdidas "
             f"consecutivas")
 
-    # Breakdown por régimen
     by_regime: Dict[str, List[Trade]] = defaultdict(list)
     for r in rows:
         by_regime[parse_regime(r["comment"])].append(r["trade"])
     result["by_regime"] = {k: block_stats(v) for k, v in by_regime.items()}
 
-    # Breakdown por banda de confianza
     by_conf: Dict[str, List[Trade]] = defaultdict(list)
     for r in rows:
         c = parse_confidence(r["comment"])
@@ -210,9 +207,8 @@ def evaluate(rows: List[dict], window: int, args) -> Dict:
         by_conf[band].append(r["trade"])
     result["by_confidence"] = {k: block_stats(v) for k, v in by_conf.items()}
 
-    # Breakdown por hora y día de apertura
     by_hour: Dict[int, List[Trade]] = defaultdict(list)
-    by_day:  Dict[int, List[Trade]] = defaultdict(list)
+    by_day: Dict[int, List[Trade]] = defaultdict(list)
     for r in rows:
         h = open_hour(r)
         d = open_weekday(r)
@@ -221,7 +217,7 @@ def evaluate(rows: List[dict], window: int, args) -> Dict:
         if d is not None:
             by_day[d].append(r["trade"])
     result["by_hour"] = {k: block_stats(v) for k, v in sorted(by_hour.items())}
-    result["by_day"]  = {k: block_stats(v) for k, v in sorted(by_day.items())}
+    result["by_day"] = {k: block_stats(v) for k, v in sorted(by_day.items())}
 
     return result
 
@@ -290,8 +286,7 @@ def print_report(res: Dict, args) -> None:
 def discover_csvs(directory: str) -> List[str]:
     return sorted(
         glob.glob(os.path.join(directory, "GoldenTradeX_*.csv"))
-        + glob.glob(os.path.join(directory, "**", "GoldenTradeX_*.csv"),
-                    recursive=True)
+        + glob.glob(os.path.join(directory, "**", "GoldenTradeX_*.csv"), recursive=True)
     )
 
 

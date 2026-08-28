@@ -1,19 +1,16 @@
 #!/usr/bin/env python3
 """
-Golden Trade X — Static lint for MQL5 sources (v2.50).
+Golden Trade X — conservative static lint for MQL5 sources.
 
-Catches the exact MQL4-isms and API misuses that break MetaEditor compilation
-but that a structure-only CI cannot see. This is NOT a compiler — it is a
-regression guard for the error classes that already bit this project once
-(77 compilation errors in v2.30):
+This does not replace MetaEditor. It catches known high-value error classes
+that can be detected safely on Linux CI:
 
-  1. MQL4-style indicator calls: iATR/iRSI/iADX/iMA/iBands with the wrong
-     argument count (MQL5 versions return a handle and take fewer/different args).
-  2. '->' member access (MQL5 uses '.' even on object pointers; '->' parses
-     as minus + greater-than under #property strict).
-  3. ArraySetAsSeries() on statically-sized arrays (compile error in MQL5).
-  4. CTrade::ResultRetcodeDescription() — method does not exist in the
-     standard library (use ResultComment()).
+  1. MQL4-style indicator calls with invalid MQL5 argument counts.
+  2. '->' member access (MQL5 uses '.').
+  3. ArraySetAsSeries() on statically-sized arrays.
+  4. Non-existent CTrade::ResultRetcodeDescription().
+  5. Direct CTrade entry calls with literal zero Stop Loss.
+  6. Literal GlobalVariable names outside the GTX_ namespace.
 
 Usage:
     python scripts/mql5_lint.py                 # lints MQL5/ recursively
@@ -25,14 +22,12 @@ import re
 import sys
 from pathlib import Path
 
-# MQL5 argument counts for the indicator functions this codebase uses.
-# iMA(symbol,tf,period,shift,method,price)=6, iATR(symbol,tf,period)=3, etc.
 INDICATOR_ARGS = {
-    "iATR":    3,
-    "iRSI":    4,
-    "iADX":    3,
-    "iMA":     6,
-    "iBands":  6,
+    "iATR": 3,
+    "iRSI": 4,
+    "iADX": 3,
+    "iMA": 6,
+    "iBands": 6,
     "iStdDev": 6,
 }
 
@@ -41,10 +36,11 @@ _ARR_TYPES = (
 )
 STATIC_ARRAY_DECL = re.compile(r"\b" + _ARR_TYPES + r"\s+(\w+)\s*\[\s*\d+\s*\]")
 DYNAMIC_ARRAY_DECL = re.compile(r"\b" + _ARR_TYPES + r"\s+(\w+)\s*\[\s*\]")
+ZERO_LITERAL = re.compile(r"^[+]?0(?:\.0*)?(?:[eE][+-]?\d+)?$")
 
 
 def strip_comments_and_strings(text: str) -> str:
-    """Replace comments and string literals with spaces, preserving offsets/newlines."""
+    """Replace comments and string contents with spaces, preserving offsets/newlines."""
     out = []
     i, n = 0, len(text)
     while i < n:
@@ -72,9 +68,11 @@ def strip_comments_and_strings(text: str) -> str:
     return "".join(out)
 
 
-def count_call_args(code: str, open_paren: int) -> int:
-    """Count top-level comma-separated args of the call starting at '('."""
-    depth, args, has_content = 0, 0, False
+def split_call_args(code: str, open_paren: int) -> list[str] | None:
+    """Return top-level arguments for a function call, or None if unbalanced."""
+    depth = 0
+    start = open_paren + 1
+    args: list[str] = []
     i = open_paren
     while i < len(code):
         c = code[i]
@@ -83,13 +81,24 @@ def count_call_args(code: str, open_paren: int) -> int:
         elif c == ")":
             depth -= 1
             if depth == 0:
-                return (args + 1) if has_content else 0
+                tail = code[start:i].strip()
+                if tail or args:
+                    args.append(tail)
+                return args
         elif depth == 1 and c == ",":
-            args += 1
-        elif depth >= 1 and not c.isspace():
-            has_content = True
+            args.append(code[start:i].strip())
+            start = i + 1
         i += 1
-    return -1  # unbalanced — let the compiler complain
+    return None
+
+
+def count_call_args(code: str, open_paren: int) -> int:
+    args = split_call_args(code, open_paren)
+    return -1 if args is None else len(args)
+
+
+def _is_zero_literal(expr: str) -> bool:
+    return bool(ZERO_LITERAL.fullmatch(expr.strip()))
 
 
 def lint_file(path: Path):
@@ -100,42 +109,74 @@ def lint_file(path: Path):
     def lines_upto(pos: int) -> int:
         return code.count("\n", 0, pos) + 1
 
-    # 1. Indicator calls with MQL4 argument counts
+    # 1. Indicator calls with MQL4 argument counts.
     for name, expected in INDICATOR_ARGS.items():
-        for m in re.finditer(r"\b" + name + r"\s*\(", code):
-            got = count_call_args(code, m.end() - 1)
+        for match in re.finditer(r"\b" + name + r"\s*\(", code):
+            got = count_call_args(code, match.end() - 1)
             if got >= 0 and got != expected:
                 findings.append((
-                    lines_upto(m.start()),
+                    lines_upto(match.start()),
                     f"{name}() con {got} argumentos — MQL5 requiere {expected} "
                     f"(devuelve handle; usar CopyBuffer para leer valores)",
                 ))
 
-    # 2. '->' member access
-    for m in re.finditer(r"\w\s*->\s*\w", code):
+    # 2. '->' member access.
+    for match in re.finditer(r"\w\s*->\s*\w", code):
         findings.append((
-            lines_upto(m.start()),
+            lines_upto(match.start()),
             "operador '->' — MQL5 usa '.' incluso sobre punteros a objetos",
         ))
 
     # 3. ArraySetAsSeries on statically-sized arrays.
-    # Heurística a nivel de archivo: si el mismo nombre también está declarado
-    # como array dinámico en otro scope del archivo, es ambiguo → no flaggear.
     static_arrays = set(STATIC_ARRAY_DECL.findall(code)) - set(DYNAMIC_ARRAY_DECL.findall(code))
-    for m in re.finditer(r"\bArraySetAsSeries\s*\(\s*(\w+)", code):
-        if m.group(1) in static_arrays:
+    for match in re.finditer(r"\bArraySetAsSeries\s*\(\s*(\w+)", code):
+        if match.group(1) in static_arrays:
             findings.append((
-                lines_upto(m.start()),
-                f"ArraySetAsSeries('{m.group(1)}') sobre array de tamaño estático "
+                lines_upto(match.start()),
+                f"ArraySetAsSeries('{match.group(1)}') sobre array de tamaño estático "
                 f"— declarar como array dinámico ('tipo nombre[]')",
             ))
 
-    # 4. Non-existent CTrade method
-    for m in re.finditer(r"\bResultRetcodeDescription\s*\(", code):
+    # 4. Non-existent CTrade method.
+    for match in re.finditer(r"\bResultRetcodeDescription\s*\(", code):
         findings.append((
-            lines_upto(m.start()),
+            lines_upto(match.start()),
             "ResultRetcodeDescription() no existe en CTrade — usar ResultComment()",
         ))
+
+    # 5. Direct CTrade entries with a literal zero SL. Dynamic expressions are
+    # intentionally not guessed here; MetaEditor/runtime guards cover those.
+    # PositionOpen(symbol,type,volume,price,sl,tp,comment)
+    for match in re.finditer(r"\bPositionOpen\s*\(", code):
+        args = split_call_args(code, match.end() - 1)
+        if args is not None and len(args) >= 6 and _is_zero_literal(args[4]):
+            findings.append((
+                lines_upto(match.start()),
+                "PositionOpen() con SL literal 0 — ninguna entrada Golden Trade X debe enviarse sin SL",
+            ))
+
+    # Buy/Sell(volume,symbol,price,sl,tp,comment)
+    for name in ("Buy", "Sell"):
+        for match in re.finditer(r"\b" + name + r"\s*\(", code):
+            args = split_call_args(code, match.end() - 1)
+            if args is not None and len(args) >= 5 and _is_zero_literal(args[3]):
+                findings.append((
+                    lines_upto(match.start()),
+                    f"{name}() con SL literal 0 — usar OrderManager con Stop Loss válido",
+                ))
+
+    # 6. Literal terminal GlobalVariables must use the GTX_ namespace to avoid
+    # collisions with unrelated EAs. Dynamic StringFormat names are not flagged.
+    for match in re.finditer(
+        r"\bGlobalVariable(?:Set|Get|Del|Check)\s*\(\s*\"([^\"]+)\"",
+        raw,
+    ):
+        name = match.group(1)
+        if not name.startswith("GTX_"):
+            findings.append((
+                raw.count("\n", 0, match.start()) + 1,
+                f"GlobalVariable literal '{name}' fuera del namespace GTX_",
+            ))
 
     return findings
 
@@ -143,25 +184,25 @@ def lint_file(path: Path):
 def main() -> None:
     targets = [Path(p) for p in sys.argv[1:]] or [Path("MQL5")]
     files = []
-    for t in targets:
-        if t.is_dir():
-            files += sorted(t.rglob("*.mq5")) + sorted(t.rglob("*.mqh"))
-        elif t.is_file():
-            files.append(t)
+    for target in targets:
+        if target.is_dir():
+            files += sorted(target.rglob("*.mq5")) + sorted(target.rglob("*.mqh"))
+        elif target.is_file():
+            files.append(target)
         else:
-            print(f"ERROR: no existe {t}")
+            print(f"ERROR: no existe {target}")
             sys.exit(1)
 
     total = 0
-    for f in files:
-        for line, msg in lint_file(f):
-            print(f"{f}:{line}: {msg}")
+    for file_path in files:
+        for line, msg in lint_file(file_path):
+            print(f"{file_path}:{line}: {msg}")
             total += 1
 
     if total:
         print(f"\nFAIL — {total} problema(s) MQL5 detectado(s) en {len(files)} archivo(s)")
         sys.exit(1)
-    print(f"OK — {len(files)} archivo(s) MQL5 sin MQL4-ismos conocidos")
+    print(f"OK — {len(files)} archivo(s) MQL5 sin patrones estáticos críticos conocidos")
 
 
 if __name__ == "__main__":

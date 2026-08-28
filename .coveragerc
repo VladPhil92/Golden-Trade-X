@@ -1,0 +1,11 @@
+[run]
+branch = True
+
+[report]
+show_missing = True
+skip_empty = True
+exclude_also =
+    ^\s*def main\(.*\).*:$
+    ^\s*def print_report\(.*\).*:$
+    ^\s*def _fmt_block\(.*\).*:$
+    ^\s*if __name__ == ["']__main__["']:$
