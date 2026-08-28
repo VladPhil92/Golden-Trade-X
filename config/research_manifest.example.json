@@ -1,0 +1,12 @@
+{
+  "dataset_id": "<REQUIRED_UNIQUE_DATASET_ID>",
+  "source_type": "strategy_tester",
+  "git_sha": "<REQUIRED_GIT_COMMIT_SHA>",
+  "preset_sha256": "<REQUIRED_PRESET_SHA256>",
+  "broker": "<REQUIRED_BROKER_OR_TESTER_SOURCE>",
+  "symbols": ["XAUUSD"],
+  "timeframe": "M15",
+  "period_start": "<REQUIRED_ISO_OR_MT5_DATETIME>",
+  "period_end": "<REQUIRED_ISO_OR_MT5_DATETIME>",
+  "notes": "Replace every <REQUIRED_...> value with observed experiment provenance. This file is a template, not research evidence."
+}
