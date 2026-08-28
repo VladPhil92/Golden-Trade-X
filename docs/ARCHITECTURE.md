@@ -1,177 +1,300 @@
 # Golden Trade X — Arquitectura
 
-> La versión vigente del EA es la del `#property version` de `GoldenTradeX.mq5`
-> y la primera entrada de `CHANGELOG.md` — este documento no fija versión
-> para evitar quedar desactualizado.
+> La versión vigente es la indicada por el EA y `CHANGELOG.md`.
 
-## Visión general
+## Objetivo arquitectónico
 
-Golden Trade X es un Expert Advisor para MetaTrader 5 con arquitectura
-modular de capas. Cada capa tiene responsabilidad única y se comunica
-a través de interfaces claras. La decisión de entrada se produce mediante
-un **Confluence Score** heurístico que agrega múltiples fuentes de señal.
+Golden Trade X separa decisión, riesgo, ejecución y observabilidad. La arquitectura debe impedir que un fallo de datos, identidad o broker incremente silenciosamente el riesgo.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                       GoldenTradeX.mq5                       │
-│                 (Orquestador / Entry Point)                   │
-└──────────┬──────────────────────────────────────────────────┘
-           │
-    ┌──────▼──────────────────────────────────────────────────┐
-    │                   CAPA DE FILTROS                        │
-    │  SessionFilter  │  NewsFilter  │  RiskManager           │
-    │  (horario/FV)   │  (NFP/FOMC)  │  (DD/consec/CB/KS)    │
-    └──────┬──────────────────────────────────────────────────┘
-           │
-    ┌──────▼──────────────────────────────────────────────────┐
-    │                CAPA DE ANÁLISIS DE MERCADO               │
-    │  SignalEngine        MarketRegimeEngine  SmartMoneyEngine │
-    │  (EMA+RSI+ADX+ATR)  (7 regímenes)       (BOS/CHOCH/FVG/OB)│
-    └──────┬──────────────────────────────────────────────────┘
-           │
-    ┌──────▼──────────────────────────────────────────────────┐
-    │               ENSEMBLE CONFIDENCE ENGINE                  │
-    │  Score 0-100 = BaseSignal(25) + Regime(25) +             │
-    │               SMC(30) + HTF(15) + ATR(5)                 │
-    │  Umbral configurable: InpMinConfidence (default 55)       │
-    └──────┬──────────────────────────────────────────────────┘
-           │
-    ┌──────▼──────────────────────────────────────────────────┐
-    │                  CAPA DE EJECUCIÓN                        │
-    │  CalculateLotSize  │  PositionOpen  │  ManageTrailing    │
-    │  (% equity × mult) │  (CTrade)      │  (BE + Trailing)   │
-    └──────┬──────────────────────────────────────────────────┘
-           │
-    ┌──────▼──────────────────────────────────────────────────┐
-    │              CAPA DE OBSERVABILIDAD                       │
-    │  TradeLogger.mqh    │  monitor.py     │  dashboard/      │
-    │  (CSV por trade)    │  (Telegram/log) │  (HTML/Chart.js) │
-    └─────────────────────────────────────────────────────────┘
+```text
+Market Data / MT5 Indicators
+          │
+          ▼
+     SignalEngine
+          │
+   ┌──────┼───────────────┐
+   ▼      ▼               ▼
+Regime   SMC          Fibonacci
+   └──────┼───────────────┘
+          ▼
+   ConfluenceEngine
+     (heurístico)
+          │
+          ▼
+       Guards
+ Session / News / DD /
+ ownership / spread / RR
+          │
+          ▼
+     RiskManager
+          │
+          ▼
+     OrderManager
+(server-confirmed execution)
+          │
+          ▼
+        Broker
+          │
+   ┌──────┼────────────────────┐
+   ▼      ▼                    ▼
+PositionState            TradeLogger
+Partial/BE/Trail         HealthMonitor
 ```
 
-## Módulos MQL5
+## Identidad de trading
 
-### Núcleo (MQL5/Include/GoldenTradeX/)
+Los siguientes identificadores son diferentes y nunca deben intercambiarse:
 
-| Módulo | Responsabilidad | Entradas | Salidas |
-|--------|-----------------|----------|---------|
-| `SignalEngine.mqh` | Cruce EMA+RSI+ADX+ATR+H4 | Symbol, TF, parámetros | `ENUM_SIGNAL`, ATR |
-| `MarketRegimeEngine.mqh` | Clasificación de régimen | Symbol, TF | `ENUM_MARKET_REGIME`, RegimeScore |
-| `SmartMoneyEngine.mqh` | BOS, CHOCH, FVG, OB, LS | Symbol, TF, lookbacks | `SSmcContext`, SmcScore |
-| `ConfidenceEngine.mqh` | Confluence scoring 0-100 (heurístico) | Scores de capas | `SConfidenceResult` |
-| `RiskManager.mqh` | DD, lotes, circuit breakers | % riesgo, límites | lots, bool guards |
-| `SessionFilter.mqh` | Horario y fin de semana | Horas, flags | bool |
-| `NewsFilter.mqh` | NFP/FOMC/CPI calendario | Buffers min | bool |
-| `TradeLogger.mqh` | CSV de trades cerrados | Deal ticket | CSV file |
-
-### Flujo de decisión por barra
-
-```
-OnTick()
-  ├─ ManageTrailing()            ← cada tick
-  └─ IsNewBar() → true
-       ├─ KillSwitch?            → STOP
-       ├─ SessionFilter?         → SKIP
-       ├─ Spread?                → SKIP
-       ├─ DD diario/sem/mensual? → SKIP
-       ├─ ConsecLosses?          → SKIP
-       ├─ NewsBlocked?           → SKIP
-       ├─ MaxPositions?          → SKIP
-       ├─ Regime == VOLATILE?    → SKIP
-       ├─ SignalEngine.GetSignal() == NONE? → SKIP
-       ├─ ConfidenceEngine.Compute()
-       │    < InpMinConfidence?  → SKIP (loguea score)
-       └─ PositionOpen(lots, sl, tp, comment="GTX|Conf=N|Reg=X")
+```text
+order_ticket
+   ↓
+deal_ticket(s)
+   ↓
+POSITION_IDENTIFIER / DEAL_POSITION_ID
+   ↓
+current position_ticket
 ```
 
-## Módulos Python
+`POSITION_IDENTIFIER` es la clave durable usada por Golden Trade X para estado y Portfolio Risk Cap. El position ticket es una referencia operativa actual y se resuelve desde el identificador estable.
 
-| Script | Uso |
-|--------|-----|
-| `monitor.py` | Monitoreo en vivo con Telegram y reconexión |
-| `backtest_analysis.py` | Métricas post-backtest + Monte Carlo + Walk-Forward |
-| `regime_analysis.py` | Análisis por régimen de mercado + stress test |
-| `ml_pipeline.py` | Feature engineering + XGBoost (señal de calidad) |
-| `validate_set.py` | Validación de parámetros del preset `.set` |
+## Execution Engine
 
-## Dashboard Web
+`OrderManager` clasifica resultados server-side:
 
-`dashboard/index.html` — archivo estático, sin servidor.
-
-- Abrir directamente en el browser (`file://`)
-- Cargar CSV(s) exportados por TradeLogger via drag-and-drop
-- Muestra: equity curve, KPIs, régimen, confidence buckets, P/L mensual,
-  checklist institucional, tabla de últimas 30 operaciones
-
-## Confluence Score — Desglose (heurístico, no calibrado)
-
-```
-┌──────────────────┬──────────────┬────────────────────────────────┐
-│ Componente       │ Puntos máx.  │ Condición máxima               │
-├──────────────────┼──────────────┼────────────────────────────────┤
-│ Señal base       │ 25           │ EMA cross + RSI en zona        │
-│ Régimen mercado  │ 25           │ Régimen TRENDING alineado      │
-│ Smart Money      │ 30           │ BOS + CHOCH + FVG + OB         │
-│ Alineación HTF   │ 15           │ Precio H4 sobre/bajo EMA50     │
-│ Calidad ATR      │ 5            │ ATR ratio 0.8–1.5              │
-├──────────────────┼──────────────┼────────────────────────────────┤
-│ TOTAL            │ 100          │                                 │
-└──────────────────┴──────────────┴────────────────────────────────┘
-
-Umbrales recomendados:
-  InpMinConfidence = 40  → alta frecuencia, menor calidad
-  InpMinConfidence = 55  → equilibrio (default)
-  InpMinConfidence = 70  → baja frecuencia, alta calidad
-  InpMinConfidence = 80  → solo confluencias excepcionales
+```text
+SUCCESS
+PARTIAL_SUCCESS
+RETRYABLE
+REJECTED
+FATAL
+UNKNOWN
 ```
 
-## Gestión de riesgo multicapa
+Un booleano `true` retornado por `CTrade` no es suficiente para declarar éxito. Las aperturas exigen deal confirmado y datos de ejecución server-side; los cierres también exigen confirmación del deal. Modificaciones utilizan retcodes compatibles con modificación confirmada/no-change.
 
+Retries se limitan a errores clasificados como temporales. Un resultado desconocido no se transforma en éxito.
+
+## PositionStateManager
+
+Estado persistente por:
+
+```text
+account + magic + POSITION_IDENTIFIER
 ```
-Nivel 1: Spread > InpMaxSpreadPoints          → skip entrada
-Nivel 2: DD diario > InpMaxDailyDD            → pausa hasta mañana
-Nivel 3: DD semanal > InpMaxWeeklyDD          → pausa hasta semana sig.
-Nivel 4: Circuit Breaker mensual              → pausa hasta mes sig.
-Nivel 5: Pérdidas consec. >= InpMaxConsecLosses → pausa hasta semana sig.
-Nivel 6: Lote < mínimo broker                 → no operar
-Nivel 7: Capital Preservation Mode (auto)     → riesgo reducido al 25%
-Nivel 8: Kill Switch (manual)                 → parada total
+
+Core state:
+
+- entry price;
+- Initial SL;
+- Initial TP;
+- Initial Risk Price;
+- Initial Risk Money;
+- Initial Volume;
+- entry time;
+- confidence;
+- regime.
+
+Runtime state:
+
+- MFE price/R/time;
+- MAE price/R/time;
+- closure tombstone para idempotencia.
+
+En startup `ReconcileOpenPositions()` reconstruye posiciones cuya información puede probarse mediante historial. Ownership ambiguo en netting se considera unsafe.
+
+## Definición de R
+
+```text
+InitialRiskPrice = abs(entry - initialSL)
+InitialRiskMoney = abs(OrderCalcProfit(entry → initialSL, initialVolume))
+RealizedR        = totalNetPnL / InitialRiskMoney
 ```
 
-## Smart Money Concepts — Lógica
+El SL actual nunca redefine Initial R.
 
-### BOS (Break of Structure)
-- **Bullish BOS**: `close[1] > swing_high_reciente`
-- **Bearish BOS**: `close[1] < swing_low_reciente`
-- Swing detectado con fractal de 3 barras (N barras a cada lado)
+## Gestión de posición por tick
 
-### FVG (Fair Value Gap)
-- **Bullish FVG**: `high[bar+2] < low[bar]` — brecha entre 3 velas
-- **Bearish FVG**: `low[bar+2] > high[bar]`
-- Proximity: precio dentro de 1×ATR del gap
+```text
+OnTick
+ ├─ Friday close guard
+ ├─ ManageOpenPositions
+ │   ├─ Ensure PositionState
+ │   ├─ Update MFE/MAE
+ │   ├─ Partial TP (Initial R)
+ │   ├─ Break-Even (Initial R)
+ │   └─ ATR trailing (si habilitado)
+ └─ if NewBar
+     └─ evaluate new entry
+```
 
-### Order Block
-- **Bullish OB**: última vela bajista antes de un BOS alcista
-- **Bearish OB**: última vela alcista antes de un BOS bajista
+Partial TP y Break-Even no dependen de que trailing esté habilitado.
 
-### Liquidity Sweep
-- **Bull sweep**: wick bajo el swing low, cierre sobre él
-- **Bear sweep**: wick sobre el swing high, cierre bajo él
+## Flujo de nueva entrada
 
-## Roadmap hacia producción
+```text
+New bar
+  ↓
+Kill switch
+  ↓
+Session
+  ↓
+Spread
+  ↓
+Daily/Weekly/Monthly DD
+  ↓
+Consecutive loss guard
+  ↓
+News
+  ↓
+Max positions
+  ↓
+Netting ownership
+  ↓
+Connection
+  ↓
+Regime
+  ↓
+Base signal
+  ↓
+SMC + Fib + HTF context
+  ↓
+Confluence Score
+  ↓
+Final structural SL / TP
+  ↓
+Initial RR guard
+  ↓
+Risk sizing
+  ↓
+Equity Curve multiplier
+  ↓
+OrderManager
+  ↓
+server-confirmed deal
+  ↓
+resolve POSITION_IDENTIFIER + ticket
+  ↓
+PositionState
+  ↓
+Portfolio risk reservation
+```
 
-| Fase | Descripción | Estado |
-|------|-------------|--------|
-| 1 | EA base + riesgo multicapa | ✅ Completo |
-| 2 | TradeLogger + tests unitarios | ✅ Completo |
-| 3 | CI/CD GitHub Actions | ✅ Completo |
-| 4 | Telegram + análisis estadístico | ✅ Completo |
-| 5 | Market Regime + SMC + Confidence | ✅ Completo (v2.00) |
-| 6 | ML Pipeline (XGBoost) | ✅ Scaffold completo |
-| 7 | Dashboard Web | ✅ Completo |
-| 8 | Backtest XAUUSD 2020-2026 (MT5) | ⏳ Requiere MT5 |
-| 9 | Walk-forward 8 ventanas | ⏳ Requiere MT5 |
-| 10 | Demo 3 meses (≥100 trades) | ⏳ Requiere broker |
-| 11 | VPS deploy + monitor 24/5 | ⏳ Producción |
-| 12 | ML reentrenamiento mensual | ⏳ Post-producción |
-| 13 | SaaS / multi-cuenta | ⏳ Expansión comercial |
+## RiskManager
+
+Responsabilidades:
+
+- fixed risk sizing;
+- optional Kelly;
+- daily/weekly/monthly drawdown;
+- consecutive losses;
+- Capital Preservation;
+- margin guard;
+- Portfolio Risk Cap;
+- kill switch.
+
+Sizing y riesgo monetario usan `OrderCalcProfit()` para incorporar la semántica contractual real del símbolo en lugar de depender exclusivamente de fórmulas manuales con tick value/tick size.
+
+Portfolio Risk Cap usa reservas idempotentes por `POSITION_IDENTIFIER` y reconcilia reservas huérfanas en startup.
+
+## NewsFilter
+
+FOMC: fechas de decisión verificadas 2025–2027 y statement 14:00 US Eastern con conversión DST.
+
+NFP/CPI: hora DST-aware pero fecha proxy. No son todavía un calendario histórico auditable.
+
+Coverage policy:
+
+```text
+WARN
+FAIL_CLOSED
+FAIL_OPEN
+```
+
+Las ventanas usan timestamps absolutos para soportar buffers que atraviesan medianoche.
+
+## Confluence Score
+
+No es un ensemble estadístico ni una probabilidad.
+
+```text
+Base      25
+Regime    25
+SMC       30
+HTF       15
+Fib        5
+---------
+Total    100
+```
+
+Los pesos necesitan ablation/sensitivity/OOS antes de promoverse como calibrados.
+
+## Python / Research plane
+
+Actual:
+
+```text
+TradeLogger CSV
+  ├─ backtest_analysis.py
+  ├─ performance_report.py
+  ├─ regime_analysis.py
+  ├─ session_analyzer.py
+  ├─ walk_forward_optimizer.py (diagnóstico post-hoc)
+  └─ ml_pipeline.py (scaffold, no live)
+```
+
+Target:
+
+```text
+MT5 events
+   ↓
+Event Collector
+   ↓
+SQLite → PostgreSQL when justified
+   ↓
+Signals / Decisions / Orders / Deals / Positions / Trades
+   ↓
+Analytics / Dashboard / Alerts / Experiment Registry
+```
+
+## Verificación
+
+### Linux CI
+
+Dependency integrity, Ruff, Python tests/coverage, ML compatibility, config validation, MQL5 static analysis, structure, version and dashboard checks.
+
+### Windows CI
+
+MetaTrader 5 + MetaEditor compilan realmente `GoldenTradeX.mq5`; el gate requiere `0 errors` y genera EX5 + SHA-256 artifact.
+
+### Pendiente inmediato
+
+El siguiente milestone debe automatizar:
+
+1. compilación de TODOS los scripts de tests MQL5;
+2. ejecución automatizada de tests MQL5/integration donde MT5 lo permita;
+3. Strategy Tester smoke tests separados de unit tests.
+
+## Roadmap técnico
+
+| Milestone | Alcance | Estado |
+|---|---|---|
+| v2.62 | Trading Correctness | En integración |
+| v2.63 | Automated MQL5 Verification | Pendiente |
+| v2.70 | Event Ledger / Research Telemetry | Pendiente |
+| v2.80 | Baseline + ablation + exit research | Pendiente |
+| v2.90 | Experiment Registry + true WF + robustness | Pendiente |
+| v3.0-rc1 | OOS gates | NOT VALIDATED |
+| v3.0-rc2 | Forward demo gates | NOT VALIDATED |
+| v3.0 | Controlled production | NOT VALIDATED |
+
+## Principio de seguridad
+
+Ante incertidumbre de:
+
+- ownership;
+- Initial R;
+- position identity;
+- riesgo monetario;
+- broker execution;
+
+toda lógica safety-critical debe **fallar cerrada** y no incrementar exposición.
