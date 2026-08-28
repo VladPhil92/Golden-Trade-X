@@ -173,6 +173,7 @@ private:
       Set(positionId, "MAE_P", entryPrice);
       Set(positionId, "MFE_T", (double)earliest);
       Set(positionId, "MAE_T", (double)earliest);
+      GlobalVariableDel(Key(positionId, "CLOSED"));
 
       Print("PositionState: reconstructed position_id=", positionId,
             " initialRiskMoney=", DoubleToString(initialRiskMoney, 2));
@@ -211,8 +212,6 @@ public:
       return ownEntry && !foreignEntry;
      }
 
-   // Llamar inmediatamente tras apertura server-confirmed con la posición
-   // seleccionable. Si no hay estado, reconstruye desde historial.
    bool EnsurePosition(ulong positionTicket, int confidence = -1, int regime = -1)
      {
       if(positionTicket == 0 || !PositionSelectByTicket(positionTicket)) return false;
@@ -230,6 +229,7 @@ public:
         {
          if(confidence >= 0) Set(positionId, "CONF", (double)confidence);
          if(regime >= 0)     Set(positionId, "REG", (double)regime);
+         GlobalVariableDel(Key(positionId, "CLOSED"));
         }
       return true;
      }
@@ -245,6 +245,7 @@ public:
          ulong positionId = (ulong)PositionGetInteger(POSITION_IDENTIFIER);
          if(positionId == 0) continue;
          if(!HasCoreState(positionId) && EnsurePosition(ticket)) reconstructed++;
+         else GlobalVariableDel(Key(positionId, "CLOSED"));
         }
       if(reconstructed > 0)
          Print("PositionState: ", reconstructed,
@@ -322,6 +323,14 @@ public:
       return true;
      }
 
+   bool IsClosureProcessed(ulong positionId)
+     { return positionId > 0 && GlobalVariableCheck(Key(positionId, "CLOSED")); }
+
+   void MarkClosureProcessed(ulong positionId)
+     {
+      if(positionId > 0) Set(positionId, "CLOSED", (double)TimeCurrent());
+     }
+
    void Cleanup(ulong positionId)
      {
       if(positionId == 0) return;
@@ -331,6 +340,7 @@ public:
       };
       for(int i = 0; i < ArraySize(fields); i++)
          GlobalVariableDel(Key(positionId, fields[i]));
+      // CLOSED se conserva como tombstone para deduplicar múltiples exit deals.
      }
   };
 //+------------------------------------------------------------------+
