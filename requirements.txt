@@ -4,7 +4,7 @@
 #
 # Core (always required)
 MetaTrader5~=5.0
-requests~=2.31
+requests~=2.34
 
 # Machine learning (scripts/ml_pipeline.py)
 xgboost~=2.0
