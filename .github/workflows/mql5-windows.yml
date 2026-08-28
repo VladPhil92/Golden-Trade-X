@@ -1,0 +1,29 @@
+name: MQL5 Windows Build
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  mql5-compile:
+    name: MQL5 compile (MetaEditor)
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install MetaTrader 5 and compile GoldenTradeX.mq5
+        shell: pwsh
+        run: .github/scripts/compile-mql5.ps1
+
+      - name: Upload MetaEditor build evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mql5-metaeditor-build
+          if-no-files-found: warn
+          path: |
+            ${{ env.GTX_COMPILE_LOG }}
+            ${{ env.GTX_EX5 }}
