@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
 //|                                              TestNewsFilter.mq5  |
-//|   Golden Trade X v2.62 — NewsFilter correctness tests           |
+//|   Golden Trade X v2.63 — NewsFilter correctness tests           |
 //+------------------------------------------------------------------+
 #property script_show_inputs false
 #include <GoldenTradeX/NewsFilter.mqh>
@@ -28,7 +28,7 @@ datetime MakeTime(int year, int mon, int day, int hour, int min, int sec = 0)
 
 void OnStart()
   {
-   Print("=== TestNewsFilter v2.62 BEGIN ===");
+   Print("=== TestNewsFilter v2.63 BEGIN ===");
 
    // Server UTC+2.
    CNewsFilter f;
@@ -44,8 +44,12 @@ void OnStart()
    AssertFalse(f.IsNewsBlockedAt(MakeTime(2026,1,9,15,30)), "Second Friday is not NFP proxy");
 
    // NFP proxy Apr 2026: EDT, 08:30 ET = 12:30 UTC = 14:30 server.
+   // The configured +90m safety buffer intentionally remains active through
+   // 16:00 server time. The historical fixed-UTC clock (15:30) is therefore
+   // still blocked even though it is no longer the actual event timestamp.
    AssertTrue (f.IsNewsBlockedAt(MakeTime(2026,4,3,14,30)), "NFP EDT shifts one hour");
-   AssertFalse(f.IsNewsBlockedAt(MakeTime(2026,4,3,15,31)), "NFP EDT old fixed-UTC time not event");
+   AssertTrue (f.IsNewsBlockedAt(MakeTime(2026,4,3,15,31)), "NFP EDT old fixed-UTC clock remains inside +90m buffer");
+   AssertFalse(f.IsNewsBlockedAt(MakeTime(2026,4,3,16, 1)), "NFP EDT after +90m buffer");
 
    // FOMC Jan 28 2026: EST, 14:00 ET = 19:00 UTC = 21:00 server.
    AssertTrue (f.IsNewsBlockedAt(MakeTime(2026,1,28,21, 0)), "FOMC Jan exact event");
