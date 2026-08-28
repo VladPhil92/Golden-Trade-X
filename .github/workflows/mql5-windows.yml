@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   mql5-verification:
     name: MQL5 compile + automated tests (MetaTrader)
