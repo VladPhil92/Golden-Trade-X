@@ -48,6 +48,7 @@ SELECTION_METRICS = {
 @dataclass(frozen=True)
 class ConfidenceOutcome:
     position_id: int
+    entry_time: datetime
     close_time: datetime
     confidence: int
     realized_r: float
@@ -98,7 +99,7 @@ def _normalize_datetimes(values: Sequence[datetime]) -> list[datetime]:
         return []
     aware = [value.tzinfo is not None and value.utcoffset() is not None for value in values]
     if any(aware) and not all(aware):
-        raise ValueError("confidence outcomes mix timezone-aware and naive close times")
+        raise ValueError("confidence outcomes mix timezone-aware and naive timestamps")
     if all(aware):
         return [value.astimezone(timezone.utc) for value in values]
     return list(values)
@@ -107,18 +108,19 @@ def _normalize_datetimes(values: Sequence[datetime]) -> list[datetime]:
 def load_outcomes(conn: sqlite3.Connection) -> tuple[list[ConfidenceOutcome], list[str]]:
     cursor = conn.execute(
         """
-        SELECT position_id, close_time, confidence, realized_r
+        SELECT position_id, entry_time, close_time, confidence, realized_r
         FROM position_outcomes
         ORDER BY COALESCE(close_time, ''), COALESCE(position_id, 0), row_hash
         """
     )
     errors: list[str] = []
-    raw: list[tuple[int, datetime, int, float]] = []
-    for position_id, close_time, confidence, realized_r in cursor.fetchall():
+    raw: list[tuple[int, datetime, datetime, int, float]] = []
+    for position_id, entry_time, close_time, confidence, realized_r in cursor.fetchall():
         try:
             parsed_position = int(position_id)
             parsed_confidence = int(confidence)
-            parsed_time = _parse_datetime(str(close_time))
+            parsed_entry = _parse_datetime(str(entry_time))
+            parsed_close = _parse_datetime(str(close_time))
         except (TypeError, ValueError, OverflowError):
             errors.append(f"invalid identity/time/confidence for position_id={position_id}")
             continue
@@ -130,20 +132,40 @@ def load_outcomes(conn: sqlite3.Connection) -> tuple[list[ConfidenceOutcome], li
         if not _finite(realized_r):
             errors.append(f"non-finite RealizedR for position_id={parsed_position}")
             continue
-        raw.append((parsed_position, parsed_time, parsed_confidence, float(realized_r)))
+        raw.append(
+            (
+                parsed_position,
+                parsed_entry,
+                parsed_close,
+                parsed_confidence,
+                float(realized_r),
+            )
+        )
 
+    flattened_times = [timestamp for row in raw for timestamp in (row[1], row[2])]
     try:
-        normalized_times = _normalize_datetimes([row[1] for row in raw])
+        normalized_times = _normalize_datetimes(flattened_times)
     except ValueError as exc:
         errors.append(str(exc))
         return [], errors
 
-    outcomes = [
-        ConfidenceOutcome(position_id, normalized_time, confidence, realized_r)
-        for (position_id, _, confidence, realized_r), normalized_time in zip(
-            raw, normalized_times, strict=True
+    outcomes: list[ConfidenceOutcome] = []
+    for index, (position_id, _, _, confidence, realized_r) in enumerate(raw):
+        entry = normalized_times[index * 2]
+        close = normalized_times[index * 2 + 1]
+        if close < entry:
+            errors.append(f"position_id={position_id} closes before its entry time")
+            continue
+        outcomes.append(
+            ConfidenceOutcome(
+                position_id=position_id,
+                entry_time=entry,
+                close_time=close,
+                confidence=confidence,
+                realized_r=realized_r,
+            )
         )
-    ]
+
     outcomes.sort(key=lambda row: (row.close_time, row.position_id))
     return outcomes, list(dict.fromkeys(errors))
 
@@ -163,6 +185,22 @@ def chronological_split(
     if split >= len(outcomes):
         return list(outcomes), []
     return list(outcomes[:split]), list(outcomes[split:])
+
+
+def purge_holdout_overlaps(
+    train: Sequence[ConfidenceOutcome], holdout: Sequence[ConfidenceOutcome]
+) -> tuple[list[ConfidenceOutcome], int, datetime | None]:
+    """Remove holdout decisions that occurred before training outcomes were fully known.
+
+    Confidence is fixed at/near entry. For a genuinely later holdout decision,
+    entry must be strictly after the final close whose outcome was available to
+    threshold selection. Same-time entries are conservatively purged too.
+    """
+    if not train:
+        return list(holdout), 0, None
+    cutoff = max(row.close_time for row in train)
+    clean = [row for row in holdout if row.entry_time > cutoff]
+    return clean, len(holdout) - len(clean), cutoff
 
 
 def threshold_metrics(
@@ -223,8 +261,8 @@ def select_threshold(
     ]
     if not candidates:
         return None
-    # Threshold selection is based on TRAIN ONLY. Lower threshold wins ties to
-    # preserve more observations rather than preferring a more selective filter.
+    # Threshold selection is based on TRAIN ONLY. The lowest threshold wins
+    # exact metric plateaus, avoiding an arbitrary preference for stricter cuts.
     return max(candidates, key=lambda row: (float(row[metric]), -int(row["threshold"])))
 
 
@@ -255,7 +293,14 @@ def build_confidence_report(
         "train_fraction_requested": train_fraction,
         "quality_status": quality["status"],
         "load_errors": load_errors,
-        "counts": {"eligible_confidence_outcomes": len(outcomes), "train": 0, "holdout": 0},
+        "counts": {
+            "eligible_confidence_outcomes": len(outcomes),
+            "train": 0,
+            "holdout_before_overlap_purge": 0,
+            "holdout_overlap_purged": 0,
+            "holdout": 0,
+        },
+        "temporal_cutoff": None,
         "training_grid": [],
         "selected_threshold": None,
         "train_selected": None,
@@ -263,9 +308,11 @@ def build_confidence_report(
         "holdout_all_observed": None,
         "parameter_change_status": COUNTERFACTUAL_REQUIRED,
         "methodology_note": (
-            "The threshold is selected only on the earlier training partition and evaluated once on "
-            "the later holdout partition. This tests confidence discrimination among observed trades; "
-            "it does not reproduce the counterfactual EA path created by changing InpMinConfidence."
+            "The threshold is selected only on the earlier training partition. Holdout trades whose "
+            "entry/confidence decision occurred on or before the final training close are purged, then "
+            "the frozen threshold is evaluated once on the remaining later holdout. This tests confidence "
+            "discrimination among observed trades; it does not reproduce the counterfactual EA path created "
+            "by changing InpMinConfidence."
         ),
         "research_thresholds": asdict(research_thresholds),
     }
@@ -276,12 +323,17 @@ def build_confidence_report(
     if quality["status"] != READY_FOR_EXPLORATORY_RESEARCH:
         return report
 
-    train, holdout = chronological_split(outcomes, train_fraction)
+    train, raw_holdout = chronological_split(outcomes, train_fraction)
+    holdout, purged_count, cutoff = purge_holdout_overlaps(train, raw_holdout)
     report["counts"] = {
         "eligible_confidence_outcomes": len(outcomes),
         "train": len(train),
+        "holdout_before_overlap_purge": len(raw_holdout),
+        "holdout_overlap_purged": purged_count,
         "holdout": len(holdout),
     }
+    report["temporal_cutoff"] = cutoff.isoformat() if cutoff else None
+
     if (
         len(train) < research_thresholds.min_train_outcomes
         or len(holdout) < research_thresholds.min_holdout_outcomes
