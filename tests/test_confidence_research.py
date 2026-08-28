@@ -136,9 +136,11 @@ def test_training_selection_uses_train_only_not_holdout() -> None:
     selected = select_threshold(training_grid(train, step=5, min_candidate_train=20), "avg_realized_r")
 
     assert selected is not None
-    assert selected["threshold"] == 80
+    # Thresholds 65..80 select the identical confidence=80 subset. The
+    # deterministic tie-break intentionally picks the lowest equivalent threshold.
+    assert selected["threshold"] == 65
     assert selected["avg_realized_r"] == pytest.approx(1.0)
-    assert threshold_metrics(holdout, 80)["avg_realized_r"] == pytest.approx(-1.0)
+    assert threshold_metrics(holdout, selected["threshold"])["avg_realized_r"] == pytest.approx(-1.0)
 
 
 def test_selection_tie_prefers_lower_threshold_and_more_observations() -> None:
@@ -176,7 +178,7 @@ def test_end_to_end_report_freezes_train_choice_before_holdout(tmp_path: Path) -
         "train": 84,
         "holdout": 36,
     }
-    assert report["selected_threshold"] == 80
+    assert report["selected_threshold"] == 65
     assert report["train_selected"]["avg_realized_r"] == pytest.approx(1.0)
     assert report["holdout_selected"]["avg_realized_r"] == pytest.approx(-1.0)
     assert report["parameter_change_status"] == COUNTERFACTUAL_REQUIRED
