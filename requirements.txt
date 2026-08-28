@@ -2,20 +2,22 @@
 # Acotadas con ~= (compatible release) para builds reproducibles;
 # Dependabot propone las actualizaciones de versión semanalmente.
 #
-# Core (always required)
-MetaTrader5~=5.0
+# Core (cross-platform)
 requests~=2.34
+
+# MetaTrader 5 terminal integration
+# MetaQuotes only publishes the MetaTrader5 Python wheel for Windows.
+# Linux CI intentionally skips it while Windows/MT5 environments install it.
+MetaTrader5~=5.0; platform_system == "Windows"
 
 # Machine learning (scripts/ml_pipeline.py)
 xgboost~=3.3
-scikit-learn~=1.4
-xgboost~=2.0
 scikit-learn~=1.9
 
 # Market data (scripts/correlation_engine.py)
 yfinance~=0.2
 
-# Live monitoring (scripts/live_monitor.py) — optional
+# Live monitoring (scripts/live_monitor.py) — optional runtime capability
 python-dotenv~=1.0
 
 # Testing
