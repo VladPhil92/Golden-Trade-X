@@ -24,6 +24,7 @@
 #include <GoldenTradeX/OrderManager.mqh>
 #include <GoldenTradeX/HealthMonitor.mqh>
 #include <GoldenTradeX/PositionStateManager.mqh>
+#include <GoldenTradeX/ResearchTelemetry.mqh>
 
 input group "=== Identidad ==="
 input ulong   InpMagicNumber      = 920260;
@@ -116,7 +117,8 @@ input ENUM_NEWS_CALENDAR_POLICY InpNewsCalendarPolicy = NEWS_CALENDAR_WARN;
 input bool    InpPauseForNews     = false;
 
 input group "=== Registro ==="
-input bool    InpEnableTradeLog   = true;
+input bool    InpEnableTradeLog          = true;
+input bool    InpEnableResearchTelemetry = true;
 
 CTrade                trade;
 CRiskManager          riskManager;
@@ -133,11 +135,21 @@ CEquityCurveFilter    eqCurveFilter;
 COrderManager         orderMgr;
 CHealthMonitor        healthMonitor;
 CPositionStateManager positionState;
+CResearchTelemetry    researchTelemetry;
 
 datetime g_lastBarTime = 0;
 string   g_gvLastBarKey = "";
 int      g_lastConfidence = 0;
 ENUM_MARKET_REGIME g_lastRegime = REGIME_UNKNOWN;
+
+void LogResearchGuard(string reason)
+  {
+   researchTelemetry.LogSignal(g_lastBarTime,
+                               "GUARD", "REJECTED", reason, "NONE",
+                               -1, (int)g_lastRegime,
+                               0, 0, 0, 0, 0,
+                               0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+  }
 
 bool PositionIdentifierIsOpen(ulong positionId)
   { return positionState.IsPositionOpen(positionId); }
@@ -220,6 +232,8 @@ int OnInit()
    newsFilter.Init(InpUseNewsFilter, InpNewsBufferBefore, InpNewsBufferAfter,
                    InpNewsCalendarPolicy);
    tradeLogger.Init(InpEnableTradeLog, InpMagicNumber);
+   researchTelemetry.Init(InpEnableResearchTelemetry, InpMagicNumber,
+                          _Symbol, InpTimeframe);
 
    if(InpUseRegimeFilter)
      {
@@ -270,7 +284,8 @@ int OnInit()
          " | PartialTP=", InpUsePartialTP ? "ON" : "OFF",
          " | EqFilter=", InpUseEqCurveFilter ? "ON" : "OFF",
          " | Kelly=", InpUseKelly ? "ON" : "OFF",
-         " | PortfolioCap=", InpUsePortfolioCap ? "ON" : "OFF");
+         " | PortfolioCap=", InpUsePortfolioCap ? "ON" : "OFF",
+         " | ResearchTelemetry=", InpEnableResearchTelemetry ? "ON" : "OFF");
    return INIT_SUCCEEDED;
   }
 
@@ -310,37 +325,83 @@ void OnTick()
    eqCurveFilter.Sample();
 
    if(riskManager.IsKillSwitchActive())
-     { Comment("GoldenTradeX: KILL SWITCH activo. Operaciones detenidas."); return; }
-   if(!sessionFilter.IsTradingAllowed()) return;
-   if(!riskManager.IsSpreadAcceptable(_Symbol)) return;
+     {
+      LogResearchGuard("KILL_SWITCH");
+      Comment("GoldenTradeX: KILL SWITCH activo. Operaciones detenidas.");
+      return;
+     }
+   if(!sessionFilter.IsTradingAllowed())
+     { LogResearchGuard("SESSION_BLOCKED"); return; }
+   if(!riskManager.IsSpreadAcceptable(_Symbol))
+     { LogResearchGuard("SPREAD_TOO_WIDE"); return; }
    if(riskManager.IsDailyDrawdownExceeded())
-     { Comment("GoldenTradeX: DD diario alcanzado. Pausa hasta mañana."); return; }
+     {
+      LogResearchGuard("DAILY_DD_LIMIT");
+      Comment("GoldenTradeX: DD diario alcanzado. Pausa hasta mañana.");
+      return;
+     }
    if(riskManager.IsWeeklyDrawdownExceeded())
-     { Comment("GoldenTradeX: DD semanal alcanzado. Pausa hasta la semana siguiente."); return; }
+     {
+      LogResearchGuard("WEEKLY_DD_LIMIT");
+      Comment("GoldenTradeX: DD semanal alcanzado. Pausa hasta la semana siguiente.");
+      return;
+     }
    if(riskManager.IsMonthlyCircuitBreakerTripped())
-     { Comment("GoldenTradeX: Circuit Breaker mensual disparado."); return; }
+     {
+      LogResearchGuard("MONTHLY_CIRCUIT_BREAKER");
+      Comment("GoldenTradeX: Circuit Breaker mensual disparado.");
+      return;
+     }
    if(riskManager.IsConsecutiveLossLimitReached())
-     { Comment("GoldenTradeX: límite de pérdidas consecutivas alcanzado."); return; }
+     {
+      LogResearchGuard("CONSECUTIVE_LOSS_LIMIT");
+      Comment("GoldenTradeX: límite de pérdidas consecutivas alcanzado.");
+      return;
+     }
    if(newsFilter.IsNewsBlocked())
-     { Comment("GoldenTradeX: ventana de noticias activa. Esperando..."); return; }
+     {
+      LogResearchGuard("NEWS_WINDOW");
+      Comment("GoldenTradeX: ventana de noticias activa. Esperando...");
+      return;
+     }
    if(InpPauseForNews)
-     { Comment("GoldenTradeX: pausa manual activa."); return; }
-   if(riskManager.CountOpenPositions(_Symbol) >= InpMaxPositions) return;
-   if(HasForeignNettingPosition(_Symbol)) return;
-   if(!TerminalInfoInteger(TERMINAL_CONNECTED)) return;
+     {
+      LogResearchGuard("MANUAL_NEWS_PAUSE");
+      Comment("GoldenTradeX: pausa manual activa.");
+      return;
+     }
+   if(riskManager.CountOpenPositions(_Symbol) >= InpMaxPositions)
+     { LogResearchGuard("MAX_POSITIONS"); return; }
+   if(HasForeignNettingPosition(_Symbol))
+     { LogResearchGuard("FOREIGN_NETTING_POSITION"); return; }
+   if(!TerminalInfoInteger(TERMINAL_CONNECTED))
+     { LogResearchGuard("TERMINAL_DISCONNECTED"); return; }
 
    if(InpUseRegimeFilter)
      {
       g_lastRegime = regimeEngine.Detect();
       if(g_lastRegime == REGIME_VOLATILE)
-        { Comment("GoldenTradeX: régimen VOLATILE. Sin entradas."); return; }
+        {
+         LogResearchGuard("REGIME_VOLATILE");
+         Comment("GoldenTradeX: régimen VOLATILE. Sin entradas.");
+         return;
+        }
      }
    else
       g_lastRegime = REGIME_UNKNOWN;
 
    ENUM_SIGNAL signal = signalEngine.GetSignal();
-   if(signal == SIGNAL_NONE) return;
+   if(signal == SIGNAL_NONE)
+     {
+      researchTelemetry.LogSignal(g_lastBarTime,
+                                  "BASE_SIGNAL", "NO_SIGNAL", "SIGNAL_NONE", "NONE",
+                                  0, (int)g_lastRegime,
+                                  0, 0, 0, 0, 0,
+                                  0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+      return;
+     }
    bool isBuy = (signal == SIGNAL_BUY);
+   string direction = isBuy ? "BUY" : "SELL";
 
    int regScore = InpUseRegimeFilter ? regimeEngine.RegimeScore(isBuy) : 15;
    int smcScore = 0;
@@ -355,8 +416,21 @@ void OnTick()
    SConfidenceResult conf = confEngine.Compute(true, isBuy, regScore, smcScore, fibScore);
    g_lastConfidence = conf.total;
 
+   researchTelemetry.LogSignal(g_lastBarTime,
+                               "CONFLUENCE", "CANDIDATE", "", direction,
+                               conf.total, (int)g_lastRegime,
+                               conf.baseSignal, conf.regimeBonus, conf.smcBonus,
+                               conf.htfBonus, conf.fibBonus,
+                               0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+
    if(conf.total < InpMinConfidence)
      {
+      researchTelemetry.LogSignal(g_lastBarTime,
+                                  "CONFLUENCE", "REJECTED", "CONFIDENCE_TOO_LOW", direction,
+                                  conf.total, (int)g_lastRegime,
+                                  conf.baseSignal, conf.regimeBonus, conf.smcBonus,
+                                  conf.htfBonus, conf.fibBonus,
+                                  0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
       Comment("GoldenTradeX: Conf=", conf.total, "/100 < ", InpMinConfidence,
               " | Base=", conf.baseSignal, " Reg=", conf.regimeBonus,
               " SMC=", conf.smcBonus, " HTF=", conf.htfBonus, " Fib=", conf.fibBonus);
@@ -367,7 +441,16 @@ void OnTick()
       Print("GoldenTradeX: Capital Preservation Mode activo.");
 
    double atr = signalEngine.GetATR();
-   if(atr <= 0) return;
+   if(atr <= 0)
+     {
+      researchTelemetry.LogSignal(g_lastBarTime,
+                                  "GEOMETRY", "REJECTED", "ATR_INVALID", direction,
+                                  conf.total, (int)g_lastRegime,
+                                  conf.baseSignal, conf.regimeBonus, conf.smcBonus,
+                                  conf.htfBonus, conf.fibBonus,
+                                  atr, 0.0, 0.0, 0.0, 0.0, 0.0);
+      return;
+     }
 
    double price, sl, tp;
    ENUM_ORDER_TYPE type;
@@ -398,10 +481,25 @@ void OnTick()
 
    double riskDistance = MathAbs(price - sl);
    double rewardDistance = MathAbs(tp - price);
-   if(riskDistance <= 0 || rewardDistance <= 0) return;
+   if(riskDistance <= 0 || rewardDistance <= 0)
+     {
+      researchTelemetry.LogSignal(g_lastBarTime,
+                                  "GEOMETRY", "REJECTED", "INVALID_RISK_REWARD_DISTANCE", direction,
+                                  conf.total, (int)g_lastRegime,
+                                  conf.baseSignal, conf.regimeBonus, conf.smcBonus,
+                                  conf.htfBonus, conf.fibBonus,
+                                  atr, price, sl, tp, 0.0, 0.0);
+      return;
+     }
    double initialRR = rewardDistance / riskDistance;
    if(InpMinInitialRR > 0 && initialRR < InpMinInitialRR)
      {
+      researchTelemetry.LogSignal(g_lastBarTime,
+                                  "RR", "REJECTED", "RR_TOO_LOW", direction,
+                                  conf.total, (int)g_lastRegime,
+                                  conf.baseSignal, conf.regimeBonus, conf.smcBonus,
+                                  conf.htfBonus, conf.fibBonus,
+                                  atr, price, sl, tp, initialRR, 0.0);
       Print("GoldenTradeX: RR_TOO_LOW — RR=", DoubleToString(initialRR, 3),
             " < mínimo=", DoubleToString(InpMinInitialRR, 3));
       Comment("GoldenTradeX: RR inicial insuficiente: ", DoubleToString(initialRR, 2));
@@ -409,16 +507,43 @@ void OnTick()
      }
 
    double lots = riskManager.CalculateLotSize(_Symbol, price, sl);
-   if(lots <= 0) return;
+   if(lots <= 0)
+     {
+      researchTelemetry.LogSignal(g_lastBarTime,
+                                  "SIZING", "REJECTED", "LOT_SIZE_INVALID", direction,
+                                  conf.total, (int)g_lastRegime,
+                                  conf.baseSignal, conf.regimeBonus, conf.smcBonus,
+                                  conf.htfBonus, conf.fibBonus,
+                                  atr, price, sl, tp, initialRR, lots);
+      return;
+     }
 
    double eqMult = eqCurveFilter.GetMultiplier();
    if(eqMult < 1.0)
      {
       double lotStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
       double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
-      if(lotStep <= 0) return;
+      if(lotStep <= 0)
+        {
+         researchTelemetry.LogSignal(g_lastBarTime,
+                                     "SIZING", "REJECTED", "VOLUME_STEP_INVALID", direction,
+                                     conf.total, (int)g_lastRegime,
+                                     conf.baseSignal, conf.regimeBonus, conf.smcBonus,
+                                     conf.htfBonus, conf.fibBonus,
+                                     atr, price, sl, tp, initialRR, lots);
+         return;
+        }
       lots = MathFloor(lots * eqMult / lotStep) * lotStep;
-      if(lots < minLot) return;
+      if(lots < minLot)
+        {
+         researchTelemetry.LogSignal(g_lastBarTime,
+                                     "SIZING", "REJECTED", "EQUITY_FILTER_BELOW_MIN_LOT", direction,
+                                     conf.total, (int)g_lastRegime,
+                                     conf.baseSignal, conf.regimeBonus, conf.smcBonus,
+                                     conf.htfBonus, conf.fibBonus,
+                                     atr, price, sl, tp, initialRR, lots);
+         return;
+        }
       Print("GoldenTradeX: EqCurveFilter — lote reducido (equity<EMA).");
      }
 
@@ -426,14 +551,54 @@ void OnTick()
                                   InpTradeComment, conf.total,
                                   RegimeToString(g_lastRegime));
 
+   researchTelemetry.LogSignal(g_lastBarTime,
+                               "EXECUTION", "ORDER_REQUESTED", "", direction,
+                               conf.total, (int)g_lastRegime,
+                               conf.baseSignal, conf.regimeBonus, conf.smcBonus,
+                               conf.htfBonus, conf.fibBonus,
+                               atr, price, sl, tp, initialRR, lots);
+
+   double requestedSL = NormalizeDouble(sl, _Digits);
+   double requestedTP = NormalizeDouble(tp, _Digits);
    bool ok = orderMgr.OpenPosition(_Symbol, type, lots, price,
-                                   NormalizeDouble(sl, _Digits),
-                                   NormalizeDouble(tp, _Digits),
+                                   requestedSL,
+                                   requestedTP,
                                    comment);
+
+   ulong telemetryOrder = orderMgr.GetLastOrderTicket();
+   ulong telemetryDeal = orderMgr.GetLastDealTicket();
+   ulong telemetryPositionId = orderMgr.GetLastPositionIdentifier();
+   ulong telemetryPositionTicket = orderMgr.GetLastPositionTicket();
+   double confirmedPrice = ok ? trade.ResultPrice() : 0.0;
+   double confirmedVolume = ok ? trade.ResultVolume() : 0.0;
+   double confirmedSlippage = ok ? orderMgr.GetLastSlippage() : 0.0;
+
+   researchTelemetry.LogOrderResult("OPEN",
+                                    ok ? "SERVER_CONFIRMED" : "FAILED",
+                                    direction,
+                                    price, requestedSL, requestedTP, lots,
+                                    trade.ResultRetcode(),
+                                    (int)orderMgr.GetLastResultClass(),
+                                    confirmedPrice, confirmedVolume, confirmedSlippage,
+                                    telemetryOrder, telemetryDeal,
+                                    telemetryPositionId, telemetryPositionTicket,
+                                    trade.ResultComment());
+
+   researchTelemetry.LogSignal(g_lastBarTime,
+                               "EXECUTION",
+                               ok ? "OPEN_CONFIRMED" : "OPEN_FAILED",
+                               ok ? "SERVER_CONFIRMED" : trade.ResultComment(),
+                               direction,
+                               conf.total, (int)g_lastRegime,
+                               conf.baseSignal, conf.regimeBonus, conf.smcBonus,
+                               conf.htfBonus, conf.fibBonus,
+                               atr, price, sl, tp, initialRR, lots,
+                               telemetryPositionId, telemetryOrder, telemetryDeal);
+
    if(ok)
      {
-      ulong positionId = orderMgr.GetLastPositionIdentifier();
-      ulong positionTicket = orderMgr.GetLastPositionTicket();
+      ulong positionId = telemetryPositionId;
+      ulong positionTicket = telemetryPositionTicket;
       if(positionTicket == 0)
          positionTicket = orderMgr.ResolveLastPositionTicket(_Symbol);
 
@@ -486,11 +651,24 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    if(dealTicket == 0 || !HistoryDealSelect(dealTicket)) return;
 
    long entry = HistoryDealGetInteger(dealTicket, DEAL_ENTRY);
+   long dealMagic = HistoryDealGetInteger(dealTicket, DEAL_MAGIC);
+
+   if(entry == DEAL_ENTRY_IN)
+     {
+      if(dealMagic == (long)InpMagicNumber)
+         researchTelemetry.LogDeal(dealTicket);
+      return;
+     }
+
    if(entry != DEAL_ENTRY_OUT && entry != DEAL_ENTRY_INOUT) return;
 
    ulong positionId = (ulong)HistoryDealGetInteger(dealTicket, DEAL_POSITION_ID);
    if(positionId == 0) return;
    if(!PositionHistoryBelongsExclusivelyToEA(positionId)) return;
+
+   // Exit deals can be manual/broker-side (magic 0). Ownership is proven from
+   // the position history before the immutable deal is admitted to research.
+   researchTelemetry.LogDeal(dealTicket);
 
    if(PositionIdentifierIsOpen(positionId))
      {
@@ -518,9 +696,44 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    SPositionState finalState;
    bool hasState = positionState.Load(positionId, finalState);
    if(hasState)
+     {
       Print("GoldenTradeX: cierre position_id=", positionId,
             " MFE=", DoubleToString(finalState.mfeR, 2), "R",
             " MAE=", DoubleToString(finalState.maeR, 2), "R");
+
+      long exitType = HistoryDealGetInteger(dealTicket, DEAL_TYPE);
+      string direction = exitType == DEAL_TYPE_SELL ? "BUY" : "SELL";
+      datetime closeTime = (datetime)HistoryDealGetInteger(dealTicket, DEAL_TIME);
+      string closedSymbol = HistoryDealGetString(dealTicket, DEAL_SYMBOL);
+      double closePrice = HistoryDealGetDouble(dealTicket, DEAL_PRICE);
+      double realizedR = posNet / finalState.initialRiskMoney;
+
+      researchTelemetry.LogPositionOutcome(closeTime,
+                                           closedSymbol,
+                                           positionId,
+                                           direction,
+                                           finalState.entryTime,
+                                           finalState.entryPrice,
+                                           finalState.initialSL,
+                                           finalState.initialTP,
+                                           finalState.initialRiskPrice,
+                                           finalState.initialRiskMoney,
+                                           finalState.initialVolume,
+                                           finalState.confidence,
+                                           finalState.regime,
+                                           finalState.mfeR,
+                                           finalState.mfePrice,
+                                           finalState.mfeTime,
+                                           finalState.maeR,
+                                           finalState.maePrice,
+                                           finalState.maeTime,
+                                           posNet,
+                                           realizedR,
+                                           closePrice);
+     }
+   else
+      Print("ResearchTelemetry: outcome omitido — PositionState final no demostrable para position_id=",
+            positionId);
 
    riskManager.RegisterTradeResult(posNet);
    riskManager.ReleaseOpenRisk(positionId);
