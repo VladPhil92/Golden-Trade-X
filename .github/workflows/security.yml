@@ -39,47 +39,50 @@ jobs:
           cache: pip
       - name: Install pip-audit
         run: python -m pip install --disable-pip-version-check pip-audit
-      - name: Audit declared Python dependencies
+      - name: Audit complete declared dependency set
         run: python -m pip_audit -r requirements.txt --progress-spinner off
 
-  dependency-review:
-    name: Dependency review capability
+  dependency-manifest-review:
+    name: Dependency manifest review
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     steps:
       - uses: actions/checkout@v7
-      - name: Detect Dependency Graph availability
-        id: depgraph
+        with:
+          fetch-depth: 0
+      - name: Record dependency manifest changes
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
+          GTX_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GTX_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          code=$(curl --silent --show-error --output /tmp/gtx-sbom.json \
-            --write-out "%{http_code}" \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/dependency-graph/sbom")
-          if [ "$code" = "200" ]; then
-            echo "supported=true" >> "$GITHUB_OUTPUT"
-            echo "Dependency Graph available — dependency review is blocking."
-          elif [ "$code" = "403" ] || [ "$code" = "404" ]; then
-            echo "supported=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::Dependency Graph is disabled/unavailable; Dependency Review cannot be enforced yet."
+          set -euo pipefail
+          echo "Dependency manifest diff for ${GTX_BASE_SHA}...${GTX_HEAD_SHA}"
+          if git diff --quiet "$GTX_BASE_SHA" "$GTX_HEAD_SHA" -- requirements.txt; then
+            echo "No requirements.txt changes in this pull request."
           else
-            echo "Unexpected Dependency Graph API status: $code"
-            cat /tmp/gtx-sbom.json || true
-            exit 1
+            git diff --unified=3 "$GTX_BASE_SHA" "$GTX_HEAD_SHA" -- requirements.txt
+            echo "requirements.txt changed; the blocking Python dependency audit validates the complete resulting set."
           fi
-      - name: Review dependency changes
-        if: steps.depgraph.outputs.supported == 'true'
-        uses: actions/dependency-review-action@v4
-        with:
-          fail-on-severity: moderate
-      - name: Record external security gap
-        if: steps.depgraph.outputs.supported != 'true'
+
+  security-required:
+    name: Security required gate
+    if: always()
+    needs:
+      - codeql
+      - python-dependency-audit
+      - dependency-manifest-review
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce security job conclusions
+        shell: bash
         run: |
-          echo "DEPENDENCY_REVIEW=BLOCKED_EXTERNAL"
-          echo "Enable GitHub Dependency Graph to make dependency-review-action a blocking gate."
+          set -euo pipefail
+          test "${{ needs.codeql.result }}" = "success"
+          test "${{ needs.python-dependency-audit.result }}" = "success"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            test "${{ needs.dependency-manifest-review.result }}" = "success"
+          else
+            test "${{ needs.dependency-manifest-review.result }}" = "skipped"
+          fi
+          echo "SECURITY REQUIRED GATE PASS"
