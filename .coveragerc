@@ -1,0 +1,9 @@
+[run]
+branch = True
+
+[report]
+show_missing = True
+skip_empty = True
+exclude_also =
+    ^\s*def main\(.*\):$
+    ^\s*if __name__ == ["']__main__["']:$
