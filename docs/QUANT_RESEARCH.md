@@ -122,9 +122,41 @@ for ablation status.
 
 True v2.80 ablation must use controlled Strategy Tester reruns where exactly one component/configuration changes and every other relevant input is frozen. Those runs will be compared only after provenance and data-quality gates pass.
 
-## Confidence-research warning
+## Confidence research
 
-The legacy `scripts/optimize_confidence.py` searches thresholds on the same dataset it scores. That is useful for exploratory sensitivity analysis, but selecting the best threshold on the full dataset creates selection bias and is not OOS validation. v2.80 will replace “optimal threshold” language with train/holdout or controlled Strategy Tester experiment semantics before any confidence recommendation is promoted.
+The legacy `scripts/optimize_confidence.py` previously selected a best threshold on the same full dataset it scored and claimed this avoided look-ahead bias. That claim was removed. The legacy utility is now an explicitly **in-sample sensitivity table only**: it emits no threshold recommendation and directs parameter research to the v2.80 workflow.
+
+The v2.80 confidence study uses:
+
+```bash
+python scripts/confidence_research.py \
+  --db data/gtx_research.sqlite \
+  --manifest config/research_manifest.json \
+  --output data/research/confidence_holdout.json
+```
+
+Methodology:
+
+```text
+chronological observed outcomes
+       │
+       ├── earlier TRAIN partition
+       │      └── threshold grid
+       │             └── freeze one threshold using TRAIN only
+       │
+       └── later HOLDOUT partition
+              └── evaluate the frozen threshold once
+```
+
+Default internal minimums are 70 train outcomes, 30 holdout outcomes, 20 observations for a train candidate and 10 holdout observations for the selected candidate. These are research-operability floors, not proof of statistical sufficiency.
+
+Important boundary: even a favorable untouched holdout result is still a **post-hoc discrimination diagnostic among trades that actually occurred**. It does not prove that changing `InpMinConfidence` would have produced the same realized trade sequence. Rejecting trades can alter equity, drawdown, sizing, loss streaks and subsequent EA state. Therefore every confidence report carries:
+
+```text
+REQUIRES_COUNTERFACTUAL_STRATEGY_TESTER_CONFIRMATION
+```
+
+No code path in the research tool edits an EA preset or changes live parameters automatically.
 
 ## Exit-research boundary
 
@@ -136,8 +168,8 @@ v2.80 is complete only when:
 
 - [x] data-quality/provenance gate exists;
 - [x] reproducible descriptive baseline exists;
-- [ ] legacy confidence optimizer no longer presents in-sample selection as validated optimization;
-- [ ] confidence research uses explicit holdout/counterfactual semantics;
+- [x] legacy confidence optimizer no longer presents in-sample selection as validated optimization;
+- [x] confidence research uses explicit chronological train/holdout and counterfactual semantics;
 - [ ] ablation experiment matrix is reproducible and one-change-at-a-time;
 - [ ] exit research distinguishes descriptive MFE/MAE diagnostics from counterfactual reruns;
 - [ ] controlled experiment outputs are registered without fabricating missing evidence;
