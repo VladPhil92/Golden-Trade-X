@@ -6,10 +6,15 @@ from scripts.security_scan import scan_path, scan_text
 
 
 def test_detects_high_risk_credential_patterns() -> None:
-    assert "private key" in scan_text("-----BEGIN PRIVATE KEY-----\nabc")
-    assert "GitHub token" in scan_text("token=ghp_abcdefghijklmnopqrstuvwxyz123456")
-    assert "AWS access key" in scan_text("AKIA1234567890ABCDEF")
-    assert "Telegram bot token" in scan_text("123456789:abcdefghijklmnopqrstuvwxyzABCDEFGHI")
+    private_key = "-----BEGIN " + "PRIVATE KEY-----\nabc"
+    github_token = "token=" + "gh" + "p_abcdefghijklmnopqrstuvwxyz123456"
+    aws_key = "AK" + "IA1234567890ABCDEF"
+    telegram_token = "123456789:" + "abcdefghijklmnopqrstuvwxyzABCDEFGHI"
+
+    assert "private key" in scan_text(private_key)
+    assert "GitHub token" in scan_text(github_token)
+    assert "AWS access key" in scan_text(aws_key)
+    assert "Telegram bot token" in scan_text(telegram_token)
 
 
 def test_does_not_flag_normal_placeholders() -> None:
