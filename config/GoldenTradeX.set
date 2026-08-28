@@ -1,6 +1,5 @@
-; Golden Trade X v2.61 — preset por defecto (XAUUSD M15)
-; Nota DST: StartHour/EndHour estan en hora del servidor del broker.
-; La mayoria de brokers usa EET (GMT+2 verano / GMT+3 invierno).
+; Golden Trade X v2.62 — preset por defecto (XAUUSD M15)
+; Nota DST: StartHour/EndHour aun estan en hora del servidor del broker.
 
 InpMagicNumber=920260
 InpTradeComment=GoldenTradeX
@@ -24,12 +23,10 @@ InpAdxMinLevel=25.0
 InpUseHtfFilter=true
 InpHtfEmaPeriod=50
 
-; --- Confluence Score & Smart Money (heuristico, v2.00) ---
+; --- Confluence Score & Smart Money (heuristico, no calibrado) ---
 InpUseRegimeFilter=true
 InpUseSmcFilter=true
 InpMinConfidence=55
-; Pesos del Confluence Score (v2.60) — heuristicos, no calibrados con datos.
-; Configurables para optimizar via Strategy Tester una vez haya historial real.
 InpConfWeightBase=25
 InpConfWeightRegime=25
 InpConfWeightSmc=30
@@ -47,6 +44,8 @@ InpAtrSlMultiplier=2.0
 InpAtrTpMultiplier=3.0
 InpMaxSpreadPoints=350
 InpCpThresholdPct=8.0
+; 0.0 = guard RR desactivado hasta disponer de evidencia OOS para fijar umbral.
+InpMinInitialRR=0.0
 
 ; --- Trailing y Break-Even ---
 InpUseTrailing=true
@@ -65,38 +64,35 @@ InpFridayCloseHour=19
 InpUseNewsFilter=true
 InpNewsBufferBefore=30
 InpNewsBufferAfter=90
+; 0=WARN, 1=FAIL_CLOSED, 2=FAIL_OPEN. WARN preserva backtests historicos
+; mientras se construye el calendar cache oficial; produccion debera evaluar 1.
+InpNewsCalendarPolicy=0
 InpPauseForNews=false
 
-; --- Kelly Criterion Fraccional (v2.40) ---
-; InpUseKelly=false por defecto. Activar solo tras >= InpKellyMinTrades en historial.
+; --- Kelly Criterion Fraccional ---
 InpUseKelly=false
 InpKellyFraction=0.25
 InpKellyMinTrades=30
 
-; --- Order Manager (v2.30) ---
+; --- Order Manager ---
 InpOrderMaxRetries=3
 InpOrderRetryDelay=500
 InpMinMarginLevel=200.0
 
-; --- Portfolio Risk Cap (v2.60) ---
-; Riesgo agregado maximo entre TODAS las instancias del EA en esta cuenta
-; (p.ej. XAUUSD + XAGUSD corriendo en paralelo). OFF por defecto para no
-; alterar el comportamiento de instalaciones existentes de un solo simbolo.
-; Si corres varios simbolos a la vez, activa esto en TODAS las instancias
-; con el MISMO InpMaxPortfolioRiskPct — comparten presupuesto por cuenta.
+; --- Portfolio Risk Cap ---
 InpUsePortfolioCap=false
 InpMaxPortfolioRiskPct=1.5
 
-; --- Partial Take Profit (v2.20) ---
+; --- Partial Take Profit ---
 InpUsePartialTP=true
 InpPartialTPR=1.0
 InpPartialTPPct=50.0
 
-; --- Equity Curve Filter (v2.20) ---
+; --- Equity Curve Filter ---
 InpUseEqCurveFilter=true
 InpEqCurvePeriod=20
 
-; --- Filtro volumen de ticks (v2.20) ---
+; --- Filtro volumen de ticks ---
 InpMinTickVolume=10
 
 ; --- Registro ---
