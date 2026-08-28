@@ -99,6 +99,43 @@ void OnStart()
    rm.RegisterTradeResult(10.0);
    AssertFalse(rm.IsConsecutiveLossLimitReached(), "Limite liberado tras ganancia");
 
+   //--- Portfolio Risk Cap (v2.60) — funciones puras basadas en GlobalVariable
+   {
+      CRiskManagerTest rm2;
+      rm2.Init(1.0, 4.0, 1, 350, 0, 3, 8.0);
+      rm2.InitPortfolioCap(true, 1.5);
+
+      // Limpieza previa: liberar tickets de prueba si quedaron de una corrida anterior
+      rm2.ReleaseOpenRisk(90001);
+      rm2.ReleaseOpenRisk(90002);
+      AssertEq(rm2.GetPortfolioRiskUsed(), 0.0, "PortfolioRisk inicia en 0");
+
+      rm2.RegisterOpenRisk(90001, 0.8);
+      AssertEq(rm2.GetPortfolioRiskUsed(), 0.8, "PortfolioRisk tras 1er registro = 0.8%");
+      AssertEq(rm2.GetAvailablePortfolioRisk(), 0.7, "Disponible = 1.5 - 0.8 = 0.7%");
+
+      rm2.RegisterOpenRisk(90002, 0.5);
+      AssertEq(rm2.GetPortfolioRiskUsed(), 1.3, "PortfolioRisk tras 2do registro = 1.3%");
+      AssertEq(rm2.GetAvailablePortfolioRisk(), 0.2, "Disponible = 1.5 - 1.3 = 0.2%");
+
+      rm2.ReleaseOpenRisk(90001);
+      AssertEq(rm2.GetPortfolioRiskUsed(), 0.5, "PortfolioRisk tras liberar 90001 = 0.5%");
+
+      rm2.ReleaseOpenRisk(90002);
+      AssertEq(rm2.GetPortfolioRiskUsed(), 0.0, "PortfolioRisk tras liberar todo = 0.0%");
+
+      // Liberar un ticket no registrado no debe romper nada ni ir negativo
+      rm2.ReleaseOpenRisk(99999);
+      AssertEq(rm2.GetPortfolioRiskUsed(), 0.0, "Liberar ticket inexistente no afecta el total");
+
+      // Con el cap desactivado, Register/Release no deben tener efecto
+      CRiskManagerTest rm3;
+      rm3.Init(1.0, 4.0, 1, 350, 0, 3, 8.0);
+      rm3.InitPortfolioCap(false, 1.5);
+      rm3.RegisterOpenRisk(90003, 0.9);
+      AssertEq(rm3.GetPortfolioRiskUsed(), 0.0, "Cap OFF: RegisterOpenRisk no acumula");
+   }
+
    //--- Resumen
    Print("=== TestRiskManager END | PASS=", g_pass, " FAIL=", g_fail, " ===");
    if(g_fail == 0) Print(">>> ALL TESTS PASSED <<<");

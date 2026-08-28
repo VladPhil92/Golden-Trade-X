@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
 //|                                                  RiskManager.mqh |
-//|   Golden Trade X v2.50 — Gestión de riesgo y capital             |
+//|   Golden Trade X v2.60 — Gestión de riesgo y capital             |
 //+------------------------------------------------------------------+
 #property strict
 
@@ -41,6 +41,17 @@ private:
    bool    m_useKelly;
    double  m_kellyFraction;         // 0.25 = Quarter-Kelly (recomendado)
    int     m_kellyMinTrades;        // trades mínimos antes de activar Kelly
+
+   // v2.60: Portfolio Risk Cap — riesgo agregado entre TODAS las instancias
+   // del EA en la misma cuenta (p.ej. XAUUSD + XAGUSD). Sin esto, cada
+   // instancia gestiona su drawdown de forma aislada aunque XAUUSD y XAGUSD
+   // están altamente correlacionados (USD, tasas reales, riesgo geopolítico),
+   // por lo que dos posiciones de 1% pueden significar ~2% de riesgo real
+   // ante el mismo factor macro.
+   bool    m_usePortfolioCap;
+   double  m_maxPortfolioRiskPct;   // % máximo de equity en riesgo simultáneo, TODAS las instancias
+   string  m_gvPortfolioRiskKey;    // GlobalVariable compartida por cuenta (no por magic number)
+   string  m_gvPortfolioPrefix;     // prefijo para las claves per-ticket
 
    // Calcula W (win rate) y R (win/loss ratio) desde historial real del EA.
    // v2.50: agrega los deals por POSITION_ID — un trade con cierre parcial
@@ -225,8 +236,14 @@ public:
       m_useKelly             = false;
       m_kellyFraction        = 0.25;
       m_kellyMinTrades       = 30;
+      m_usePortfolioCap      = false;
+      m_maxPortfolioRiskPct  = 1.5;
 
       long login = AccountInfoInteger(ACCOUNT_LOGIN);
+      // v2.60: clave por CUENTA (no por magic number) — compartida entre
+      // todas las instancias del EA (XAUUSD, XAGUSD, ...) en este login.
+      m_gvPortfolioRiskKey = StringFormat("GTX_%d_PortfolioRiskPct", (int)login);
+      m_gvPortfolioPrefix  = StringFormat("GTX_%d_PR_", (int)login);
       m_gvDayKey         = StringFormat("GTX_%d_%d_Day",         (int)login, (int)magic);
       m_gvEquityKey      = StringFormat("GTX_%d_%d_Equity",      (int)login, (int)magic);
       m_gvWeekKey        = StringFormat("GTX_%d_%d_Week",        (int)login, (int)magic);
@@ -263,12 +280,126 @@ public:
                DoubleToString(m_kellyFraction*100,0), "% minTrades=", m_kellyMinTrades);
      }
 
+   // v2.60: activar el Portfolio Risk Cap (riesgo agregado entre instancias)
+   void InitPortfolioCap(bool enabled, double maxPortfolioRiskPct)
+     {
+      m_usePortfolioCap     = enabled;
+      m_maxPortfolioRiskPct = MathMax(0.01, maxPortfolioRiskPct);
+      if(m_usePortfolioCap)
+        {
+         ReconcilePortfolioRisk();   // v2.61: limpiar reservas huérfanas
+         Print("RiskManager: Portfolio Risk Cap ON — máximo ",
+               DoubleToString(m_maxPortfolioRiskPct, 2),
+               "% de riesgo agregado entre todas las instancias del EA.");
+        }
+     }
+
+   // v2.61: reconciliación del presupuesto de riesgo compartido.
+   // Si una posición se cierra con el terminal APAGADO (SL/TP se ejecutan
+   // en el servidor del broker), OnTradeTransaction nunca se dispara al
+   // reiniciar → ReleaseOpenRisk() no se llama y la reserva queda escrita
+   // en la GlobalVariable para siempre. Sin esta pasada, el presupuesto se
+   // llena de posiciones fantasma y el cap termina bloqueando trades
+   // legítimos. Aquí se enumeran todas las reservas GTX_<login>_PR_*,
+   // se eliminan las de tickets que ya no existen, y se RECONSTRUYE el
+   // total desde las reservas supervivientes (corrige cualquier deriva).
+   void ReconcilePortfolioRisk()
+     {
+      double rebuiltTotal = 0.0;
+      int    released     = 0;
+      int    prefixLen    = StringLen(m_gvPortfolioPrefix);
+
+      // Recorrer hacia atrás: GlobalVariableDel reindexa la lista
+      for(int i = GlobalVariablesTotal() - 1; i >= 0; i--)
+        {
+         string name = GlobalVariableName(i);
+         if(StringSubstr(name, 0, prefixLen) != m_gvPortfolioPrefix) continue;
+
+         ulong ticket = (ulong)StringToInteger(StringSubstr(name, prefixLen));
+         if(ticket > 0 && PositionSelectByTicket(ticket))
+           {
+            rebuiltTotal += GlobalVariableGet(name);   // posición viva: conservar
+           }
+         else
+           {
+            released++;
+            Print("RiskManager: reserva huérfana liberada (ticket=", ticket,
+                  " riesgo=", DoubleToString(GlobalVariableGet(name), 3),
+                  "% — posición ya no existe).");
+            GlobalVariableDel(name);
+           }
+        }
+
+      GlobalVariableSet(m_gvPortfolioRiskKey, rebuiltTotal);
+      if(released > 0)
+         Print("RiskManager: reconciliación — ", released,
+               " reserva(s) huérfana(s) liberada(s). Riesgo comprometido real: ",
+               DoubleToString(rebuiltTotal, 3), "%");
+     }
+
+   // Riesgo % actualmente comprometido por TODAS las instancias del EA
+   // (suma persistida en una GlobalVariable compartida por cuenta)
+   double GetPortfolioRiskUsed()
+     {
+      return GlobalVariableCheck(m_gvPortfolioRiskKey)
+             ? GlobalVariableGet(m_gvPortfolioRiskKey) : 0.0;
+     }
+
+   double GetAvailablePortfolioRisk()
+     {
+      return MathMax(0.0, m_maxPortfolioRiskPct - GetPortfolioRiskUsed());
+     }
+
+   // Registra el riesgo % de una posición recién abierta contra el
+   // presupuesto compartido. Llamar UNA vez, justo tras confirmar la
+   // apertura (con el SL/lote REALES, no el propuesto).
+   void RegisterOpenRisk(ulong ticket, double riskPct)
+     {
+      if(!m_usePortfolioCap || riskPct <= 0) return;
+      double total = GetPortfolioRiskUsed() + riskPct;
+      GlobalVariableSet(m_gvPortfolioRiskKey, total);
+      GlobalVariableSet(m_gvPortfolioPrefix + IntegerToString(ticket), riskPct);
+     }
+
+   // Libera el riesgo reservado al cerrar TOTALMENTE una posición.
+   void ReleaseOpenRisk(ulong ticket)
+     {
+      if(!m_usePortfolioCap) return;
+      string key = m_gvPortfolioPrefix + IntegerToString(ticket);
+      if(!GlobalVariableCheck(key)) return;
+      double riskPct = GlobalVariableGet(key);
+      double total   = MathMax(0.0, GetPortfolioRiskUsed() - riskPct);
+      GlobalVariableSet(m_gvPortfolioRiskKey, total);
+      GlobalVariableDel(key);
+     }
+
    //--- Lote con multiplicador de riesgo adaptativo (v2.40: soporte Kelly)
    double CalculateLotSize(string symbol, double entryPrice, double slPrice)
      {
       double equity       = AccountInfoDouble(ACCOUNT_EQUITY);
       double baseRisk     = m_useKelly ? CalcKellyRiskPct() : m_riskPercent;
       double effectiveRisk = m_capitalPreservation ? baseRisk * 0.25 : baseRisk;
+
+      // v2.60: capar contra el presupuesto de riesgo agregado del portafolio
+      if(m_usePortfolioCap)
+        {
+         double available = GetAvailablePortfolioRisk();
+         if(available <= 0)
+           {
+            Print("RiskManager: Portfolio Risk Cap alcanzado (",
+                  DoubleToString(GetPortfolioRiskUsed(), 2), "% / ",
+                  DoubleToString(m_maxPortfolioRiskPct, 2), "%) — trade omitido.");
+            return 0;
+           }
+         if(effectiveRisk > available)
+           {
+            Print("RiskManager: riesgo reducido por Portfolio Cap ",
+                  DoubleToString(effectiveRisk, 3), "% → ",
+                  DoubleToString(available, 3), "%");
+            effectiveRisk = available;
+           }
+        }
+
       double riskMoney  = equity * effectiveRisk / 100.0;
       double slDistance = MathAbs(entryPrice - slPrice);
       if(slDistance <= 0) return 0;
@@ -290,6 +421,33 @@ public:
       if(lots < minLot) return 0;
       lots = MathMin(maxLot, lots);
 
+      // v2.51: verificar margen libre ANTES de enviar. Sin esto, una cuenta
+      // justa de margen recibe 10019 NO_MONEY — clasificado como fatal —
+      // y el Kill Switch detiene el EA. Se usa máx. 80% del margen libre;
+      // si no alcanza, se reduce el lote (o se omite el trade con log).
+      ENUM_ORDER_TYPE ordType = (slPrice < entryPrice) ? ORDER_TYPE_BUY
+                                                       : ORDER_TYPE_SELL;
+      double marginReq = 0.0;
+      if(OrderCalcMargin(ordType, symbol, lots, entryPrice, marginReq) &&
+         marginReq > 0)
+        {
+         double marginCap = AccountInfoDouble(ACCOUNT_MARGIN_FREE) * 0.80;
+         if(marginReq > marginCap)
+           {
+            double scaled = MathFloor(lots * marginCap / marginReq / lotStep) * lotStep;
+            if(scaled < minLot)
+              {
+               Print("RiskManager: margen libre insuficiente (req=",
+                     DoubleToString(marginReq, 2), " cap=",
+                     DoubleToString(marginCap, 2), ") — trade omitido.");
+               return 0;
+              }
+            Print("RiskManager: lote reducido por margen libre ",
+                  DoubleToString(lots, 2), " → ", DoubleToString(scaled, 2));
+            lots = scaled;
+           }
+        }
+
       int decimals;
       if(lotStep >= 1.0)       decimals = 0;
       else if(lotStep >= 0.1)  decimals = 1;
@@ -297,6 +455,22 @@ public:
       else                     decimals = 3;
 
       return NormalizeDouble(lots, decimals);
+     }
+
+   // v2.60: riesgo % real de una posición ya abierta, a partir de su
+   // SL/lote REALES (puede diferir del propuesto por redondeo de lotes,
+   // ajuste de stops_level, etc.) — usado para alimentar RegisterOpenRisk.
+   double CalcRiskPctForPosition(string symbol, double entryPrice, double slPrice, double lots)
+     {
+      double equity = AccountInfoDouble(ACCOUNT_EQUITY);
+      if(equity <= 0 || lots <= 0) return 0;
+      double slDistance = MathAbs(entryPrice - slPrice);
+      if(slDistance <= 0) return 0;
+      double tickValue = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_VALUE);
+      double tickSize  = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_SIZE);
+      if(tickValue <= 0 || tickSize <= 0) return 0;
+      double moneyAtRisk = slDistance / tickSize * tickValue * lots;
+      return moneyAtRisk / equity * 100.0;
      }
 
    //--- Drawdown checks
@@ -392,7 +566,10 @@ public:
       Print("RiskManager | ConsecLoss=", m_consecutiveLosses,
             " | KillSwitch=", m_killSwitch ? "ON" : "OFF",
             " | CapPreserv=", m_capitalPreservation ? "ON" : "OFF",
-            " | CircuitBreaker=", IsMonthlyCircuitBreakerTripped() ? "TRIPPED" : "OK");
+            " | CircuitBreaker=", IsMonthlyCircuitBreakerTripped() ? "TRIPPED" : "OK",
+            " | PortfolioRisk=", m_usePortfolioCap
+               ? StringFormat("%.2f%%/%.2f%%", GetPortfolioRiskUsed(), m_maxPortfolioRiskPct)
+               : "OFF");
      }
   };
 //+------------------------------------------------------------------+

@@ -64,6 +64,12 @@ class TelegramNotifier:
         if self._token and self._chat_id and not _REQUESTS_OK:
             log.warning("Telegram: el paquete 'requests' no está instalado — alertas desactivadas.")
 
+    def _redact(self, text: str) -> str:
+        """v2.61: las excepciones de requests incluyen la URL completa — que
+        contiene el token del bot. Sin esta redacción, un fallo de red
+        escribiría el token en texto plano en monitor.log."""
+        return text.replace(self._token, "***TOKEN***") if self._token else text
+
     def send(self, text: str) -> None:
         if not self._enabled:
             return
@@ -74,9 +80,10 @@ class TelegramNotifier:
                 timeout=10,
             )
             if not resp.ok:
-                log.warning("Telegram: HTTP %d — %s", resp.status_code, resp.text[:120])
+                log.warning("Telegram: HTTP %d — %s", resp.status_code,
+                            self._redact(resp.text[:120]))
         except Exception as exc:
-            log.warning("Telegram: fallo al enviar — %s", exc)
+            log.warning("Telegram: fallo al enviar — %s", self._redact(str(exc)))
 
 
 # ── State tracking ─────────────────────────────────────────────────────────────
@@ -244,15 +251,21 @@ def main() -> None:
         default=DEFAULT_REFRESH,
         help="Intervalo de refresco en segundos",
     )
+    # v2.61: acepta AMBOS nombres de variable — los canónicos documentados en
+    # .env.example (GTX_TELEGRAM_*, los mismos de live_monitor.py) y los
+    # legacy (GTX_TG_*). Antes cada monitor usaba nombres distintos y
+    # configurar el .env según la plantilla dejaba este script mudo.
     parser.add_argument(
         "--telegram-token",
-        default=os.getenv("GTX_TG_TOKEN", ""),
-        help="Token del bot de Telegram (env: GTX_TG_TOKEN)",
+        default=os.getenv("GTX_TELEGRAM_TOKEN", "") or os.getenv("GTX_TG_TOKEN", ""),
+        help="Token del bot de Telegram (preferir GTX_TELEGRAM_TOKEN en .env — "
+             "pasarlo por CLI lo expone en el historial de shell y en la lista "
+             "de procesos)",
     )
     parser.add_argument(
         "--telegram-chat-id",
-        default=os.getenv("GTX_TG_CHAT_ID", ""),
-        help="Chat ID de destino (env: GTX_TG_CHAT_ID)",
+        default=os.getenv("GTX_TELEGRAM_CHAT_ID", "") or os.getenv("GTX_TG_CHAT_ID", ""),
+        help="Chat ID de destino (preferir GTX_TELEGRAM_CHAT_ID en .env)",
     )
     parser.add_argument(
         "--alert-dd-pct",

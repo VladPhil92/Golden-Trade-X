@@ -239,7 +239,8 @@ public:
              int swingLookback = 50,
              int fvgLookback   = 20,
              int obLookback    = 40,
-             double proxPct    = 1.0)
+             double proxPct    = 1.0,
+             int atrPeriod     = 14)
      {
       m_symbol       = symbol;
       m_tf           = tf;
@@ -247,7 +248,7 @@ public:
       m_fvgLookback  = fvgLookback;
       m_obLookback   = obLookback;
       m_proxPct      = proxPct;
-      m_hAtr         = iATR(symbol, tf, 14);
+      m_hAtr         = iATR(symbol, tf, atrPeriod);   // v2.61: período propagado
       return (m_hAtr != INVALID_HANDLE);
      }
 

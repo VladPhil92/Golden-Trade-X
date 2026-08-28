@@ -5,6 +5,181 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [2.61] — 2026-07-31
+
+Auditoría crítica multidimensión (seguridad, riesgo, automatización, datos,
+indicadores, fundamental) — barrido completo P0+P1+P2.
+
+### Fixed — Crítico (operación desatendida)
+- **Fuga de presupuesto en el Portfolio Risk Cap** (`RiskManager.mqh`):
+  si una posición se cerraba con el terminal apagado (SL/TP se ejecutan en
+  el servidor del broker), `OnTradeTransaction` no se re-dispara al
+  reiniciar → la reserva de riesgo quedaba huérfana en la GlobalVariable
+  para siempre, llenando el presupuesto de posiciones fantasma hasta
+  bloquear trades legítimos. Nueva `ReconcilePortfolioRisk()` en el
+  arranque: enumera las reservas `GTX_<login>_PR_*`, elimina las de
+  tickets inexistentes y reconstruye el total desde las supervivientes.
+
+### Fixed — Análisis fundamental
+- **`NewsFilter.mqh` cubre FOMC 2027** (8 fechas proyectadas, sincronizadas
+  con `fomc_calendar.py` — el dato ya existía en el repo y el EA no lo
+  usaba). `FOMC_LAST_YEAR` → 2027. Verificar contra federalreserve.gov
+  cuando la Fed publique el calendario oficial.
+- **`fomc_calendar.py` genera el bloque MQL5 con la firma real** de
+  `NewsFilter.IsFomcDay(int, int, int)` — antes generaba
+  `IsFomcDay(datetime)`, que no compilaba al pegarlo. Incluye ahora el
+  aviso de cobertura y recuerda actualizar `FOMC_LAST_YEAR`.
+
+### Fixed — Seguridad
+- **Token de Telegram redactado en logs** (`monitor.py`, `live_monitor.py`):
+  las excepciones de red incluyen la URL completa — que contiene el token —
+  y se escribían en texto plano en `monitor.log`/stdout.
+- **SRI (Subresource Integrity) en el dashboard**: el `<script>` del CDN de
+  Chart.js lleva hash `sha384` + `crossorigin` — un CDN comprometido ya no
+  puede inyectar JS (el navegador rechaza el archivo y se muestra el aviso
+  de "CDN no cargó").
+- `.env.example` y `--help` advierten no pasar el token por CLI (queda en
+  historial de shell y lista de procesos).
+
+### Fixed — Indicadores / análisis técnico
+- **Períodos de indicadores propagados a todos los motores**: `InpAtrPeriod`
+  ahora gobierna el ATR de `MarketRegimeEngine`, `SmartMoneyEngine`,
+  `FibonacciEngine` y `HealthMonitor` (antes 14 fijo — cambiar el input
+  dejaba al EA operando con dos ATRs distintos en silencio). Nuevo
+  `InpAdxPeriod` (default 14) para `SignalEngine` y `MarketRegimeEngine`.
+  Bollinger (20, 2.0) sigue fijo: interno a la clasificación de régimen.
+
+### Fixed — Automatización / análisis de datos
+- **Variables de entorno unificadas**: `monitor.py` acepta las canónicas
+  de `.env.example` (`GTX_TELEGRAM_*`, las mismas de `live_monitor.py`)
+  además de las legacy (`GTX_TG_*`) — antes configurar el `.env` según la
+  plantilla dejaba a `monitor.py` sin alertas, sin error visible.
+- `.env.example` documenta la ruta real de los CSV desde v2.51
+  (`Common\Files` del terminal) y añade la sección de `monitor.py`.
+- **`walk_forward_optimizer.py` excluye los trades sin confidence** del
+  barrido (CSVs de TradeLogger < v2.50) con aviso — el default anterior
+  (conf=100) los hacía pasar todos los umbrales, sesgando la optimización
+  hacia umbrales altos.
+
+### Fixed — Documentación / herramientas
+- `docs/STRATEGY.md` reescrito: describía solo la estrategia v1.x (9
+  filtros); ahora documenta las 3 capas (guardianes, señal base,
+  Confluence Score), salidas, gestión de capital completa (Kelly,
+  Portfolio Cap, Equity Filter), plan de validación alineado con las
+  herramientas reales y riesgos conocidos honestos.
+- Dashboard: badge de versión estático "v2.00" eliminado (etiqueta neutra)
+  y "Objetivos Institucionales" → "Objetivos internos de calidad".
+- Tests MQL5: casos nuevos de reconciliación implícita vía
+  register/release en `TestRiskManager.mq5` (de v2.60) siguen válidos.
+
+---
+
+## [2.60] — 2026-07-31
+
+Plan de trabajo ejecutado a partir de una revisión crítica externa (evaluación
+cuantitativa independiente del repositorio). Se implementó todo lo accionable
+por código; lo que requiere datos reales o infraestructura externa (backtest
+limpio, 300+ trades para Kelly, runner Windows para compilar en CI) queda
+documentado como pendiente, no simulado.
+
+### Added — Portfolio Risk Cap
+- **`RiskManager.mqh`**: límite de riesgo agregado entre TODAS las instancias
+  del EA en la misma cuenta (p.ej. XAUUSD + XAGUSD en paralelo, que están
+  correlacionados y antes gestionaban su drawdown de forma completamente
+  aislada). `RegisterOpenRisk`/`ReleaseOpenRisk`/`GetPortfolioRiskUsed` vía
+  GlobalVariable compartida por cuenta (no por magic number).
+  `CalculateLotSize` reduce u omite el trade si excede el presupuesto.
+- **`OrderManager.mqh`**: `GetLastPositionTicket()` para conocer el ticket
+  de la posición recién confirmada.
+- Nuevos inputs: `InpUsePortfolioCap` (OFF por defecto), `InpMaxPortfolioRiskPct`.
+- Tests unitarios para Register/Release/GetUsed/GetAvailable en `TestRiskManager.mq5`.
+
+### Changed — Confluence Score (antes "Ensemble")
+- **`ConfidenceEngine.mqh`** renombrado de "Ensemble Score" a **"Confluence
+  Score" heurístico** en toda la documentación — es un puntaje por
+  confluencia de filtros con pesos elegidos a mano, no un ensemble
+  estadístico calibrado con datos.
+- Los 5 pesos del score (`InpConfWeightBase/Regime/Smc/Htf/Fib`) ahora son
+  **inputs del EA**, para que puedan optimizarse con datos reales via
+  Strategy Tester. Los defaults (25/25/30/15/5) preservan exactamente el
+  comportamiento de versiones anteriores (factor de escala 1.0).
+
+### Added — Métricas de riesgo estadísticamente honestas
+- **`scripts/backtest_analysis.py`**:
+  - Sharpe/Sortino sobre **retornos % diarios** (no P&L absoluto) — evita
+    distorsión cuando el equity o el lote cambian durante el test (Kelly,
+    Equity Curve Filter).
+  - Nuevas métricas: Sortino ratio, Calmar ratio (CAGR/MaxDD), Ulcer Index,
+    Expected Shortfall (CVaR 95%).
+  - **Probabilistic Sharpe Ratio (PSR)** y **Deflated Sharpe Ratio (DSR)**
+    (Bailey & López de Prado): probabilidad de que el Sharpe real sea
+    positivo, corregida por sesgo de selección con `--trials N`.
+  - Monte Carlo con **block bootstrap** (`--block-size N`): preserva
+    autocorrelación/rachas que el bootstrap IID de trade individual (aún
+    el default, `--block-size 1`, sin cambios de comportamiento) ignora.
+  - Sección renombrada de "OBJETIVOS INSTITUCIONALES" a "OBJETIVOS
+    INTERNOS DE CALIDAD" — son umbrales propios del proyecto, no una
+    certificación institucional externa. Se agregó el check PSR ≥ 95%.
+  - Reporte HTML incluye las nuevas métricas de riesgo.
+- **28 tests nuevos** en `tests/test_backtest_analysis.py` (69 en total).
+
+### Fixed — Observabilidad
+- **`SessionFilter.mqh`**: detecta y advierte en el Journal cuando el
+  offset servidor-UTC cambia entre inicializaciones (cambio de DST) —
+  antes el desfase horario de la sesión Londres-NY pasaba en silencio.
+  No cambia el comportamiento de trading (sigue en hora de servidor por
+  diseño), solo alerta para que el operador revise `InpStartHour/EndHour`.
+
+### Fixed — Documentación
+- **`README.md`** reescrito por completo: describía la arquitectura de
+  v1.x (solo 5 módulos) mientras el código ya tenía 14. Ahora refleja
+  v2.60, incluye advertencias metodológicas explícitas (Confluence Score
+  heurístico, walk-forward real vs. desglose trimestral, bootstrap IID
+  vs. block) y elimina el ejemplo de backtest sin evidencia detrás.
+
+---
+
+## [2.51] — 2026-07-30
+
+Autoauditoría post-v2.50 + evaluación continua de desempeño.
+
+### Fixed — Autoauditoría
+- **Neto de la posición completa en `OnTradeTransaction`**: al cerrar un
+  trade que tuvo cierre parcial, `RegisterTradeResult` ahora recibe la suma
+  de TODOS los deals de salida de la posición (parcial + final). Antes, un
+  trade con parcial de +0.5R que cerraba el resto en break-even se contaba
+  como pérdida para el contador de pérdidas consecutivas.
+- **`TradeLogger` registra totales de la POSICIÓN**: `Lots` = volumen de
+  entrada, `ProfitLoss`/`Commission` = suma de todos los deals de salida
+  (incluye swap). Antes el CSV solo veía el deal final — un trade con
+  parcial ocultaba la mitad de su P/L a toda la capa analítica.
+- **Chequeo de margen libre en `CalculateLotSize`** (`OrderCalcMargin`,
+  tope 80% del margen libre): reduce el lote u omite el trade con log.
+  Antes, una cuenta justa de margen recibía `10019 NO_MONEY` — clasificado
+  como error fatal — y el Kill Switch detenía el EA.
+- **`PartialTP` marca como resuelto los lotes no divisibles** (p.ej. 0.01
+  con minLot 0.01) con un aviso único en el Journal, en vez de re-evaluar
+  la misma posición imposible de partir en cada tick.
+
+### Added — Evaluación continua de desempeño
+- **`scripts/performance_report.py`** — monitor de desempeño recurrente
+  sobre los CSV del TradeLogger:
+  - Ventana reciente (últimos N trades) vs baseline histórico → alertas de
+    DEGRADACIÓN (caída de win rate, expectancy negativa, PF < 1).
+  - Drawdown ACTUAL desde el pico (no solo el máximo histórico).
+  - Racha de pérdidas abierta.
+  - Breakdown por régimen de mercado y banda de confianza (columna
+    `Comment` v2.50) — muestra qué filtros aportan y cuáles restan.
+  - Breakdown por hora y día de APERTURA.
+  - `--watch N`: re-evaluación automática cada N segundos (modo monitor).
+  - `--json`: export para el dashboard u otras herramientas.
+  - Exit code 1 con alertas → integrable en cron/Task Scheduler.
+- **`tests/test_performance_report.py`** — 13 tests (parsing de Comment,
+  métricas de bloque, detección de degradación, breakdowns). Total: 41.
+- CI `structure-check` incluye los scripts y tests nuevos.
+
+---
+
 ## [2.50] — 2026-07-30
 
 Revisión crítica integral: 20+ correcciones de correctitud, ejecución,

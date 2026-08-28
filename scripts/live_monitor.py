@@ -122,7 +122,10 @@ def send_telegram(message: str, dry_run: bool = False) -> bool:
         with urllib.request.urlopen(req, timeout=10) as resp:
             return resp.status == 200
     except Exception as e:
-        print(f"[ERROR] Telegram send failed: {e}")
+        # v2.61: redactar el token — algunas excepciones incluyen la URL
+        # completa, que lo contiene, y esto se imprime/loguea en texto plano.
+        msg = str(e).replace(TELEGRAM_TOKEN, "***TOKEN***") if TELEGRAM_TOKEN else str(e)
+        print(f"[ERROR] Telegram send failed: {msg}")
         return False
 
 

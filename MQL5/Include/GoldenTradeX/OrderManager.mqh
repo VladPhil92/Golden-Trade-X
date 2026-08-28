@@ -261,6 +261,11 @@ public:
       return IsFatal(rc);
      }
 
+   // v2.60: ticket de la posición recién confirmada (llamar justo tras un
+   // OpenPosition() exitoso). En cuentas hedge, ResultOrder() coincide con
+   // el ticket de la posición para órdenes de mercado nuevas.
+   ulong GetLastPositionTicket() const { return m_trade.ResultOrder(); }
+
    // ── Estadísticas de ejecución ─────────────────────────────────────
    double GetLastSlippage()   const { return m_lastSlippage; }
    double GetAvgSlippage()    const

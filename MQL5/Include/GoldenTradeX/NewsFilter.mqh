@@ -100,6 +100,14 @@ private:
                 (mon==4  && day==29) || (mon==6  && day==17) ||
                 (mon==7  && day==29) || (mon==9  && day==16) ||
                 (mon==11 && day==4)  || (mon==12 && day==9));
+      // 2027: PROYECTADAS (sincronizadas con scripts/fomc_calendar.py) —
+      // verificar contra federalreserve.gov cuando la Fed publique el
+      // calendario oficial (~mediados de 2026) y actualizar si difieren.
+      if(year == 2027)
+         return((mon==1  && day==27) || (mon==3  && day==17) ||
+                (mon==4  && day==28) || (mon==6  && day==16) ||
+                (mon==7  && day==28) || (mon==9  && day==15) ||
+                (mon==10 && day==27) || (mon==12 && day==8));
       return(false);
      }
 
@@ -166,5 +174,5 @@ public:
      }
   };
 
-const int CNewsFilter::FOMC_LAST_YEAR = 2026;
+const int CNewsFilter::FOMC_LAST_YEAR = 2027;
 //+------------------------------------------------------------------+

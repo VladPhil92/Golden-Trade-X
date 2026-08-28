@@ -9,7 +9,7 @@
 Golden Trade X es un Expert Advisor para MetaTrader 5 con arquitectura
 modular de capas. Cada capa tiene responsabilidad única y se comunica
 a través de interfaces claras. La decisión de entrada se produce mediante
-un **Ensemble Confidence Score** que agrega múltiples fuentes de señal.
+un **Confluence Score** heurístico que agrega múltiples fuentes de señal.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -58,7 +58,7 @@ un **Ensemble Confidence Score** que agrega múltiples fuentes de señal.
 | `SignalEngine.mqh` | Cruce EMA+RSI+ADX+ATR+H4 | Symbol, TF, parámetros | `ENUM_SIGNAL`, ATR |
 | `MarketRegimeEngine.mqh` | Clasificación de régimen | Symbol, TF | `ENUM_MARKET_REGIME`, RegimeScore |
 | `SmartMoneyEngine.mqh` | BOS, CHOCH, FVG, OB, LS | Symbol, TF, lookbacks | `SSmcContext`, SmcScore |
-| `ConfidenceEngine.mqh` | Ensemble scoring 0-100 | Scores de capas | `SConfidenceResult` |
+| `ConfidenceEngine.mqh` | Confluence scoring 0-100 (heurístico) | Scores de capas | `SConfidenceResult` |
 | `RiskManager.mqh` | DD, lotes, circuit breakers | % riesgo, límites | lots, bool guards |
 | `SessionFilter.mqh` | Horario y fin de semana | Horas, flags | bool |
 | `NewsFilter.mqh` | NFP/FOMC/CPI calendario | Buffers min | bool |
@@ -103,7 +103,7 @@ OnTick()
 - Muestra: equity curve, KPIs, régimen, confidence buckets, P/L mensual,
   checklist institucional, tabla de últimas 30 operaciones
 
-## Ensemble Confidence Score — Desglose
+## Confluence Score — Desglose (heurístico, no calibrado)
 
 ```
 ┌──────────────────┬──────────────┬────────────────────────────────┐

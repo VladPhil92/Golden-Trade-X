@@ -4,7 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Golden Trade X — Dashboard</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<!-- v2.61: integrity (SRI) — si el CDN sirviera un archivo alterado, el
+     navegador lo rechaza y el aviso de "CDN no cargó" (abajo) se muestra. -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"
+        integrity="sha384-e6nUZLBkQ86NJ6TVVKAeSaK8jWa3NhkYWZFomE39AvDbQWeie9PlQqM3pmYW5d1g"
+        crossorigin="anonymous"></script>
 <script>
 // v2.50: aviso visible si el CDN de Chart.js no cargó (uso sin conexión).
 // Sin esto el dashboard fallaba en silencio con la consola llena de errores.
@@ -68,7 +72,7 @@ window.addEventListener('DOMContentLoaded', function () {
 
 <header>
   <span class="logo">⚡ Golden Trade X</span>
-  <span class="version">v2.00</span>
+  <span class="version">dashboard offline · CSV TradeLogger</span>
   <span style="margin-left:auto;font-size:.8rem;color:var(--muted)" id="filename">Sin datos cargados</span>
 </header>
 
@@ -109,9 +113,9 @@ window.addEventListener('DOMContentLoaded', function () {
     <div class="chart-wrap"><canvas id="monthlyChart"></canvas></div>
   </div>
 
-  <!-- Checklist institucional -->
+  <!-- Checklist de calidad (umbrales propios del proyecto) -->
   <div class="section">
-    <h3>Objetivos Institucionales</h3>
+    <h3>Objetivos internos de calidad</h3>
     <ul class="target-list" id="targetList"></ul>
   </div>
 

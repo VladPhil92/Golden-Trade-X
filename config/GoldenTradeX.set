@@ -1,4 +1,4 @@
-; Golden Trade X v2.50 — preset por defecto (XAUUSD M15)
+; Golden Trade X v2.61 — preset por defecto (XAUUSD M15)
 ; Nota DST: StartHour/EndHour estan en hora del servidor del broker.
 ; La mayoria de brokers usa EET (GMT+2 verano / GMT+3 invierno).
 
@@ -17,16 +17,24 @@ InpTimeframe=15
 InpAtrPeriod=14
 InpAtrMinRatio=0.8
 InpAtrMaxRatio=3.0
+InpAdxPeriod=14
 InpAdxMinLevel=25.0
 
 ; --- Filtro HTF ---
 InpUseHtfFilter=true
 InpHtfEmaPeriod=50
 
-; --- Smart Money & Ensemble (v2.00) ---
+; --- Confluence Score & Smart Money (heuristico, v2.00) ---
 InpUseRegimeFilter=true
 InpUseSmcFilter=true
 InpMinConfidence=55
+; Pesos del Confluence Score (v2.60) — heuristicos, no calibrados con datos.
+; Configurables para optimizar via Strategy Tester una vez haya historial real.
+InpConfWeightBase=25
+InpConfWeightRegime=25
+InpConfWeightSmc=30
+InpConfWeightHtf=15
+InpConfWeightFib=5
 
 ; --- Riesgo ---
 InpRiskPercent=1.0
@@ -69,6 +77,15 @@ InpKellyMinTrades=30
 InpOrderMaxRetries=3
 InpOrderRetryDelay=500
 InpMinMarginLevel=200.0
+
+; --- Portfolio Risk Cap (v2.60) ---
+; Riesgo agregado maximo entre TODAS las instancias del EA en esta cuenta
+; (p.ej. XAUUSD + XAGUSD corriendo en paralelo). OFF por defecto para no
+; alterar el comportamiento de instalaciones existentes de un solo simbolo.
+; Si corres varios simbolos a la vez, activa esto en TODAS las instancias
+; con el MISMO InpMaxPortfolioRiskPct — comparten presupuesto por cuenta.
+InpUsePortfolioCap=false
+InpMaxPortfolioRiskPct=1.5
 
 ; --- Partial Take Profit (v2.20) ---
 InpUsePartialTP=true

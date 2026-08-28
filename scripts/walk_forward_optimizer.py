@@ -63,7 +63,12 @@ class Trade:
 
 
 def load_csv(path: str) -> List[Trade]:
+    """Carga trades. v2.61: los trades SIN confidence en el Comment (CSVs de
+    TradeLogger < v2.50) se EXCLUYEN del análisis en lugar de asignarles
+    conf=100 — el valor 100 los hacía pasar TODOS los umbrales probados,
+    sesgando la optimización hacia umbrales altos."""
     trades: List[Trade] = []
+    skipped_no_conf = 0
     with open(path, newline="", encoding="utf-8") as f:
         for row in csv.DictReader(f):
             try:
@@ -72,12 +77,15 @@ def load_csv(path: str) -> List[Trade]:
                 r_mult = float(row["RMultiple"])
                 # Extract confidence from comment field (format: "GTX|Conf=72|...")
                 comment = row.get("Comment", "")
-                conf = 100
+                conf = -1
                 if "Conf=" in comment:
                     try:
                         conf = int(comment.split("Conf=")[1].split("|")[0])
                     except (ValueError, IndexError):
-                        conf = 100
+                        conf = -1
+                if conf < 0:
+                    skipped_no_conf += 1
+                    continue
                 trades.append(Trade(
                     close_date=row["CloseDate"],
                     symbol=row["Symbol"],
@@ -88,6 +96,9 @@ def load_csv(path: str) -> List[Trade]:
                 ))
             except (KeyError, ValueError):
                 continue
+    if skipped_no_conf:
+        print(f"  AVISO: {skipped_no_conf} trade(s) sin 'Conf=' en el Comment "
+              f"excluidos del barrido (CSV de TradeLogger < v2.50) ← {path}")
     return trades
 
 

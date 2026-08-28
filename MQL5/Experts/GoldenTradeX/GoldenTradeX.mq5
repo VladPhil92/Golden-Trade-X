@@ -1,13 +1,13 @@
 //+------------------------------------------------------------------+
 //|                                                 GoldenTradeX.mq5 |
-//|                    Golden Trade X v2.50 — Expert Advisor          |
+//|                    Golden Trade X v2.61 — Expert Advisor          |
 //|                    CTG One Technology S.A.S.                      |
 //+------------------------------------------------------------------+
 #property copyright "CTG One Technology S.A.S."
 #property link      "https://github.com/VladPhil92/Golden-Trade-X"
-#property version   "2.50"
+#property version   "2.61"
 #property strict
-#property description "EA de precisión para Oro (XAUUSD): EMA+RSI+ADX+ATR+H4 + Market Regime + Smart Money Concepts + Fibonacci + Ensemble Confidence Score. Gestión de riesgo multicapa con circuit breaker mensual, kill switch persistente, Capital Preservation Mode, Partial TP, Equity Curve Filter y OrderManager production-grade con retry automático."
+#property description "EA de precisión para Oro (XAUUSD): EMA+RSI+ADX+ATR+H4 + Market Regime + Smart Money Concepts + Fibonacci + Confluence Score heurístico (pesos configurables). Gestión de riesgo multicapa con circuit breaker mensual, kill switch persistente, Capital Preservation Mode, Portfolio Risk Cap entre símbolos, Partial TP, Equity Curve Filter y OrderManager production-grade con retry automático."
 
 #include <Trade/Trade.mqh>
 #include <GoldenTradeX/RiskManager.mqh>
@@ -42,6 +42,7 @@ input ENUM_TIMEFRAMES InpTimeframe = PERIOD_M15;
 input int     InpAtrPeriod        = 14;
 input double  InpAtrMinRatio      = 0.8;
 input double  InpAtrMaxRatio      = 3.0;
+input int     InpAdxPeriod        = 14;     // v2.61: período ADX (antes 14 fijo)
 input double  InpAdxMinLevel      = 25.0;
 input int     InpMinTickVolume    = 10;      // v2.20: volumen mínimo de ticks (0=off)
 
@@ -51,10 +52,19 @@ input bool    InpUseHtfFilter     = true;
 input int     InpHtfEmaPeriod     = 50;
 
 //--- Módulos v2.00
-input group "=== Ensemble & Smart Money ==="
+// v2.60: renombrado de "Ensemble" a "Confluence Score" — es un puntaje
+// heurístico por confluencia de filtros, NO un ensemble estadístico
+// calibrado con datos. Los pesos son configurables para que puedan
+// optimizarse con datos reales via Strategy Tester.
+input group "=== Confluence Score & Smart Money (heurístico, v2.00) ==="
 input bool    InpUseRegimeFilter  = true;
 input bool    InpUseSmcFilter     = true;
 input int     InpMinConfidence    = 55;
+input int     InpConfWeightBase   = 25;  // Puntos por señal base EMA+RSI (máx)
+input int     InpConfWeightRegime = 25;  // Puntos por alineación de régimen (máx)
+input int     InpConfWeightSmc    = 30;  // Puntos por Smart Money Concepts (máx)
+input int     InpConfWeightHtf    = 15;  // Puntos por alineación H4 (máx)
+input int     InpConfWeightFib    = 5;   // Puntos por confluencia Fibonacci (máx)
 
 //--- Gestión de riesgo
 input group "=== Riesgo ==="
@@ -92,6 +102,11 @@ input group "=== Kelly Criterion (v2.40) ==="
 input bool    InpUseKelly         = false;   // Activar Kelly Criterion fraccional
 input double  InpKellyFraction    = 0.25;    // Fracción de Kelly (0.25 = quarter-Kelly)
 input int     InpKellyMinTrades   = 30;      // Trades mínimos para activar Kelly
+
+//--- Portfolio Risk Cap (v2.60)
+input group "=== Portfolio Risk Cap (v2.60) ==="
+input bool    InpUsePortfolioCap     = false;  // Limitar riesgo agregado entre instancias (XAUUSD+XAGUSD, etc.)
+input double  InpMaxPortfolioRiskPct = 1.5;    // % máximo de equity en riesgo simultáneo, TODAS las instancias
 
 //--- Order Manager (v2.30)
 input group "=== Order Manager (v2.30) ==="
@@ -183,7 +198,7 @@ int OnInit()
                          InpAtrPeriod, InpAtrMinRatio,
                          InpAdxMinLevel, InpAtrMaxRatio,
                          InpUseHtfFilter, InpHtfEmaPeriod,
-                         (long)InpMinTickVolume))
+                         (long)InpMinTickVolume, InpAdxPeriod))
      { Print("GoldenTradeX: error inicializando SignalEngine"); return INIT_FAILED; }
 
    riskManager.Init(InpRiskPercent, InpMaxDailyDD, InpMaxPositions,
@@ -199,27 +214,36 @@ int OnInit()
 
    if(InpUseRegimeFilter)
      {
-      if(!regimeEngine.Init(_Symbol, InpTimeframe, InpEmaFast, InpEmaSlow))
+      // v2.61: umbrales por defecto (25/20/2.0/0.70) + períodos ATR/ADX del EA
+      if(!regimeEngine.Init(_Symbol, InpTimeframe, InpEmaFast, InpEmaSlow,
+                            25.0, 20.0, 2.0, 0.70, InpAtrPeriod, InpAdxPeriod))
         { Print("GoldenTradeX: error inicializando MarketRegimeEngine"); return INIT_FAILED; }
      }
 
    if(InpUseSmcFilter)
      {
-      if(!smcEngine.Init(_Symbol, InpTimeframe))
+      // v2.61: lookbacks por defecto (50/20/40/1.0) + período ATR del EA
+      if(!smcEngine.Init(_Symbol, InpTimeframe, 50, 20, 40, 1.0, InpAtrPeriod))
         { Print("GoldenTradeX: error inicializando SmartMoneyEngine"); return INIT_FAILED; }
      }
 
-   if(!confEngine.Init(_Symbol, InpTimeframe, InpUseHtfFilter, InpHtfEmaPeriod))
+   if(!confEngine.Init(_Symbol, InpTimeframe, InpUseHtfFilter, InpHtfEmaPeriod,
+                       InpConfWeightBase, InpConfWeightRegime, InpConfWeightSmc,
+                       InpConfWeightHtf, InpConfWeightFib))
      { Print("GoldenTradeX: error inicializando ConfidenceEngine"); return INIT_FAILED; }
 
-   if(!fibEngine.Init(_Symbol, InpTimeframe))
+   // v2.61: lookback/proximidad por defecto (100/0.5) + período ATR del EA
+   if(!fibEngine.Init(_Symbol, InpTimeframe, 100, 0.5, InpAtrPeriod))
      { Print("GoldenTradeX: error inicializando FibonacciEngine"); return INIT_FAILED; }
    partialTP.Init(InpUsePartialTP, InpMagicNumber);
    eqCurveFilter.Init(InpUseEqCurveFilter, InpEqCurvePeriod, InpMagicNumber);
    orderMgr.Init(&trade, InpOrderMaxRetries, InpOrderRetryDelay);
-   if(!healthMonitor.Init(_Symbol, InpTimeframe, InpMagicNumber, InpMinMarginLevel))
+   // v2.61: emergencyAtrMult/checkInterval por defecto (3.0/60s) + período ATR
+   if(!healthMonitor.Init(_Symbol, InpTimeframe, InpMagicNumber, InpMinMarginLevel,
+                          3.0, 60, InpAtrPeriod))
      { Print("GoldenTradeX: error inicializando HealthMonitor"); return INIT_FAILED; }
    riskManager.InitKelly(InpUseKelly, InpKellyFraction, InpKellyMinTrades);
+   riskManager.InitPortfolioCap(InpUsePortfolioCap, InpMaxPortfolioRiskPct);
 
    // ── Persistencia de barra ──────────────────────────────────────────
    g_gvLastBarKey = StringFormat("GTX_%d_LastBar", (int)InpMagicNumber);
@@ -230,12 +254,13 @@ int OnInit()
 
    newsFilter.PrintStatus();
    riskManager.PrintStatus();
-   Print("GoldenTradeX v2.50 inicializado en ", _Symbol,
+   Print("GoldenTradeX v2.61 inicializado en ", _Symbol,
          " | MinConf=",    InpMinConfidence,
          " | Retries=",    InpOrderMaxRetries,
          " | PartialTP=",  InpUsePartialTP  ? "ON" : "OFF",
          " | EqFilter=",   InpUseEqCurveFilter ? "ON" : "OFF",
-         " | Kelly=",      InpUseKelly ? StringFormat("ON(f=%.0f%%,min=%d)", InpKellyFraction*100, InpKellyMinTrades) : "OFF");
+         " | Kelly=",      InpUseKelly ? StringFormat("ON(f=%.0f%%,min=%d)", InpKellyFraction*100, InpKellyMinTrades) : "OFF",
+         " | PortfolioCap=", InpUsePortfolioCap ? StringFormat("ON(max=%.2f%%)", InpMaxPortfolioRiskPct) : "OFF");
    return INIT_SUCCEEDED;
   }
 
@@ -392,6 +417,21 @@ void OnTick()
                                    NormalizeDouble(sl, _Digits),
                                    NormalizeDouble(tp, _Digits),
                                    comment);
+   if(ok && InpUsePortfolioCap)
+     {
+      // v2.60: registrar el riesgo REAL de la posición confirmada (SL/lote
+      // finales, que pueden diferir del propuesto por stops_level o
+      // redondeo) contra el presupuesto agregado del portafolio.
+      ulong newTicket = orderMgr.GetLastPositionTicket();
+      if(PositionSelectByTicket(newTicket))
+        {
+         double realSl   = PositionGetDouble(POSITION_SL);
+         double realOpen = PositionGetDouble(POSITION_PRICE_OPEN);
+         double realLots = PositionGetDouble(POSITION_VOLUME);
+         double riskPct  = riskManager.CalcRiskPctForPosition(_Symbol, realOpen, realSl, realLots);
+         riskManager.RegisterOpenRisk(newTicket, riskPct);
+        }
+     }
    if(!ok && orderMgr.LastErrorIsFatal())
      {
       Print("GoldenTradeX: error fatal al abrir posición — activando Kill Switch.");
@@ -427,12 +467,32 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
       return;
      }
 
-   // v2.50: resultado NETO (profit + comisión + swap) — misma definición de
-   // "ganador" que usa el cálculo de Kelly en RiskManager.
-   double net = HistoryDealGetDouble(dealTicket, DEAL_PROFIT)
-              + HistoryDealGetDouble(dealTicket, DEAL_COMMISSION)
-              + HistoryDealGetDouble(dealTicket, DEAL_SWAP);
-   riskManager.RegisterTradeResult(net);
+   // v2.51: resultado NETO de la POSICIÓN completa (todos sus deals de
+   // salida — el parcial + el cierre final), no solo el último deal.
+   // Sin esto, un trade con parcial de +0.5R que cierra el resto en BE
+   // se registraría como pérdida. Misma definición que usa Kelly.
+   double posNet = 0.0;
+   if(HistorySelectByPosition(posTicket))
+     {
+      for(int i = 0; i < HistoryDealsTotal(); i++)
+        {
+         ulong d = HistoryDealGetTicket(i);
+         if(d == 0) continue;
+         long e = HistoryDealGetInteger(d, DEAL_ENTRY);
+         if(e != DEAL_ENTRY_OUT && e != DEAL_ENTRY_INOUT) continue;
+         posNet += HistoryDealGetDouble(d, DEAL_PROFIT)
+                 + HistoryDealGetDouble(d, DEAL_COMMISSION)
+                 + HistoryDealGetDouble(d, DEAL_SWAP);
+        }
+     }
+   else
+     {
+      posNet = HistoryDealGetDouble(dealTicket, DEAL_PROFIT)
+             + HistoryDealGetDouble(dealTicket, DEAL_COMMISSION)
+             + HistoryDealGetDouble(dealTicket, DEAL_SWAP);
+     }
+   riskManager.RegisterTradeResult(posNet);
+   riskManager.ReleaseOpenRisk(posTicket);   // v2.60: libera el cupo del Portfolio Risk Cap
    tradeLogger.LogTrade(dealTicket);
    partialTP.Cleanup(posTicket);
   }

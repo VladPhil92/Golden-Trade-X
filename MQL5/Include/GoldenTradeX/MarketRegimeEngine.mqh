@@ -84,7 +84,9 @@ public:
              double adxTrend  = 25.0,
              double adxRange  = 20.0,
              double atrVolat  = 2.0,
-             double bbwSqz    = 0.70)
+             double bbwSqz    = 0.70,
+             int atrPeriod    = 14,
+             int adxPeriod    = 14)
      {
       m_symbol          = symbol;
       m_tf              = tf;
@@ -94,8 +96,12 @@ public:
       m_bbwSqueezeRatio = bbwSqz;
       m_lastRegime      = REGIME_UNKNOWN;
 
-      m_hAdx     = iADX(symbol, tf, 14);
-      m_hAtr     = iATR(symbol, tf, 14);
+      // v2.61: períodos ATR/ADX propagados desde el EA (antes 14 fijo aunque
+      // InpAtrPeriod fuera distinto — el EA operaba con dos ATRs en silencio).
+      // Las Bandas de Bollinger (20, 2.0) siguen fijas: son internas a la
+      // clasificación de régimen (BBW squeeze), no un parámetro de señal.
+      m_hAdx     = iADX(symbol, tf, adxPeriod);
+      m_hAtr     = iATR(symbol, tf, atrPeriod);
       m_hBb      = iBands(symbol, tf, 20, 0, 2.0, PRICE_CLOSE);
       m_hEmaFast = iMA(symbol, tf, emaFast, 0, MODE_EMA, PRICE_CLOSE);
       m_hEmaSlow = iMA(symbol, tf, emaSlow, 0, MODE_EMA, PRICE_CLOSE);
