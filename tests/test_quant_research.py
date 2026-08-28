@@ -122,6 +122,20 @@ def test_valid_dataset_meets_internal_exploratory_floor_and_is_reproducible(tmp_
     assert first["ablation_status"]["status"] == "REQUIRES_COUNTERFACTUAL_STRATEGY_TESTER_RUNS"
 
 
+def test_baseline_api_accepts_tuple_returning_telemetry_connection(tmp_path: Path) -> None:
+    """Regression: public research API must not depend on caller row_factory."""
+    db = tmp_path / "research.sqlite"
+    with connect(db) as conn:
+        _seed_outcomes(conn, 100)
+        assert conn.row_factory is None
+        quality = evaluate_data_quality(conn, _manifest(), [], EvidenceThresholds())
+        report = build_baseline(conn, _manifest(), [], generated_at="fixed")
+
+    assert quality["status"] == READY_FOR_EXPLORATORY_RESEARCH
+    assert report["research_status"] == READY_FOR_EXPLORATORY_RESEARCH
+    assert report["baseline"]["observations_used"] == 100
+
+
 def test_unknown_confidence_keeps_dataset_below_evidence_floor(tmp_path: Path) -> None:
     db = tmp_path / "research.sqlite"
     with connect(db) as conn:
@@ -203,6 +217,57 @@ def test_manifest_loader_rejects_bad_hashes_and_missing_fields(tmp_path: Path) -
     assert any("period_end" in error for error in errors)
     assert any("git_sha" in error for error in errors)
     assert any("preset_sha256" in error for error in errors)
+
+
+def test_manifest_loader_rejects_null_required_provenance(tmp_path: Path) -> None:
+    manifest = _manifest()
+    for field in (
+        "dataset_id",
+        "source_type",
+        "broker",
+        "timeframe",
+        "period_start",
+        "period_end",
+    ):
+        manifest[field] = None
+
+    path = tmp_path / "manifest.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    _, errors = load_manifest(path)
+
+    for field in (
+        "dataset_id",
+        "source_type",
+        "broker",
+        "timeframe",
+        "period_start",
+        "period_end",
+    ):
+        assert any(field in error and "null/empty" in error for error in errors)
+
+
+def test_manifest_mixed_timezone_awareness_is_validation_error(tmp_path: Path) -> None:
+    manifest = _manifest()
+    manifest["period_start"] = "2026-01-01 00:00:00"
+    manifest["period_end"] = "2026-06-01T00:00:00Z"
+    path = tmp_path / "manifest.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    _, errors = load_manifest(path)
+
+    assert any("both include timezone offsets or both omit" in error for error in errors)
+
+
+def test_manifest_aware_periods_compare_in_utc(tmp_path: Path) -> None:
+    manifest = _manifest()
+    manifest["period_start"] = "2026-01-01T00:00:00-05:00"
+    manifest["period_end"] = "2026-01-01T04:00:00Z"  # one hour earlier in UTC
+    path = tmp_path / "manifest.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    _, errors = load_manifest(path)
+
+    assert any("period_end must be later" in error for error in errors)
 
 
 def test_threshold_validation_rejects_impossible_coverage() -> None:
