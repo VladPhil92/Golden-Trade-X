@@ -5,6 +5,65 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [2.62] — 2026-08-28
+
+Trading Correctness milestone: correcciones P0 de ejecución server-side,
+identidad de posición, Initial R, cierres parciales, métricas y calendario.
+No constituye validación de rentabilidad ni de edge estadístico.
+
+### Fixed — Ejecución y ownership
+- `OrderManager.mqh` deja de aceptar `CTrade` boolean `true` como evidencia de
+  ejecución. Aperturas/cierres requieren retcodes server-side compatibles y
+  deal confirmado; modificaciones requieren retcode de servidor válido.
+- Identidad separada para order ticket, deal ticket, `POSITION_IDENTIFIER` y
+  position ticket; se elimina la hipótesis `ResultOrder()==position ticket`.
+- En cuentas netting el EA falla cerrado si existe una posición del mismo
+  símbolo que no pertenece inequívocamente al magic number de Golden Trade X.
+- Cierres manuales/broker-side ya pueden atribuirse al trade original mediante
+  el historial de entrada, sin depender del magic del deal de salida.
+- Eventos de cierre se deduplican por `POSITION_IDENTIFIER` para evitar doble
+  contabilización cuando una liquidación produce varios exit deals.
+
+### Fixed — Initial R y gestión de posición
+- Nuevo `PositionStateManager.mqh`: estado persistente por cuenta + magic +
+  `POSITION_IDENTIFIER`, con entry, InitialSL/TP, riesgo inicial en precio y
+  dinero, volumen inicial, timestamp, confidence/regime y MFE/MAE.
+- `PartialTakeProfit.mqh` usa Initial R inmutable reconstruido desde historial;
+  mover el SL a break-even/trailing ya no reduce artificialmente el denominador
+  ni dispara parciales prematuros.
+- Break-even usa ahora la distancia de Initial R real, incluida la ampliación
+  estructural del SL, y deja de depender indirectamente del ATR base.
+- Partial TP y Break-Even se ejecutan independientemente de `InpUseTrailing`.
+- Portfolio Risk Cap persiste reservas por `POSITION_IDENTIFIER` estable y su
+  registro es idempotente; sizing/riesgo monetario usan `OrderCalcProfit()` para
+  respetar especificaciones reales del símbolo/broker.
+
+### Fixed — Métricas
+- `TradeLogger.mqh`: `RMultiple = net P/L completo / Initial monetary risk`.
+  Los cierres parciales ya no se valoran usando únicamente el precio del último
+  deal. Profit, commission, swap y fee forman el neto cuando están disponibles.
+- Posiciones netting con entradas de ownership mixto se rechazan para métricas
+  en lugar de fabricar atribución.
+- Kelly incluye `DEAL_FEE` en el neto histórico.
+
+### Fixed — Noticias
+- FOMC 2026/2027 sincronizado con el calendario publicado por la Federal
+  Reserve: se corrige octubre 2026 y junio 2027, entre otras fechas.
+- Hora FOMC modelada como 14:00 US Eastern con conversión DST (18:00 UTC en
+  EDT / 19:00 UTC en EST), en lugar de 19:00 UTC fijo.
+- Hora NFP/CPI proxy convertida desde 08:30 US Eastern con DST.
+- Nueva política de cobertura `WARN / FAIL_CLOSED / FAIL_OPEN`.
+- NFP/CPI siguen explícitamente marcados como proxies de FECHA hasta completar
+  el calendar cache oficial de la fase de research.
+
+### Added — Risk/research guards
+- `InpMinInitialRR` (default `0.0`, desactivado): permite bloquear RR inicial
+  insuficiente después del SL estructural sin inventar todavía un umbral óptimo.
+- `InpNewsCalendarPolicy` en los presets.
+- `TestPositionState.mq5` y ampliación de `TestOrderManager.mq5`.
+
+---
+
 ## [2.61] — 2026-07-31
 
 Auditoría crítica multidimensión (seguridad, riesgo, automatización, datos,
@@ -86,7 +145,7 @@ documentado como pendiente, no simulado.
 - **`RiskManager.mqh`**: límite de riesgo agregado entre TODAS las instancias
   del EA en la misma cuenta (p.ej. XAUUSD + XAGUSD en paralelo, que están
   correlacionados y antes gestionaban su drawdown de forma completamente
-  aislada). `RegisterOpenRisk`/`ReleaseOpenRisk`/`GetPortfolioRiskUsed` vía
+  aislada). `RegisterOpenRisk`/`ReleaseOpenRisk`/`GetUsed` vía
   GlobalVariable compartida por cuenta (no por magic number).
   `CalculateLotSize` reduce u omite el trade si excede el presupuesto.
 - **`OrderManager.mqh`**: `GetLastPositionTicket()` para conocer el ticket
@@ -397,7 +456,7 @@ calidad de datos y tooling. Sin cambios de estrategia de entrada.
 - **`scripts/validate_set.py`** — Añadidos 6 nuevos parámetros v2.20 a `REQUIRED` y
   `RANGE_CHECKS`: `InpUsePartialTP`, `InpPartialTPR`, `InpPartialTPPct`,
   `InpUseEqCurveFilter`, `InpEqCurvePeriod`, `InpMinTickVolume`.
-- **`config/GoldenTradeX.set`** / **`config/GoldenTradeX_XAGUSD.set`** — Añadidos
+- **`config/GoldenTradeX.set`** / **`GoldenTradeX_XAGUSD.set`** — Añadidos
   los 6 nuevos parámetros v2.20 con valores por defecto recomendados.
 
 ---
@@ -566,7 +625,7 @@ calidad de datos y tooling. Sin cambios de estrategia de entrada.
 - **TestNewsFilter.mq5** (`MQL5/Scripts/Tests/`) — 18 asserts que cubren:
   NFP (primer viernes de mes), FOMC 2025/2026, CPI proxy (mar/mié días 10–15),
   filtro desactivado.
-- **TestRiskManager.mq5** (`MQL5/Scripts/Tests/`) — tests de caja blanca:
+- **TestRiskManager.mq5` (`MQL5/Scripts/Tests/`) — tests de caja blanca:
   contador de pérdidas consecutivas, multiplicador 0.75 al llegar a ≥ 2 pérdidas,
   `IsConsecutiveLossLimitReached()`.
 - `NewsFilter.mqh` — nuevo método `IsNewsBlockedAt(datetime t)` (evalúa una datetime
