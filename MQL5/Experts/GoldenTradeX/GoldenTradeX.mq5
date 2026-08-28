@@ -1,13 +1,13 @@
 //+------------------------------------------------------------------+
 //|                                                 GoldenTradeX.mq5 |
-//|                    Golden Trade X v2.62 — Expert Advisor          |
+//|                    Golden Trade X v2.63 — Expert Advisor          |
 //|                    CTG One Technology S.A.S.                      |
 //+------------------------------------------------------------------+
 #property copyright "CTG One Technology S.A.S."
 #property link      "https://github.com/VladPhil92/Golden-Trade-X"
-#property version   "2.62"
+#property version   "2.63"
 #property strict
-#property description "Golden Trade X v2.62: ejecución confirmada por servidor, identidad estable por POSITION_IDENTIFIER, Initial R inmutable, Partial TP/R realizado corregidos y estado persistente por posición."
+#property description "Golden Trade X v2.63: verificación MQL5 automatizada, integration smoke determinista y gates DevSecOps."
 
 #include <Trade/Trade.mqh>
 #include <GoldenTradeX/RiskManager.mqh>
@@ -263,7 +263,7 @@ int OnInit()
    EventSetTimer(60);
    newsFilter.PrintStatus();
    riskManager.PrintStatus();
-   Print("GoldenTradeX v2.62 inicializado en ", _Symbol,
+   Print("GoldenTradeX v2.63 inicializado en ", _Symbol,
          " | MinConf=", InpMinConfidence,
          " | MinRR=", DoubleToString(InpMinInitialRR, 2),
          " | Retries=", InpOrderMaxRetries,
