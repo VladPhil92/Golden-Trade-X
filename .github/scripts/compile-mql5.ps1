@@ -10,6 +10,31 @@ $compileLog = Join-Path $env:RUNNER_TEMP "GoldenTradeX-compile.log"
 # Export evidence path before any operation so failures can still upload logs.
 "GTX_COMPILE_LOG=$compileLog" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
+function Wait-ForPath {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [int]$TimeoutSeconds = 60
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        if (Test-Path $Path) { return $true }
+        Start-Sleep -Seconds 2
+    }
+    return (Test-Path $Path)
+}
+
+function Find-UserDataTradeLibrary {
+    $terminalDataRoot = Join-Path $env:APPDATA "MetaQuotes\Terminal"
+    if (-not (Test-Path $terminalDataRoot)) { return $null }
+
+    foreach ($directory in Get-ChildItem -Path $terminalDataRoot -Directory -ErrorAction SilentlyContinue) {
+        $candidate = Join-Path $directory.FullName "MQL5\Include\Trade\Trade.mqh"
+        if (Test-Path $candidate) { return Get-Item $candidate }
+    }
+    return $null
+}
+
 Write-Host "Downloading official MetaTrader 5 installer..."
 Invoke-WebRequest -Uri $installerUrl -OutFile $installer -UseBasicParsing
 
@@ -23,13 +48,6 @@ if ($install.ExitCode -ne 0) {
     Write-Warning "Installer returned non-zero. The gate verifies installed files instead of trusting the installer exit code."
 }
 
-# The installer may launch the terminal after setup. CI only needs MetaEditor.
-Get-Process terminal64, terminal -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-
-$searchRoots = @($installDir)
-if ($env:ProgramFiles) { $searchRoots += $env:ProgramFiles }
-if (${env:ProgramFiles(x86)}) { $searchRoots += ${env:ProgramFiles(x86)} }
-
 $metaEditorCandidates = @(
     (Join-Path $installDir "metaeditor64.exe"),
     (Join-Path $installDir "MetaEditor64.exe"),
@@ -38,35 +56,74 @@ $metaEditorCandidates = @(
 )
 $metaEditor = $metaEditorCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $metaEditor) {
-    foreach ($root in $searchRoots | Select-Object -Unique) {
-        if (-not (Test-Path $root)) { continue }
-        $found = Get-ChildItem -Path $root -Filter "MetaEditor*.exe" -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($found) {
-            $metaEditor = $found.FullName
-            break
-        }
-    }
-}
-if (-not $metaEditor) {
-    throw "MetaEditor executable was not found after automated installation (installer exit code $($install.ExitCode))"
+    throw "MetaEditor executable was not found under $installDir after automated installation (installer exit code $($install.ExitCode))"
 }
 
-# Locate the MQL5 tree that contains MetaQuotes' standard library. Compiling
-# against the repository root alone would shadow <Trade/Trade.mqh>.
-$standardTrade = Get-ChildItem -Path $installDir -Filter "Trade.mqh" -File -Recurse -ErrorAction SilentlyContinue |
-    Where-Object { $_.FullName -match "[\\/]MQL5[\\/]Include[\\/]Trade[\\/]Trade\.mqh$" } |
-    Select-Object -First 1
-if (-not $standardTrade) {
-    foreach ($root in $searchRoots | Select-Object -Unique) {
-        if (-not (Test-Path $root)) { continue }
-        $standardTrade = Get-ChildItem -Path $root -Filter "Trade.mqh" -File -Recurse -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -match "[\\/]MQL5[\\/]Include[\\/]Trade[\\/]Trade\.mqh$" } |
-            Select-Object -First 1
-        if ($standardTrade) { break }
+$terminalCandidates = @(
+    (Join-Path $installDir "terminal64.exe"),
+    (Join-Path $installDir "terminal.exe")
+)
+$terminal = $terminalCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+if (-not $terminal) {
+    throw "MetaTrader terminal executable was not found under $installDir"
+}
+
+# The bootstrap installer can create the binaries before the MQL5 data tree has
+# been materialized. MetaQuotes documents /portable specifically to force the
+# terminal/MetaEditor data directory into the installation folder. Initialize
+# that deterministic tree before looking for the standard library.
+Get-Process terminal64, terminal, metaeditor64, metaeditor -ErrorAction SilentlyContinue |
+    Stop-Process -Force -ErrorAction SilentlyContinue
+
+$portableTradePath = Join-Path $installDir "MQL5\Include\Trade\Trade.mqh"
+if (-not (Test-Path $portableTradePath)) {
+    Write-Host "Initializing MetaTrader 5 portable data directory..."
+    $terminalProcess = Start-Process -FilePath $terminal -ArgumentList "/portable" -PassThru
+    try {
+        [void](Wait-ForPath -Path $portableTradePath -TimeoutSeconds 75)
+    }
+    finally {
+        if ($terminalProcess -and -not $terminalProcess.HasExited) {
+            Stop-Process -Id $terminalProcess.Id -Force -ErrorAction SilentlyContinue
+        }
+        Get-Process terminal64, terminal -ErrorAction SilentlyContinue |
+            Stop-Process -Force -ErrorAction SilentlyContinue
     }
 }
+
+# Some builds materialize the editor-side data tree only when MetaEditor starts.
+# Give it one bounded initialization attempt before falling back to the normal
+# per-user MetaQuotes data directory.
+if (-not (Test-Path $portableTradePath)) {
+    Write-Host "Portable Trade.mqh not present yet; initializing MetaEditor portable data..."
+    $editorProcess = Start-Process -FilePath $metaEditor -ArgumentList "/portable" -PassThru
+    try {
+        [void](Wait-ForPath -Path $portableTradePath -TimeoutSeconds 45)
+    }
+    finally {
+        if ($editorProcess -and -not $editorProcess.HasExited) {
+            Stop-Process -Id $editorProcess.Id -Force -ErrorAction SilentlyContinue
+        }
+        Get-Process metaeditor64, metaeditor -ErrorAction SilentlyContinue |
+            Stop-Process -Force -ErrorAction SilentlyContinue
+    }
+}
+
+$standardTrade = $null
+$portableMode = $false
+if (Test-Path $portableTradePath) {
+    $standardTrade = Get-Item $portableTradePath
+    $portableMode = $true
+} else {
+    # Normal mode stores data under %APPDATA%\MetaQuotes\Terminal\<instance>.
+    # Search only those known instance roots; never recurse through Program Files.
+    $standardTrade = Find-UserDataTradeLibrary
+}
+
 if (-not $standardTrade) {
-    throw "MetaQuotes standard MQL5 library was not found after installation (missing Include\Trade\Trade.mqh)"
+    $knownPortable = Join-Path $installDir "MQL5"
+    $knownUser = Join-Path $env:APPDATA "MetaQuotes\Terminal"
+    throw "MetaQuotes standard MQL5 library was not initialized. Missing Include\Trade\Trade.mqh under '$knownPortable' and '$knownUser'."
 }
 
 # Trade.mqh -> Trade -> Include -> MQL5
@@ -76,8 +133,10 @@ $installedExperts = Join-Path $installedMql5 "Experts"
 $customIncludeDst = Join-Path $installedInclude "GoldenTradeX"
 $expertDst = Join-Path $installedExperts "GoldenTradeX"
 
+Write-Host "MetaEditor:          $metaEditor"
 Write-Host "Installed MQL5 root: $installedMql5"
 Write-Host "Standard Trade.mqh:  $($standardTrade.FullName)"
+Write-Host "Portable mode:       $portableMode"
 
 New-Item -ItemType Directory -Force -Path $customIncludeDst | Out-Null
 New-Item -ItemType Directory -Force -Path $expertDst | Out-Null
@@ -87,13 +146,12 @@ Copy-Item -Path (Join-Path $repoMql5 "Experts\GoldenTradeX\*") -Destination $exp
 $source = Join-Path $expertDst "GoldenTradeX.mq5"
 $includeRoot = $installedMql5
 if (-not (Test-Path $source)) {
-    throw "EA source was not staged into installed MQL5 tree: $source"
+    throw "EA source was not staged into initialized MQL5 tree: $source"
 }
 
-Write-Host "MetaEditor: $metaEditor"
-Write-Host "Source:     $source"
-Write-Host "Include:    $includeRoot"
-Write-Host "Log:        $compileLog"
+Write-Host "Source:  $source"
+Write-Host "Include: $includeRoot"
+Write-Host "Log:     $compileLog"
 
 # MetaEditor documents /compile, /include and /log as its command-line build interface.
 $arguments = @(
@@ -101,6 +159,10 @@ $arguments = @(
     "/include:$includeRoot",
     "/log:$compileLog"
 )
+if ($portableMode) {
+    $arguments += "/portable"
+}
+
 $compile = Start-Process -FilePath $metaEditor -ArgumentList $arguments -PassThru -Wait
 Write-Host "MetaEditor process exit code: $($compile.ExitCode)"
 
