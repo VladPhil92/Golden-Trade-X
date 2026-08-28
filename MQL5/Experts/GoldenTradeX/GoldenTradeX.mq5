@@ -25,12 +25,10 @@
 #include <GoldenTradeX/HealthMonitor.mqh>
 #include <GoldenTradeX/PositionStateManager.mqh>
 
-//--- Identidad
 input group "=== Identidad ==="
 input ulong   InpMagicNumber      = 920260;
 input string  InpTradeComment     = "GoldenTradeX";
 
-//--- Señales base
 input group "=== Señales ==="
 input int     InpEmaFast          = 21;
 input int     InpEmaSlow          = 55;
@@ -47,12 +45,10 @@ input int     InpAdxPeriod        = 14;
 input double  InpAdxMinLevel      = 25.0;
 input int     InpMinTickVolume    = 10;
 
-//--- Filtro HTF
 input group "=== Filtro de Tendencia HTF ==="
 input bool    InpUseHtfFilter     = true;
 input int     InpHtfEmaPeriod     = 50;
 
-//--- Confluence Score
 input group "=== Confluence Score & Smart Money (heurístico) ==="
 input bool    InpUseRegimeFilter  = true;
 input bool    InpUseSmcFilter     = true;
@@ -63,7 +59,6 @@ input int     InpConfWeightSmc    = 30;
 input int     InpConfWeightHtf    = 15;
 input int     InpConfWeightFib    = 5;
 
-//--- Gestión de riesgo
 input group "=== Riesgo ==="
 input double  InpRiskPercent      = 1.0;
 input double  InpMaxDailyDD       = 4.0;
@@ -75,45 +70,37 @@ input double  InpAtrSlMultiplier  = 2.0;
 input double  InpAtrTpMultiplier  = 3.0;
 input double  InpMaxSpreadPoints  = 350;
 input double  InpCpThresholdPct   = 8.0;
-// v2.62: 0 = guard desactivado hasta investigación OOS. No se inventa óptimo.
-input double  InpMinInitialRR     = 0.0;
+input double  InpMinInitialRR     = 0.0;  // 0=off hasta research OOS
 
-//--- Trailing y Break-even
 input group "=== Trailing Stop y Break-Even ==="
 input bool    InpUseTrailing      = true;
 input double  InpTrailAtrMult     = 1.5;
 input bool    InpUseBreakEven     = true;
 input double  InpBreakEvenR       = 0.5;
 
-//--- Partial Take Profit
 input group "=== Partial Take Profit ==="
 input bool    InpUsePartialTP     = true;
 input double  InpPartialTPR       = 1.0;
 input double  InpPartialTPPct     = 50.0;
 
-//--- Equity Curve Filter
 input group "=== Equity Curve Filter ==="
 input bool    InpUseEqCurveFilter = true;
 input int     InpEqCurvePeriod    = 20;
 
-//--- Kelly Criterion
 input group "=== Kelly Criterion ==="
 input bool    InpUseKelly         = false;
 input double  InpKellyFraction    = 0.25;
 input int     InpKellyMinTrades   = 30;
 
-//--- Portfolio Risk Cap
 input group "=== Portfolio Risk Cap ==="
 input bool    InpUsePortfolioCap     = false;
 input double  InpMaxPortfolioRiskPct = 1.5;
 
-//--- Order Manager
 input group "=== Order Manager ==="
 input int     InpOrderMaxRetries  = 3;
 input int     InpOrderRetryDelay  = 500;
 input double  InpMinMarginLevel   = 200.0;
 
-//--- Sesiones
 input group "=== Sesiones ==="
 input bool    InpUseSessionFilter = true;
 input int     InpStartHour        = 7;
@@ -121,18 +108,16 @@ input int     InpEndHour          = 20;
 input bool    InpCloseOnFriday    = true;
 input int     InpFridayCloseHour  = 19;
 
-//--- Noticias
 input group "=== Noticias ==="
 input bool    InpUseNewsFilter    = true;
 input int     InpNewsBufferBefore = 30;
 input int     InpNewsBufferAfter  = 90;
+input ENUM_NEWS_CALENDAR_POLICY InpNewsCalendarPolicy = NEWS_CALENDAR_WARN;
 input bool    InpPauseForNews     = false;
 
-//--- Registro
 input group "=== Registro ==="
 input bool    InpEnableTradeLog   = true;
 
-//--- Objetos globales
 CTrade                trade;
 CRiskManager          riskManager;
 CSignalEngine         signalEngine;
@@ -154,25 +139,17 @@ string   g_gvLastBarKey = "";
 int      g_lastConfidence = 0;
 ENUM_MARKET_REGIME g_lastRegime = REGIME_UNKNOWN;
 
-//+------------------------------------------------------------------+
-//| Helpers de identidad                                             |
-//+------------------------------------------------------------------+
 bool PositionIdentifierIsOpen(ulong positionId)
-  {
-   return positionState.IsPositionOpen(positionId);
-  }
+  { return positionState.IsPositionOpen(positionId); }
 
 bool PositionHistoryBelongsExclusivelyToEA(ulong positionId)
-  {
-   return positionState.PositionBelongsExclusivelyToEA(positionId);
-  }
+  { return positionState.PositionBelongsExclusivelyToEA(positionId); }
 
 bool HasForeignNettingPosition(string symbol)
   {
    ENUM_ACCOUNT_MARGIN_MODE marginMode =
       (ENUM_ACCOUNT_MARGIN_MODE)AccountInfoInteger(ACCOUNT_MARGIN_MODE);
    if(marginMode == ACCOUNT_MARGIN_MODE_RETAIL_HEDGING) return false;
-
    if(!PositionSelect(symbol)) return false;
    long magic = PositionGetInteger(POSITION_MAGIC);
    if(magic == (long)InpMagicNumber) return false;
@@ -183,10 +160,8 @@ bool HasForeignNettingPosition(string symbol)
    return true;
   }
 
-//+------------------------------------------------------------------+
 int OnInit()
   {
-   // ── Validación de parámetros ─────────────────────────────────────
    if(InpEmaFast >= InpEmaSlow)
      { Print("GoldenTradeX: InpEmaFast debe ser menor que InpEmaSlow"); return INIT_PARAMETERS_INCORRECT; }
    if(InpRsiLower >= InpRsiUpper)
@@ -242,7 +217,8 @@ int OnInit()
 
    sessionFilter.Init(InpUseSessionFilter, InpStartHour, InpEndHour,
                       InpCloseOnFriday, InpFridayCloseHour);
-   newsFilter.Init(InpUseNewsFilter, InpNewsBufferBefore, InpNewsBufferAfter);
+   newsFilter.Init(InpUseNewsFilter, InpNewsBufferBefore, InpNewsBufferAfter,
+                   InpNewsCalendarPolicy);
    tradeLogger.Init(InpEnableTradeLog, InpMagicNumber);
 
    if(InpUseRegimeFilter)
@@ -298,7 +274,6 @@ int OnInit()
    return INIT_SUCCEEDED;
   }
 
-//+------------------------------------------------------------------+
 void OnDeinit(const int reason)
   {
    EventKillTimer();
@@ -312,11 +287,9 @@ void OnDeinit(const int reason)
    Print("GoldenTradeX: deinit razón=", reason);
   }
 
-//+------------------------------------------------------------------+
 void OnTimer()
   {
    healthMonitor.Check(trade);
-   // Mantener MFE/MAE fresco incluso en periodos con pocos ticks.
    for(int i = PositionsTotal() - 1; i >= 0; i--)
      {
       ulong ticket = PositionGetTicket(i);
@@ -326,14 +299,11 @@ void OnTimer()
      }
   }
 
-//+------------------------------------------------------------------+
 void OnTick()
   {
    if(sessionFilter.MustCloseAll())
      { CloseAllPositions("Cierre de fin de semana"); return; }
 
-   // v2.62: gestión de posición SIEMPRE activa. Partial TP y BreakEven ya
-   // no dependen del flag InpUseTrailing.
    ManageOpenPositions();
 
    if(!IsNewBar()) return;
@@ -343,7 +313,6 @@ void OnTick()
      { Comment("GoldenTradeX: KILL SWITCH activo. Operaciones detenidas."); return; }
    if(!sessionFilter.IsTradingAllowed()) return;
    if(!riskManager.IsSpreadAcceptable(_Symbol)) return;
-
    if(riskManager.IsDailyDrawdownExceeded())
      { Comment("GoldenTradeX: DD diario alcanzado. Pausa hasta mañana."); return; }
    if(riskManager.IsWeeklyDrawdownExceeded())
@@ -506,7 +475,6 @@ void OnTick()
      }
   }
 
-//+------------------------------------------------------------------+
 void OnTradeTransaction(const MqlTradeTransaction &trans,
                         const MqlTradeRequest &request,
                         const MqlTradeResult &result)
@@ -522,12 +490,8 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
 
    ulong positionId = (ulong)HistoryDealGetInteger(dealTicket, DEAL_POSITION_ID);
    if(positionId == 0) return;
-
-   // No filtrar por magic del DEAL DE SALIDA: un cierre manual/broker-side
-   // puede tener magic 0. La propiedad se demuestra por el historial de entrada.
    if(!PositionHistoryBelongsExclusivelyToEA(positionId)) return;
 
-   // Un cierre parcial genera DEAL_ENTRY_OUT pero la posición sigue viva.
    if(PositionIdentifierIsOpen(positionId))
      {
       Print("GoldenTradeX: cierre parcial position_id=", positionId,
@@ -535,7 +499,6 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
       return;
      }
 
-   // Evitar doble registro cuando un cierre produce múltiples exit deals.
    if(positionState.IsClosureProcessed(positionId)) return;
 
    double posNet = 0.0;
@@ -552,8 +515,6 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
               + HistoryDealGetDouble(d, DEAL_FEE);
      }
 
-   // Cargar snapshot antes de limpiar; TradeLogger v2.62 reconstruye R por su
-   // cuenta y una fase posterior añadirá MFE/MAE al ledger persistente.
    SPositionState finalState;
    bool hasState = positionState.Load(positionId, finalState);
    if(hasState)
@@ -569,7 +530,6 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    positionState.Cleanup(positionId);
   }
 
-//+------------------------------------------------------------------+
 bool IsNewBar()
   {
    datetime t = iTime(_Symbol, InpTimeframe, 0);
@@ -582,7 +542,6 @@ bool IsNewBar()
    return false;
   }
 
-//+------------------------------------------------------------------+
 void ManageOpenPositions()
   {
    double atr = signalEngine.GetATR();
@@ -602,7 +561,6 @@ void ManageOpenPositions()
       ulong positionId = (ulong)PositionGetInteger(POSITION_IDENTIFIER);
       if(positionId == 0) continue;
 
-      // State integrity is required for R-based management.
       if(!positionState.EnsurePosition(ticket))
         {
          Print("GoldenTradeX: SEV0 — no se pudo asegurar PositionState para position_id=",
@@ -656,7 +614,6 @@ void ManageOpenPositions()
      }
   }
 
-//+------------------------------------------------------------------+
 void CloseAllPositions(string reason)
   {
    for(int i = PositionsTotal() - 1; i >= 0; i--)
