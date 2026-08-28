@@ -2,16 +2,15 @@
 //|                                                 NewsFilter.mqh   |
 //|   Golden Trade X v2.62 — Filtro de noticias fail-safe           |
 //+------------------------------------------------------------------+
-//  FOMC 2025-2027: fechas de decisión verificadas contra el calendario
-//  publicado por la Federal Reserve. La hora del statement se modela como
-//  14:00 US Eastern y se convierte dinámicamente a UTC según DST de EE.UU.
+//  FOMC 2025-2027: fechas de decisión verificadas contra la Federal
+//  Reserve. Statement modelado a 14:00 US Eastern con DST.
 //
-//  NFP/CPI siguen siendo proxies de FECHA hasta que el calendar cache oficial
-//  de la fase de research sustituya estas heurísticas. Su HORA sí se convierte
-//  correctamente desde 08:30 US Eastern (12:30 UTC en DST / 13:30 estándar).
+//  NFP/CPI: la HORA se modela a 08:30 US Eastern con DST, pero la FECHA
+//  sigue siendo proxy hasta que la fase calendar-cache integre fuentes
+//  oficiales históricas/futuras. Esta limitación es deliberadamente visible.
 //
-//  La cobertura de calendario tiene política explícita WARN / FAIL_CLOSED /
-//  FAIL_OPEN para impedir que una expiración silenciosa incremente el riesgo.
+//  Las ventanas se evalúan con timestamps absolutos, no minutos-del-día:
+//  esto conserva correctamente buffers que cruzan medianoche.
 //+------------------------------------------------------------------+
 #property strict
 
@@ -52,31 +51,11 @@ private:
       if(key != m_offsetDateKey) DetectServerOffset();
      }
 
-   int UtcToServer(int utcHour)
-     { return((utcHour + m_serverOffset + 24) % 24); }
-
-   bool InWindow(const MqlDateTime &dt, int evServerHour, int evMinute)
-     {
-      int nowMins = dt.hour * 60 + dt.min;
-      int evMins = evServerHour * 60 + evMinute;
-      int blockStart = evMins - m_bufferBefore;
-      int blockEnd = evMins + m_bufferAfter;
-
-      if(blockStart >= 0 && blockEnd <= 1439)
-         return(nowMins >= blockStart && nowMins <= blockEnd);
-      if(blockStart < 0)
-         return(nowMins <= blockEnd || nowMins >= blockStart + 1440);
-      return(nowMins >= blockStart || nowMins <= blockEnd - 1440);
-     }
-
    int DayOfWeekForDate(int year, int mon, int day)
      {
       MqlDateTime x;
       ZeroMemory(x);
-      x.year = year;
-      x.mon = mon;
-      x.day = day;
-      x.hour = 12;
+      x.year = year; x.mon = mon; x.day = day; x.hour = 12;
       datetime t = StructToTime(x);
       TimeToStruct(t, x);
       return x.day_of_week;
@@ -88,8 +67,6 @@ private:
       return 1 + ((7 - dow) % 7);
      }
 
-   // Reglas DST de Estados Unidos vigentes desde 2007:
-   // segundo domingo de marzo → primer domingo de noviembre.
    bool IsUsEasternDst(int year, int mon, int day)
      {
       if(mon < 3 || mon > 11) return false;
@@ -99,14 +76,30 @@ private:
          int secondSunday = FirstSunday(year, 3) + 7;
          return day >= secondSunday;
         }
-      int firstSundayNov = FirstSunday(year, 11);
-      return day < firstSundayNov;
+      return day < FirstSunday(year, 11);
      }
 
    int EasternToUtcHour(int year, int mon, int day, int easternHour)
+     { return easternHour + (IsUsEasternDst(year, mon, day) ? 4 : 5); }
+
+   datetime EventServerTime(int year, int mon, int day, int utcHour, int minute)
      {
-      // EDT=UTC-4; EST=UTC-5.
-      return easternHour + (IsUsEasternDst(year, mon, day) ? 4 : 5);
+      // StructToTime se usa como calendario civil base; luego se desplaza por
+      // offset servidor-UTC. El resultado es comparable con TimeCurrent().
+      MqlDateTime x;
+      ZeroMemory(x);
+      x.year = year; x.mon = mon; x.day = day;
+      x.hour = utcHour; x.min = minute;
+      datetime utcCivil = StructToTime(x);
+      return utcCivil + (datetime)(m_serverOffset * 3600);
+     }
+
+   bool InAbsoluteWindow(datetime nowServer, datetime eventServer)
+     {
+      if(eventServer <= 0) return false;
+      datetime start = eventServer - (datetime)(m_bufferBefore * 60);
+      datetime finish = eventServer + (datetime)(m_bufferAfter * 60);
+      return nowServer >= start && nowServer <= finish;
      }
 
    bool CalendarCoverageAvailable(int year)
@@ -115,76 +108,99 @@ private:
    bool HandleMissingCalendarCoverage(int year)
      {
       if(CalendarCoverageAvailable(year)) return false;
-
       if(!m_calendarWarned)
         {
          m_calendarWarned = true;
-         Print("NewsFilter: CALENDAR_COVERAGE_MISSING para año ", year,
-               " (FOMC exacto disponible ", FOMC_FIRST_YEAR, "-", FOMC_LAST_YEAR,
-               "). Policy=", (int)m_policy,
-               ". Para evidencia histórica/futura cargar calendario oficial.");
+         Print("NewsFilter: CALENDAR_COVERAGE_MISSING año=", year,
+               " FOMC exacto=", FOMC_FIRST_YEAR, "-", FOMC_LAST_YEAR,
+               " policy=", (int)m_policy,
+               ". Evidencia histórica/futura requiere calendar cache oficial.");
         }
-
-      // true significa bloquear la operación por política fail-closed.
       return m_policy == NEWS_CALENDAR_FAIL_CLOSED;
      }
 
-   // NFP: proxy de fecha = primer viernes. Hora oficial típica 08:30 ET,
-   // convertida con DST; festivos pueden desplazar la FECHA → fase calendar cache.
-   bool IsNfpWindow(const MqlDateTime &dt)
+   bool IsNfpProxyDate(const MqlDateTime &dt)
+     { return dt.day_of_week == 5 && dt.day <= 7; }
+
+   bool IsCpiProxyDate(const MqlDateTime &dt)
      {
-      if(dt.day_of_week != 5 || dt.day > 7) return false;
-      int utcHour = EasternToUtcHour(dt.year, dt.mon, dt.day, 8);
-      return InWindow(dt, UtcToServer(utcHour), 30);
+      return dt.day >= 10 && dt.day <= 15 &&
+             (dt.day_of_week == 2 || dt.day_of_week == 3);
      }
 
-   // CPI: proxy de fecha. Hora típica 08:30 ET convertida con DST.
-   bool IsCpiProxyWindow(const MqlDateTime &dt)
-     {
-      if(dt.day < 10 || dt.day > 15) return false;
-      if(dt.day_of_week != 2 && dt.day_of_week != 3) return false;
-      int utcHour = EasternToUtcHour(dt.year, dt.mon, dt.day, 8);
-      return InWindow(dt, UtcToServer(utcHour), 30);
-     }
-
-   // Fechas de DECISIÓN/statement (segundo día de reunión) verificadas.
    bool IsFomcDecisionDate(int year, int mon, int day)
      {
       if(year == 2025)
-         return((mon==1  && day==29) || (mon==3  && day==19) ||
-                (mon==5  && day==7)  || (mon==6  && day==18) ||
-                (mon==7  && day==30) || (mon==9  && day==17) ||
-                (mon==10 && day==29) || (mon==12 && day==10));
-
+         return((mon==1&&day==29)||(mon==3&&day==19)||(mon==5&&day==7)||
+                (mon==6&&day==18)||(mon==7&&day==30)||(mon==9&&day==17)||
+                (mon==10&&day==29)||(mon==12&&day==10));
       if(year == 2026)
-         return((mon==1  && day==28) || (mon==3  && day==18) ||
-                (mon==4  && day==29) || (mon==6  && day==17) ||
-                (mon==7  && day==29) || (mon==9  && day==16) ||
-                (mon==10 && day==28) || (mon==12 && day==9));
-
+         return((mon==1&&day==28)||(mon==3&&day==18)||(mon==4&&day==29)||
+                (mon==6&&day==17)||(mon==7&&day==29)||(mon==9&&day==16)||
+                (mon==10&&day==28)||(mon==12&&day==9));
       if(year == 2027)
-         return((mon==1  && day==27) || (mon==3  && day==17) ||
-                (mon==4  && day==28) || (mon==6  && day==9)  ||
-                (mon==7  && day==28) || (mon==9  && day==15) ||
-                (mon==10 && day==27) || (mon==12 && day==8));
+         return((mon==1&&day==27)||(mon==3&&day==17)||(mon==4&&day==28)||
+                (mon==6&&day==9)||(mon==7&&day==28)||(mon==9&&day==15)||
+                (mon==10&&day==27)||(mon==12&&day==8));
       return false;
      }
 
-   bool IsFomcWindow(const MqlDateTime &dt)
+   // Evalúa candidatos de fecha -1/0/+1 para que un buffer pueda cruzar
+   // medianoche del servidor sin perder la asociación con la fecha del evento.
+   bool IsNfpWindowAt(datetime nowServer)
      {
-      if(!CalendarCoverageAvailable(dt.year)) return false;
-      if(!IsFomcDecisionDate(dt.year, dt.mon, dt.day)) return false;
-      // Regular statement: 14:00 US Eastern → 18:00 UTC DST / 19:00 UTC EST.
-      int utcHour = EasternToUtcHour(dt.year, dt.mon, dt.day, 14);
-      return InWindow(dt, UtcToServer(utcHour), 0);
+      for(int offset = -1; offset <= 1; offset++)
+        {
+         datetime candidate = nowServer + (datetime)(offset * 86400);
+         MqlDateTime dt;
+         TimeToStruct(candidate, dt);
+         if(!IsNfpProxyDate(dt)) continue;
+         int utcHour = EasternToUtcHour(dt.year, dt.mon, dt.day, 8);
+         datetime ev = EventServerTime(dt.year, dt.mon, dt.day, utcHour, 30);
+         if(InAbsoluteWindow(nowServer, ev)) return true;
+        }
+      return false;
      }
 
-   bool Evaluate(const MqlDateTime &dt)
+   bool IsCpiProxyWindowAt(datetime nowServer)
      {
+      for(int offset = -1; offset <= 1; offset++)
+        {
+         datetime candidate = nowServer + (datetime)(offset * 86400);
+         MqlDateTime dt;
+         TimeToStruct(candidate, dt);
+         if(!IsCpiProxyDate(dt)) continue;
+         int utcHour = EasternToUtcHour(dt.year, dt.mon, dt.day, 8);
+         datetime ev = EventServerTime(dt.year, dt.mon, dt.day, utcHour, 30);
+         if(InAbsoluteWindow(nowServer, ev)) return true;
+        }
+      return false;
+     }
+
+   bool IsFomcWindowAt(datetime nowServer)
+     {
+      for(int offset = -1; offset <= 1; offset++)
+        {
+         datetime candidate = nowServer + (datetime)(offset * 86400);
+         MqlDateTime dt;
+         TimeToStruct(candidate, dt);
+         if(!CalendarCoverageAvailable(dt.year)) continue;
+         if(!IsFomcDecisionDate(dt.year, dt.mon, dt.day)) continue;
+         int utcHour = EasternToUtcHour(dt.year, dt.mon, dt.day, 14);
+         datetime ev = EventServerTime(dt.year, dt.mon, dt.day, utcHour, 0);
+         if(InAbsoluteWindow(nowServer, ev)) return true;
+        }
+      return false;
+     }
+
+   bool Evaluate(datetime nowServer)
+     {
+      MqlDateTime dt;
+      TimeToStruct(nowServer, dt);
       if(HandleMissingCalendarCoverage(dt.year)) return true;
-      if(IsNfpWindow(dt)) return true;
-      if(IsCpiProxyWindow(dt)) return true;
-      if(IsFomcWindow(dt)) return true;
+      if(IsNfpWindowAt(nowServer)) return true;
+      if(IsCpiProxyWindowAt(nowServer)) return true;
+      if(IsFomcWindowAt(nowServer)) return true;
       return false;
      }
 
@@ -204,39 +220,33 @@ public:
    void SetServerOffset(int offset)
      {
       m_serverOffset = offset;
-      // Test hook: evitar auto-refresh durante IsNewsBlockedAt.
-      m_offsetDateKey = -1;
+      m_offsetDateKey = -1; // test hook: IsNewsBlockedAt no auto-refresca
      }
 
    bool IsNewsBlocked()
      {
       if(!m_enabled) return false;
       RefreshServerOffsetIfNeeded();
-      MqlDateTime dt;
-      TimeToStruct(TimeCurrent(), dt);
-      return Evaluate(dt);
+      return Evaluate(TimeCurrent());
      }
 
    bool IsNewsBlockedAt(datetime t)
      {
       if(!m_enabled) return false;
-      MqlDateTime dt;
-      TimeToStruct(t, dt);
-      return Evaluate(dt);
+      return Evaluate(t);
      }
 
    void PrintStatus()
      {
-      MqlDateTime dt;
-      TimeToStruct(TimeCurrent(), dt);
+      datetime now = TimeCurrent();
       Print("NewsFilter | ServerOffset=UTC", (m_serverOffset >= 0 ? "+" : ""),
             m_serverOffset,
             " | Policy=", (int)m_policy,
             " | FOMCcoverage=", FOMC_FIRST_YEAR, "-", FOMC_LAST_YEAR,
             " | Bloqueado=", (IsNewsBlocked() ? "SI" : "NO"),
-            " | NFP_proxy=", (IsNfpWindow(dt) ? "SI" : "NO"),
-            " | FOMC=", (IsFomcWindow(dt) ? "SI" : "NO"),
-            " | CPI_proxy=", (IsCpiProxyWindow(dt) ? "SI" : "NO"));
+            " | NFP_proxy=", (IsNfpWindowAt(now) ? "SI" : "NO"),
+            " | FOMC=", (IsFomcWindowAt(now) ? "SI" : "NO"),
+            " | CPI_proxy=", (IsCpiProxyWindowAt(now) ? "SI" : "NO"));
      }
   };
 
