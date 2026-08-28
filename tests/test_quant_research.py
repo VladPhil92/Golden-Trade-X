@@ -12,6 +12,7 @@ from quant_research import (
     build_baseline,
     evaluate_data_quality,
     load_manifest,
+    open_readonly,
 )
 from telemetry_db import connect
 
@@ -83,7 +84,9 @@ def _seed_outcomes(conn, count: int = 100, *, unknown_confidence: bool = False) 
 
 def test_empty_database_is_insufficient_not_success(tmp_path: Path) -> None:
     db = tmp_path / "research.sqlite"
-    with connect(db) as conn:
+    with connect(db):
+        pass
+    with open_readonly(db) as conn:
         report = build_baseline(
             conn,
             manifest=None,
@@ -104,6 +107,7 @@ def test_valid_dataset_meets_internal_exploratory_floor_and_is_reproducible(tmp_
     thresholds = EvidenceThresholds(min_segment_outcomes=10)
     with connect(db) as conn:
         _seed_outcomes(conn, 100)
+    with open_readonly(db) as conn:
         first = build_baseline(conn, manifest, [], thresholds, generated_at="first")
         second = build_baseline(conn, manifest, [], thresholds, generated_at="second")
 
@@ -122,6 +126,7 @@ def test_unknown_confidence_keeps_dataset_below_evidence_floor(tmp_path: Path) -
     db = tmp_path / "research.sqlite"
     with connect(db) as conn:
         _seed_outcomes(conn, 100, unknown_confidence=True)
+    with open_readonly(db) as conn:
         quality = evaluate_data_quality(conn, _manifest(), [], EvidenceThresholds())
 
     assert quality["status"] == INSUFFICIENT_EVIDENCE
@@ -133,17 +138,29 @@ def test_duplicate_position_outcome_is_invalid_data(tmp_path: Path) -> None:
     db = tmp_path / "research.sqlite"
     with connect(db) as conn:
         _seed_outcomes(conn, 100)
-        source = conn.execute("SELECT * FROM position_outcomes LIMIT 1").fetchone()
-        values = dict(source)
-        values["row_hash"] = "duplicate-hash"
-        values["event_id"] = "duplicate-event"
-        columns = list(values)
-        placeholders = ",".join("?" for _ in columns)
         conn.execute(
-            f"INSERT INTO position_outcomes ({','.join(columns)}) VALUES ({placeholders})",
-            [values[column] for column in columns],
+            """
+            INSERT INTO position_outcomes (
+                row_hash, event_id, close_time, account, magic, symbol,
+                position_id, direction, entry_time, entry_price, initial_sl,
+                initial_tp, initial_risk_price, initial_risk_money,
+                initial_volume, confidence, regime, mfe_r, mfe_price,
+                mfe_time, mae_r, mae_price, mae_time, net_pnl, realized_r,
+                close_price, source_file, raw_json
+            )
+            SELECT
+                'duplicate-hash', 'duplicate-event', close_time, account, magic, symbol,
+                position_id, direction, entry_time, entry_price, initial_sl,
+                initial_tp, initial_risk_price, initial_risk_money,
+                initial_volume, confidence, regime, mfe_r, mfe_price,
+                mfe_time, mae_r, mae_price, mae_time, net_pnl, realized_r,
+                close_price, source_file, raw_json
+            FROM position_outcomes
+            LIMIT 1
+            """
         )
         conn.commit()
+    with open_readonly(db) as conn:
         quality = evaluate_data_quality(conn, _manifest(), [], EvidenceThresholds())
 
     assert quality["status"] == INVALID_DATA
@@ -156,6 +173,7 @@ def test_manifest_symbol_scope_mismatch_is_invalid_data(tmp_path: Path) -> None:
     manifest["symbols"] = ["XAGUSD"]
     with connect(db) as conn:
         _seed_outcomes(conn, 100)
+    with open_readonly(db) as conn:
         quality = evaluate_data_quality(conn, manifest, [], EvidenceThresholds())
 
     assert quality["status"] == INVALID_DATA
