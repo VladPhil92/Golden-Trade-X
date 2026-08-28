@@ -4,8 +4,8 @@
 //+------------------------------------------------------------------+
 //  Exercises production APIs together without broker connectivity,
 //  orders, DLLs or market-history synchronization. This is an L3-lite
-//  integration contract; Strategy Tester and broker execution remain later
-//  validation layers and are not implied by this test.
+//  integration contract; broker/history ownership reconciliation and the
+//  Strategy Tester remain later validation layers and are not implied here.
 //+------------------------------------------------------------------+
 #property strict
 #property script_show_inputs false
@@ -84,7 +84,7 @@ void OnStart()
    confidence.Release();
 
    // 4) Execution classification: temporary broker result remains retryable;
-   // no CTrade call is performed in this integration test.
+   // no CTrade request is performed in this integration test.
    CTrade trade;
    COrderManager orders;
    orders.Init(&trade, 3, 0);
@@ -110,14 +110,15 @@ void OnStart()
    AssertTrue(!risk.IsConsecutiveLossLimitReached(),
               "Positive result clears consecutive-loss guard");
 
-   // 6) Position state identity: unknown stable identifier must fail closed.
+   // 6) Position-state identity smoke. Enumerating live positions is local and
+   // deterministic; history ownership (`HistorySelectByPosition`) is purposely
+   // excluded because it requires broker/history synchronization and belongs to
+   // Strategy Tester or broker-backed integration validation.
    CPositionStateManager state;
    state.Init(testMagic);
    const ulong fakePositionId = 963000001;
    AssertTrue(state.FindPositionTicket(fakePositionId) == 0,
               "Unknown POSITION_IDENTIFIER resolves to no live ticket");
-   AssertTrue(!state.PositionBelongsExclusivelyToEA(fakePositionId),
-              "Unknown history ownership fails closed");
 
    Print("=== TestIntegration END | PASS=", g_pass, " FAIL=", g_fail, " ===");
    if(g_fail == 0) Print(">>> ALL TESTS PASSED <<<");
