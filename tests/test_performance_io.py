@@ -119,6 +119,7 @@ def test_evaluate_emits_pf_drawdown_and_loss_streak_alerts(tmp_path: Path) -> No
         rows.append(
             f"2026-02-{i+1:02d},12:00:00,{i},XAUUSD,BUY,0.1,2000,1990,2020,2010,{pnl},0,{-1 if pnl < 0 else 1},GTX|Conf=55|Reg=RANGING,2026-02-{i+1:02d},09:00:00\n"
         )
+    _csv(path, rows)
     loaded = load_trades(str(path))
     res = evaluate(loaded, 5, _args())
 
