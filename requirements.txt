@@ -8,7 +8,7 @@ requests~=2.31
 
 # Machine learning (scripts/ml_pipeline.py)
 xgboost~=2.0
-scikit-learn~=1.4
+scikit-learn~=1.9
 
 # Market data (scripts/correlation_engine.py)
 yfinance~=0.2
