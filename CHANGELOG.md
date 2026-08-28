@@ -5,6 +5,43 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [2.63] — 2026-08-28
+
+Automated Verification milestone. Convierte la suite MQL5 de scripts manuales
+en un gate ejecutable en MetaTrader y añade controles DevSecOps. No constituye
+validación de rentabilidad, Strategy Tester OOS ni forward test.
+
+### Added — MQL5 automated verification
+- Windows CI compila el EA y todos los `MQL5/Scripts/Tests/Test*.mq5`.
+- Los 8 scripts se ejecutan realmente mediante MetaTrader `[StartUp]`; el job
+  falla ante timeout, resumen ausente o cualquier `FAIL>0`.
+- `TestIntegration.mq5` cruza Session/News/Regime/SMC/Confidence/Order/Risk/
+  PositionState sin enviar órdenes ni depender de broker/history.
+- Los artifacts conservan logs de compilación/runtime y EX5 de cada test.
+
+### Changed — Testability seams
+- `FibonacciEngine`, `MarketRegimeEngine`, `SessionFilter` y `OrderManager`
+  exponen lógica pura compartida por producción y tests deterministas, evitando
+  reimplementar reglas dentro de la suite.
+- Los tests que requieren market history, ownership broker-side o Strategy
+  Tester quedan explícitamente reservados para la siguiente capa de validación;
+  no se presentan como unit tests offline.
+
+### Added — DevSecOps y governance
+- `.github/CODEOWNERS`, `CONTRIBUTING.md` y `SECURITY.md`.
+- Scanner de secretos tracked con tests de regresión.
+- CodeQL para Python y `pip-audit` bloqueante sobre `requirements.txt`.
+- Dependency Review se ejecuta cuando GitHub Dependency Graph está disponible;
+  si la capacidad externa no está habilitada, el workflow registra el gap en
+  lugar de simular una revisión exitosa.
+
+### External gap
+- La protección administrativa de `main` y sus required checks no puede
+  configurarse con las acciones GitHub de escritura disponibles en esta sesión;
+  permanece explícitamente pendiente y no se considera validada.
+
+---
+
 ## [2.62] — 2026-08-28
 
 Trading Correctness milestone: correcciones P0 de ejecución server-side,
@@ -497,7 +534,7 @@ calidad de datos y tooling. Sin cambios de estrategia de entrada.
 ### Changed — Infrastructure
 - **`.github/workflows/ci.yml`** — Python syntax check extended to cover
   `correlation_engine.py`, `optimize_confidence.py`, `fomc_calendar.py`;
-  structure-check extended to cover `FibonacciEngine.mqh`,
+  structure-check extendido a `FibonacciEngine.mqh`,
   `TestSessionFilter.mq5`, `TestFibonacci.mq5`, and all 3 new Python scripts.
 
 ### Changed — ConfidenceEngine (arquitectura)
