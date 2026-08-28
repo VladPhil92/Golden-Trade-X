@@ -1,16 +1,11 @@
 //+------------------------------------------------------------------+
 //|                                                SessionFilter.mqh |
-//|   Golden Trade X v2.60 — Filtro horario y de fin de semana       |
+//|   Golden Trade X — Filtro horario y de fin de semana             |
 //+------------------------------------------------------------------+
 //  InpStartHour/InpEndHour se interpretan en HORA DEL SERVIDOR del broker
-//  (no UTC), por diseño — es lo que la mayoría de EAs asumen y lo que el
-//  operador ve directamente en el terminal. La contrapartida: si el
-//  servidor cambia de horario de verano/invierno (DST), la ventana
-//  Londres-NY que el operador tenía en mente se desplaza una hora sin
-//  aviso. v2.60 no cambia el comportamiento (no auto-convierte a UTC,
-//  para no alterar configuraciones ya calibradas), pero SÍ detecta el
-//  cambio de offset servidor-UTC entre inicializaciones y lo advierte en
-//  el Journal, para que el operador revise InpStartHour/InpEndHour.
+//  (no UTC), por diseño. El módulo expone variantes *At(datetime) para que
+//  la misma lógica productiva pueda verificarse determinísticamente sin
+//  acceder a estado privado ni duplicar reglas dentro de los tests.
 //+------------------------------------------------------------------+
 #property strict
 
@@ -47,6 +42,25 @@ private:
       GlobalVariableSet(m_gvOffsetKey, (double)current);
      }
 
+   bool TradingAllowedFor(const MqlDateTime &dt)
+     {
+      if(!m_enabled) return true;
+
+      if(m_closeFriday && dt.day_of_week == 5 && dt.hour >= m_fridayCloseHour)
+         return false;
+
+      if(dt.day_of_week == 0 || dt.day_of_week == 6)
+         return false;
+
+      return(dt.hour >= m_startHour && dt.hour < m_endHour);
+     }
+
+   bool MustCloseFor(const MqlDateTime &dt)
+     {
+      if(!m_closeFriday) return false;
+      return(dt.day_of_week == 5 && dt.hour >= m_fridayCloseHour);
+     }
+
 public:
    void Init(bool enabled, int startHour, int endHour,
              bool closeFriday, int fridayCloseHour)
@@ -57,38 +71,36 @@ public:
       m_closeFriday     = closeFriday;
       m_fridayCloseHour = fridayCloseHour;
 
-      // v2.60: clave por cuenta — persiste el último offset UTC detectado
-      // para poder comparar en el siguiente arranque del EA.
       long login    = AccountInfoInteger(ACCOUNT_LOGIN);
       m_gvOffsetKey = (login != 0) ? StringFormat("GTX_%d_ServerUtcOffset", (int)login) : "";
       if(m_enabled) WarnIfOffsetChanged();
      }
 
-   //--- ¿Está permitido abrir nuevas operaciones?
-   bool IsTradingAllowed()
+   // Evalúa exactamente la lógica productiva para una hora arbitraria de
+   // servidor. Es una seam de test determinística y también útil para
+   // diagnósticos/replays; no expone ni permite mutar estado interno.
+   bool IsTradingAllowedAt(datetime serverTime)
      {
-      if(!m_enabled) return(true);
-
       MqlDateTime dt;
-      TimeToStruct(TimeCurrent(), dt);
-
-      //--- Nunca abrir cerca del cierre semanal
-      if(m_closeFriday && dt.day_of_week == 5 && dt.hour >= m_fridayCloseHour)
-         return(false);
-
-      if(dt.day_of_week == 0 || dt.day_of_week == 6)
-         return(false);
-
-      return(dt.hour >= m_startHour && dt.hour < m_endHour);
+      TimeToStruct(serverTime, dt);
+      return TradingAllowedFor(dt);
      }
 
-   //--- ¿Hay que cerrar todo (viernes tarde)?
+   bool MustCloseAllAt(datetime serverTime)
+     {
+      MqlDateTime dt;
+      TimeToStruct(serverTime, dt);
+      return MustCloseFor(dt);
+     }
+
+   bool IsTradingAllowed()
+     {
+      return IsTradingAllowedAt(TimeCurrent());
+     }
+
    bool MustCloseAll()
      {
-      if(!m_closeFriday) return(false);
-      MqlDateTime dt;
-      TimeToStruct(TimeCurrent(), dt);
-      return(dt.day_of_week == 5 && dt.hour >= m_fridayCloseHour);
+      return MustCloseAllAt(TimeCurrent());
      }
   };
 //+------------------------------------------------------------------+

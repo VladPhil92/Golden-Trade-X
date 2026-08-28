@@ -2,14 +2,11 @@
 //|                                           TestRiskManager.mq5   |
 //|   Golden Trade X — Tests unitarios para CRiskManager            |
 //+------------------------------------------------------------------+
-//  Ejecución: arrastrar el script al gráfico en MetaEditor/MT5.
-//  El resultado aparece en la pestaña Experts del Journal.
-//
-//  NOTA: CalculateLotSize y las comprobaciones de DD/drawdown dependen
-//  de AccountInfoDouble/SymbolInfo — sólo se prueban las partes puras
-//  (conteo de pérdidas consecutivas, multiplicador de tamaño).
-//  Para los tests de integración completos usar el Strategy Tester.
+//  Verifica contratos observables de la API pública. No accede a
+//  miembros private ni modifica encapsulación productiva para facilitar tests.
+//  CalculateLotSize/DD completos permanecen como integration/Strategy Tester.
 //+------------------------------------------------------------------+
+#property strict
 #property script_show_inputs false
 #include <GoldenTradeX/RiskManager.mqh>
 
@@ -22,121 +19,102 @@ void AssertTrue(bool cond, string label)
    else     { g_fail++; Print("  FAIL  ", label); }
   }
 
-void AssertFalse(bool cond, string label)  { AssertTrue(!cond, label); }
-void AssertEq(double a, double b, string label) { AssertTrue(MathAbs(a-b)<1e-9, label); }
-void AssertEqI(long a, long b, string label)    { AssertTrue(a==b, label); }
-
-//+------------------------------------------------------------------+
-// Subclase de test que expone métodos internos para prueba de caja blanca
-//+------------------------------------------------------------------+
-class CRiskManagerTest : public CRiskManager
-  {
-public:
-   int    GetConsecLosses()   { return(m_consecutiveLosses); }
-   double GetSizeMultiplier() { return(GetPositionSizeMultiplier()); }
-
-   // Resetea estado en memoria Y borra la GlobalVariable para evitar
-   // contaminación entre tests en la misma sesión MT5
-   void ResetState()
-     {
-      m_consecutiveLosses = 0;
-      if(m_gvConsecLossKey != "") GlobalVariableDel(m_gvConsecLossKey);
-     }
-  };
+void AssertFalse(bool cond, string label) { AssertTrue(!cond, label); }
+void AssertEq(double a, double b, string label)
+  { AssertTrue(MathAbs(a-b) < 1e-9, label); }
 
 //+------------------------------------------------------------------+
 void OnStart()
   {
    Print("=== TestRiskManager BEGIN ===");
 
-   CRiskManagerTest rm;
-   // magic 0 para evitar colisiones de GlobalVariables en tests
-   rm.Init(1.0, 4.0, 1, 350, 0, 3, 8.0);
-   rm.ResetState();
+   // Magic de test dedicado para no colisionar con presets productivos.
+   const ulong testMagic = 992630;
+   CRiskManager rm;
+   rm.Init(1.0, 4.0, 1, 350, testMagic, 3, 8.0);
 
-   //--- Conteo de perdidas consecutivas
+   // Una ganancia deja el contador observable en estado limpio aunque exista
+   // una GlobalVariable residual de una ejecución anterior.
+   rm.RegisterTradeResult(1.0);
+   AssertEq(rm.GetPositionSizeMultiplier(), 1.0,
+            "Multiplicador = 1.0 con estado limpio");
+   AssertFalse(rm.IsConsecutiveLossLimitReached(),
+               "Limite NO alcanzado con estado limpio");
+
+   //--- Pérdidas consecutivas observadas por sus efectos públicos
    rm.RegisterTradeResult(-10.0);
-   AssertEqI(rm.GetConsecLosses(), 1, "ConsecLoss despues de 1 perdida");
+   AssertEq(rm.GetPositionSizeMultiplier(), 1.0,
+            "Multiplicador = 1.0 con 1 perdida");
+   AssertFalse(rm.IsConsecutiveLossLimitReached(),
+               "Limite NO alcanzado con 1 perdida");
 
    rm.RegisterTradeResult(-5.0);
-   AssertEqI(rm.GetConsecLosses(), 2, "ConsecLoss despues de 2 perdidas");
+   AssertEq(rm.GetPositionSizeMultiplier(), 0.75,
+            "Multiplicador = 0.75 con 2 perdidas");
+   AssertFalse(rm.IsConsecutiveLossLimitReached(),
+               "Limite NO alcanzado con 2 perdidas");
 
    rm.RegisterTradeResult(-1.0);
-   AssertEqI(rm.GetConsecLosses(), 3, "ConsecLoss despues de 3 perdidas");
+   AssertEq(rm.GetPositionSizeMultiplier(), 0.75,
+            "Multiplicador = 0.75 con 3 perdidas");
+   AssertTrue(rm.IsConsecutiveLossLimitReached(),
+              "Limite alcanzado con 3 perdidas");
 
-   // Ganar resetea el contador
    rm.RegisterTradeResult(20.0);
-   AssertEqI(rm.GetConsecLosses(), 0, "ConsecLoss reset tras ganancia");
+   AssertEq(rm.GetPositionSizeMultiplier(), 1.0,
+            "Ganancia restaura multiplicador a 1.0");
+   AssertFalse(rm.IsConsecutiveLossLimitReached(),
+               "Ganancia libera limite de perdidas consecutivas");
 
-   //--- Multiplicador de tamano de posicion
-   rm.ResetState();
-   AssertEq(rm.GetSizeMultiplier(), 1.0, "Multiplicador = 1.0 sin perdidas");
+   //--- Portfolio Risk Cap: API pública e idempotencia
+   CRiskManager portfolio;
+   portfolio.Init(1.0, 4.0, 1, 350, testMagic + 1, 3, 8.0);
+   portfolio.InitPortfolioCap(true, 1.5);
 
-   rm.RegisterTradeResult(-1.0);
-   AssertEq(rm.GetSizeMultiplier(), 1.0, "Multiplicador = 1.0 con 1 perdida");
+   // ReconcilePortfolioRisk() del Init elimina reservas fake huérfanas de
+   // ejecuciones anteriores. Release adicional debe ser idempotente.
+   portfolio.ReleaseOpenRisk(990001);
+   portfolio.ReleaseOpenRisk(990002);
+   AssertEq(portfolio.GetPortfolioRiskUsed(), 0.0,
+            "PortfolioRisk inicia/reconcilia en 0");
 
-   rm.RegisterTradeResult(-2.0);
-   AssertEq(rm.GetSizeMultiplier(), 0.75, "Multiplicador = 0.75 con 2 perdidas");
+   portfolio.RegisterOpenRisk(990001, 0.8);
+   AssertEq(portfolio.GetPortfolioRiskUsed(), 0.8,
+            "PortfolioRisk tras primer registro = 0.8%");
+   AssertEq(portfolio.GetAvailablePortfolioRisk(), 0.7,
+            "Disponible = 1.5 - 0.8 = 0.7%");
 
-   rm.RegisterTradeResult(-3.0);
-   AssertEq(rm.GetSizeMultiplier(), 0.75, "Multiplicador = 0.75 con 3 perdidas");
+   // Re-registrar la MISMA identidad debe reemplazar su reserva, no duplicarla.
+   portfolio.RegisterOpenRisk(990001, 0.6);
+   AssertEq(portfolio.GetPortfolioRiskUsed(), 0.6,
+            "RegisterOpenRisk es idempotente por POSITION_IDENTIFIER");
 
-   rm.RegisterTradeResult(5.0);   // win
-   AssertEq(rm.GetSizeMultiplier(), 1.0, "Multiplicador vuelve a 1.0 tras ganancia");
+   portfolio.RegisterOpenRisk(990002, 0.5);
+   AssertEq(portfolio.GetPortfolioRiskUsed(), 1.1,
+            "PortfolioRisk suma dos identidades = 1.1%");
+   AssertEq(portfolio.GetAvailablePortfolioRisk(), 0.4,
+            "Disponible = 1.5 - 1.1 = 0.4%");
 
-   //--- Limite de perdidas consecutivas
-   rm.ResetState();
-   AssertFalse(rm.IsConsecutiveLossLimitReached(), "Limite NO alcanzado con 0 perdidas");
+   portfolio.ReleaseOpenRisk(990001);
+   AssertEq(portfolio.GetPortfolioRiskUsed(), 0.5,
+            "Liberar primera identidad conserva segunda reserva");
 
-   rm.RegisterTradeResult(-1.0);
-   rm.RegisterTradeResult(-2.0);
-   AssertFalse(rm.IsConsecutiveLossLimitReached(), "Limite NO alcanzado con 2 perdidas");
+   portfolio.ReleaseOpenRisk(990001);
+   AssertEq(portfolio.GetPortfolioRiskUsed(), 0.5,
+            "ReleaseOpenRisk duplicado es idempotente");
 
-   rm.RegisterTradeResult(-3.0);
-   AssertTrue(rm.IsConsecutiveLossLimitReached(), "Limite alcanzado con 3 perdidas (InpMaxConsecLosses=3)");
+   portfolio.ReleaseOpenRisk(990002);
+   AssertEq(portfolio.GetPortfolioRiskUsed(), 0.0,
+            "Liberar todas las reservas vuelve a 0");
 
-   // Tras ganar, el limite se libera
-   rm.RegisterTradeResult(10.0);
-   AssertFalse(rm.IsConsecutiveLossLimitReached(), "Limite liberado tras ganancia");
+   // Cap desactivado: ningún registro debe alterar presupuesto compartido.
+   CRiskManager capOff;
+   capOff.Init(1.0, 4.0, 1, 350, testMagic + 2, 3, 8.0);
+   capOff.InitPortfolioCap(false, 1.5);
+   capOff.RegisterOpenRisk(990003, 0.9);
+   AssertEq(capOff.GetPortfolioRiskUsed(), 0.0,
+            "Cap OFF: RegisterOpenRisk no acumula");
 
-   //--- Portfolio Risk Cap (v2.60) — funciones puras basadas en GlobalVariable
-   {
-      CRiskManagerTest rm2;
-      rm2.Init(1.0, 4.0, 1, 350, 0, 3, 8.0);
-      rm2.InitPortfolioCap(true, 1.5);
-
-      // Limpieza previa: liberar tickets de prueba si quedaron de una corrida anterior
-      rm2.ReleaseOpenRisk(90001);
-      rm2.ReleaseOpenRisk(90002);
-      AssertEq(rm2.GetPortfolioRiskUsed(), 0.0, "PortfolioRisk inicia en 0");
-
-      rm2.RegisterOpenRisk(90001, 0.8);
-      AssertEq(rm2.GetPortfolioRiskUsed(), 0.8, "PortfolioRisk tras 1er registro = 0.8%");
-      AssertEq(rm2.GetAvailablePortfolioRisk(), 0.7, "Disponible = 1.5 - 0.8 = 0.7%");
-
-      rm2.RegisterOpenRisk(90002, 0.5);
-      AssertEq(rm2.GetPortfolioRiskUsed(), 1.3, "PortfolioRisk tras 2do registro = 1.3%");
-      AssertEq(rm2.GetAvailablePortfolioRisk(), 0.2, "Disponible = 1.5 - 1.3 = 0.2%");
-
-      rm2.ReleaseOpenRisk(90001);
-      AssertEq(rm2.GetPortfolioRiskUsed(), 0.5, "PortfolioRisk tras liberar 90001 = 0.5%");
-
-      rm2.ReleaseOpenRisk(90002);
-      AssertEq(rm2.GetPortfolioRiskUsed(), 0.0, "PortfolioRisk tras liberar todo = 0.0%");
-
-      // Liberar un ticket no registrado no debe romper nada ni ir negativo
-      rm2.ReleaseOpenRisk(99999);
-      AssertEq(rm2.GetPortfolioRiskUsed(), 0.0, "Liberar ticket inexistente no afecta el total");
-
-      // Con el cap desactivado, Register/Release no deben tener efecto
-      CRiskManagerTest rm3;
-      rm3.Init(1.0, 4.0, 1, 350, 0, 3, 8.0);
-      rm3.InitPortfolioCap(false, 1.5);
-      rm3.RegisterOpenRisk(90003, 0.9);
-      AssertEq(rm3.GetPortfolioRiskUsed(), 0.0, "Cap OFF: RegisterOpenRisk no acumula");
-   }
-
-   //--- Resumen
    Print("=== TestRiskManager END | PASS=", g_pass, " FAIL=", g_fail, " ===");
    if(g_fail == 0) Print(">>> ALL TESTS PASSED <<<");
    else            Print(">>> ", g_fail, " TEST(S) FAILED <<<");

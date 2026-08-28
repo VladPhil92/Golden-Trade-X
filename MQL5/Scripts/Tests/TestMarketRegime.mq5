@@ -1,14 +1,11 @@
 //+------------------------------------------------------------------+
 //|                                             TestMarketRegime.mq5 |
-//|   Golden Trade X — Tests para MarketRegimeEngine y ConfidenceEng |
+//| Golden Trade X — deterministic regime/confluence/SMC unit tests |
 //+------------------------------------------------------------------+
-//  Pruebas de caja blanca para:
-//    - RegimeToString() — serialización de enum
-//    - CMarketRegimeEngine.Init() — inicialización sin error
-//    - CConfidenceEngine.Compute() — scoring correcto sin señal base
-//    - CConfidenceEngine.Compute() — scoring con señal base, sin SMC/régimen
-//    - CSmartMoneyEngine.Init() — inicialización sin error
-//    - SmcScore() — ponderación correcta de componentes
+//  L2 tests must not require broker connectivity or synchronized market
+//  history. Indicator-handle creation/detection belongs to the later
+//  terminal/Strategy Tester integration gate. This script verifies the
+//  pure production scoring contracts directly.
 //+------------------------------------------------------------------+
 #property script_show_inputs false
 #include <GoldenTradeX/MarketRegimeEngine.mqh>
@@ -24,15 +21,14 @@ void AssertTrue(bool cond, string label)
    else     { g_fail++; Print("  FAIL  ", label); }
   }
 void AssertFalse(bool cond, string label) { AssertTrue(!cond, label); }
-void AssertEq(int a, int b, string label) { AssertTrue(a == b, label + " (got=" + IntegerToString(a) + " exp=" + IntegerToString(b) + ")"); }
-void AssertRange(int val, int lo, int hi, string label) { AssertTrue(val >= lo && val <= hi, label + " (val=" + IntegerToString(val) + ")"); }
+void AssertEq(int a, int b, string label)
+  { AssertTrue(a == b, label + " (got=" + IntegerToString(a) + " exp=" + IntegerToString(b) + ")"); }
 
-//+------------------------------------------------------------------+
 void OnStart()
   {
    Print("=== TestMarketRegime BEGIN ===");
 
-   //--- RegimeToString cubre todos los valores del enum
+   //--- Enum serialization
    AssertTrue(RegimeToString(REGIME_TRENDING_BULL) == "TRENDING_BULL", "RegimeToString TRENDING_BULL");
    AssertTrue(RegimeToString(REGIME_TRENDING_BEAR) == "TRENDING_BEAR", "RegimeToString TRENDING_BEAR");
    AssertTrue(RegimeToString(REGIME_RANGING)       == "RANGING",       "RegimeToString RANGING");
@@ -41,91 +37,76 @@ void OnStart()
    AssertTrue(RegimeToString(REGIME_DISTRIBUTION)  == "DISTRIBUTION",  "RegimeToString DISTRIBUTION");
    AssertTrue(RegimeToString(REGIME_UNKNOWN)       == "UNKNOWN",       "RegimeToString UNKNOWN");
 
-   //--- MarketRegimeEngine: inicialización en símbolo del gráfico
+   //--- Pure regime alignment mapping
    CMarketRegimeEngine regime;
-   bool initOk = regime.Init(_Symbol, PERIOD_M15);
-   AssertTrue(initOk, "MarketRegimeEngine.Init() exitoso");
+   AssertEq(regime.ScoreForRegime(REGIME_TRENDING_BULL, true),  25, "Bull trend BUY = 25");
+   AssertEq(regime.ScoreForRegime(REGIME_TRENDING_BULL, false),  0, "Bull trend SELL = 0");
+   AssertEq(regime.ScoreForRegime(REGIME_TRENDING_BEAR, true),   0, "Bear trend BUY = 0");
+   AssertEq(regime.ScoreForRegime(REGIME_TRENDING_BEAR, false), 25, "Bear trend SELL = 25");
+   AssertEq(regime.ScoreForRegime(REGIME_ACCUMULATION, true),   15, "Accumulation BUY = 15");
+   AssertEq(regime.ScoreForRegime(REGIME_ACCUMULATION, false),  15, "Accumulation SELL = 15");
+   AssertEq(regime.ScoreForRegime(REGIME_RANGING, true),         5, "Ranging = 5");
+   AssertEq(regime.ScoreForRegime(REGIME_DISTRIBUTION, false),   5, "Distribution = 5");
+   AssertEq(regime.ScoreForRegime(REGIME_VOLATILE, true),        0, "Volatile BUY = 0");
+   AssertEq(regime.ScoreForRegime(REGIME_VOLATILE, false),       0, "Volatile SELL = 0");
+   AssertEq(regime.ScoreForRegime(REGIME_UNKNOWN, true),        10, "Unknown neutral = 10");
 
-   // GetLast() devuelve UNKNOWN antes de la primera detección
-   AssertTrue(regime.GetLast() == REGIME_UNKNOWN, "GetLast() = UNKNOWN antes de Detect()");
-
-   // RegimeScore: régimen VOLATILE devuelve 0 en ambas direcciones
-   // (simulado: sobreescribimos m_lastRegime vía Detect con VOLATILE no posible en test,
-   //  así que verificamos la lógica con el método público usando UNKNOWN como proxy)
-   // Solo verificamos que los rangos son correctos para UNKNOWN (10)
-   AssertRange(regime.RegimeScore(true),  0, 25, "RegimeScore(true) en rango 0-25");
-   AssertRange(regime.RegimeScore(false), 0, 25, "RegimeScore(false) en rango 0-25");
-
-   regime.Release();
-
-   //--- ConfidenceEngine: sin señal base → total = 0
+   //--- Confidence: useHtf=false avoids any indicator handle/data dependency.
    CConfidenceEngine conf;
-   AssertTrue(conf.Init(_Symbol, PERIOD_M15, false, 50), "ConfidenceEngine.Init() exitoso");
+   AssertTrue(conf.Init("TEST", PERIOD_M15, false, 50), "ConfidenceEngine pure Init succeeds");
 
    SConfidenceResult r0 = conf.Compute(false, true, 20, 15);
-   AssertEq(r0.total, 0, "Conf sin señal base → total=0");
-   AssertFalse(r0.isBuy,  "Conf sin señal base → isBuy=false");
-   AssertFalse(r0.isSell, "Conf sin señal base → isSell=false");
+   AssertEq(r0.total, 0, "No base signal => total=0");
+   AssertFalse(r0.isBuy,  "No base signal => isBuy=false");
+   AssertFalse(r0.isSell, "No base signal => isSell=false");
 
-   //--- Con señal base + régimen máximo + SMC máximo (sin HTF) → ≥ 80
-   SConfidenceResult r1 = conf.Compute(true, true, 25, 30);
-   AssertTrue(r1.total >= 80, "Conf base+maxReg+maxSMC >= 80 (got=" + IntegerToString(r1.total) + ")");
-   AssertTrue(r1.isBuy,  "Conf isBuy=true cuando señal es BUY");
-   AssertFalse(r1.isSell, "Conf isSell=false cuando señal es BUY");
-   AssertEq(r1.baseSignal,  25, "baseSignal = 25");
-   AssertEq(r1.regimeBonus, 25, "regimeBonus clamp a 25");
-   AssertEq(r1.smcBonus,    30, "smcBonus clamp a 30");
+   SConfidenceResult r1 = conf.Compute(true, true, 25, 30, 20);
+   AssertEq(r1.baseSignal, 25, "baseSignal = 25");
+   AssertEq(r1.regimeBonus, 25, "regimeBonus = 25");
+   AssertEq(r1.smcBonus, 30, "smcBonus = 30");
+   AssertEq(r1.htfBonus, 8, "HTF disabled receives neutral 8");
+   AssertEq(r1.fibBonus, 5, "Fib score 20 maps to 5");
+   AssertEq(r1.total, 93, "Full pure confluence = 93 with HTF neutral");
+   AssertTrue(r1.isBuy, "BUY direction preserved");
 
-   //--- Con régimen 0 y SMC 0 → solo base + ATR bonus ≤ 30
-   SConfidenceResult r2 = conf.Compute(true, false, 0, 0);
-   AssertTrue(r2.total <= 35, "Conf solo base+ATR <= 35 (got=" + IntegerToString(r2.total) + ")");
-   AssertTrue(r2.isSell, "Conf isSell=true cuando señal es SELL");
-
+   SConfidenceResult r2 = conf.Compute(true, false, 0, 0, 0);
+   AssertEq(r2.total, 33, "Base-only with neutral HTF = 33");
+   AssertTrue(r2.isSell, "SELL direction preserved");
    conf.Release();
 
-   //--- SmartMoneyEngine: inicialización
+   //--- Smart Money scoring is pure over SSmcContext; no Init required.
    CSmartMoneyEngine smc;
-   AssertTrue(smc.Init(_Symbol, PERIOD_M15, 50, 20, 40, 1.0), "SmartMoneyEngine.Init() exitoso");
-
-   //--- SmcScore: contexto neutro → 0
    SSmcContext ctx;
    ZeroMemory(ctx);
-   AssertEq(smc.SmcScore(ctx, true),  0, "SmcScore neutro BUY = 0");
-   AssertEq(smc.SmcScore(ctx, false), 0, "SmcScore neutro SELL = 0");
+   AssertEq(smc.SmcScore(ctx, true),  0, "SMC neutral BUY = 0");
+   AssertEq(smc.SmcScore(ctx, false), 0, "SMC neutral SELL = 0");
 
-   //--- BOS bull + FVG bull + OB bull → score alto para BUY
    ctx.bos        = SMC_BULLISH;
    ctx.hasBullFvg = true;
    ctx.hasBullOb  = true;
-   int sBuy = smc.SmcScore(ctx, true);
-   AssertTrue(sBuy >= 25, "SmcScore BOS+FVG+OB BULL >= 25 (got=" + IntegerToString(sBuy) + ")");
+   AssertEq(smc.SmcScore(ctx, true), 28, "BOS+FVG+OB bull BUY = 28");
+   AssertEq(smc.SmcScore(ctx, false), 0, "Bull context contributes 0 to SELL");
 
-   //--- Mismo contexto bull → score 0 para SELL (señal contraria)
-   AssertEq(smc.SmcScore(ctx, false), 0, "SmcScore bull context = 0 para SELL");
-
-   //--- CHOCH bull añade +5
    SSmcContext ctx2;
    ZeroMemory(ctx2);
    ctx2.bos   = SMC_BULLISH;
    ctx2.choch = SMC_BULLISH;
-   int sChoch = smc.SmcScore(ctx2, true);
-   AssertTrue(sChoch >= 17, "SmcScore BOS+CHOCH BULL >= 17 (got=" + IntegerToString(sChoch) + ")");
+   AssertEq(smc.SmcScore(ctx2, true), 17, "BOS+CHOCH bull = 17");
 
-   //--- Liquidez sweep suma +5 en cualquier dirección
    SSmcContext ctx3;
    ZeroMemory(ctx3);
    ctx3.liquiditySweep = true;
-   AssertEq(smc.SmcScore(ctx3, true), 5, "liquiditySweep añade 5 puntos");
+   AssertEq(smc.SmcScore(ctx3, true), 5, "Liquidity sweep = 5");
 
-   //--- Score máximo clamp a 30
    SSmcContext ctxMax;
    ZeroMemory(ctxMax);
-   ctxMax.bos = SMC_BULLISH; ctxMax.choch = SMC_BULLISH;
-   ctxMax.hasBullFvg = true; ctxMax.hasBullOb = true;
+   ctxMax.bos = SMC_BULLISH;
+   ctxMax.choch = SMC_BULLISH;
+   ctxMax.hasBullFvg = true;
+   ctxMax.hasBullOb = true;
    ctxMax.liquiditySweep = true;
-   AssertEq(smc.SmcScore(ctxMax, true), 30, "SmcScore clamp a 30 (max)");
+   AssertEq(smc.SmcScore(ctxMax, true), 30, "SMC score clamps at 30");
 
-   //--- Resumen
    Print("=== TestMarketRegime END | PASS=", g_pass, " FAIL=", g_fail, " ===");
    if(g_fail == 0) Print(">>> ALL TESTS PASSED <<<");
    else            Print(">>> ", g_fail, " TEST(S) FAILED <<<");
