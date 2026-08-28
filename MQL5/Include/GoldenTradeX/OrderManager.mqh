@@ -1,33 +1,52 @@
 //+------------------------------------------------------------------+
 //|                                               OrderManager.mqh   |
-//|   Golden Trade X v2.30 — Gestor de órdenes production-grade      |
+//|   Golden Trade X v2.62 — Gestor de ejecución server-confirmed   |
 //+------------------------------------------------------------------+
 //  Envuelve CTrade con:
-//    1. Retry automático en errores temporales (requote, price_changed,
-//       connection, too_many_requests) — hasta InpOrderMaxRetries intentos.
-//    2. Clasificación de errores: retryable / non-retryable / fatal.
-//       Los errores fatales (NO_MONEY, TRADE_DISABLED, FROZEN) activan
-//       el Kill Switch automáticamente via CRiskManager.
-//    3. Validación obligatoria de SL ≠ 0 y TP ≠ 0 antes de enviar.
-//    4. Seguimiento de slippage (puntos) por operación.
-//    5. Log estructurado de cada intento con timestamp.
+//    1. Confirmación server-side por ResultRetcode/ResultDeal.
+//    2. Identidad separada: order, deal, POSITION_IDENTIFIER y ticket.
+//    3. Retry automático para errores temporales.
+//    4. Clasificación explícita de resultados.
+//    5. Validación de SL/TP y stops_level del broker.
+//    6. Telemetría básica de slippage e intentos.
+//
+//  IMPORTANTE: el bool retornado por CTrade solo indica que las estructuras
+//  básicas pasaron la comprobación local. NUNCA se usa por sí solo como
+//  evidencia de ejecución. El éxito depende del retcode del servidor y,
+//  para ejecuciones de mercado, de un deal confirmado.
 //+------------------------------------------------------------------+
 #property strict
 #include <Trade/Trade.mqh>
 
-// ── Códigos de retorno MQL5 (subset relevante) ─────────────────────
-#define OM_RETCODE_DONE           10009
-#define OM_RETCODE_DONE_PARTIAL   10010
-#define OM_RETCODE_REQUOTE        10004
-#define OM_RETCODE_PRICE_CHANGED  10020
-#define OM_RETCODE_PRICE_OFF      10021
-#define OM_RETCODE_TOO_MANY_REQ   10024
-#define OM_RETCODE_CONNECTION     10031
-#define OM_RETCODE_NO_MONEY       10019
-#define OM_RETCODE_TRADE_DISABLED 10017
-#define OM_RETCODE_FROZEN         10029
-#define OM_RETCODE_MARKET_CLOSED  10018
-#define OM_RETCODE_INVALID_STOPS  10016
+// ── Códigos de retorno MQL5 relevantes ─────────────────────────────
+#define OM_RETCODE_PLACED          10008
+#define OM_RETCODE_DONE            10009
+#define OM_RETCODE_DONE_PARTIAL    10010
+#define OM_RETCODE_TIMEOUT         10012
+#define OM_RETCODE_REQUOTE         10004
+#define OM_RETCODE_PRICE_CHANGED   10020
+#define OM_RETCODE_PRICE_OFF       10021
+#define OM_RETCODE_TOO_MANY_REQ    10024
+#define OM_RETCODE_NO_CHANGES      10025
+#define OM_RETCODE_SERVER_AT_OFF   10026
+#define OM_RETCODE_CLIENT_AT_OFF   10027
+#define OM_RETCODE_LOCKED          10028
+#define OM_RETCODE_CONNECTION      10031
+#define OM_RETCODE_NO_MONEY        10019
+#define OM_RETCODE_TRADE_DISABLED  10017
+#define OM_RETCODE_FROZEN          10029
+#define OM_RETCODE_MARKET_CLOSED   10018
+#define OM_RETCODE_INVALID_STOPS   10016
+
+enum ENUM_OM_RESULT_CLASS
+  {
+   OM_RESULT_SUCCESS = 0,
+   OM_RESULT_PARTIAL_SUCCESS,
+   OM_RESULT_RETRYABLE,
+   OM_RESULT_REJECTED,
+   OM_RESULT_FATAL,
+   OM_RESULT_UNKNOWN
+  };
 
 class COrderManager
   {
@@ -35,11 +54,18 @@ private:
    CTrade*    m_trade;
    int        m_maxRetries;
    int        m_retryDelayMs;
-   double     m_lastSlippage;    // puntos de slippage en la última apertura
-   double     m_totalSlippage;   // acumulado (puntos)
+   double     m_lastSlippage;
+   double     m_totalSlippage;
    int        m_totalAttempts;
    int        m_successCount;
    int        m_failCount;
+
+   // Identidad de la última APERTURA confirmada. Son conceptos distintos.
+   ulong      m_lastOrderTicket;
+   ulong      m_lastDealTicket;
+   ulong      m_lastPositionId;       // POSITION_IDENTIFIER / DEAL_POSITION_ID
+   ulong      m_lastPositionTicket;   // ticket actual de la posición, si existe
+   ENUM_OM_RESULT_CLASS m_lastResultClass;
 
    bool IsRetryable(uint code)
      {
@@ -47,32 +73,30 @@ private:
              code == OM_RETCODE_PRICE_CHANGED ||
              code == OM_RETCODE_PRICE_OFF     ||
              code == OM_RETCODE_TOO_MANY_REQ  ||
-             code == OM_RETCODE_CONNECTION;
+             code == OM_RETCODE_CONNECTION    ||
+             code == OM_RETCODE_TIMEOUT       ||
+             code == OM_RETCODE_LOCKED;
      }
 
    bool IsFatal(uint code)
      {
       return code == OM_RETCODE_NO_MONEY       ||
              code == OM_RETCODE_TRADE_DISABLED ||
-             code == OM_RETCODE_FROZEN;
+             code == OM_RETCODE_SERVER_AT_OFF  ||
+             code == OM_RETCODE_CLIENT_AT_OFF;
      }
 
-   bool IsSuccess(uint code)
+   bool IsDealExecutionCode(uint code)
      {
       return code == OM_RETCODE_DONE || code == OM_RETCODE_DONE_PARTIAL;
      }
 
-   // v2.50: distancia mínima broker para SL/TP (SYMBOL_TRADE_STOPS_LEVEL).
-   // Sin esto, órdenes con stops demasiado cerca devuelven 10016
-   // INVALID_STOPS (no-reintentable) y se descartan en silencio.
    double StopsDistance(string symbol)
      {
       long lvl = SymbolInfoInteger(symbol, SYMBOL_TRADE_STOPS_LEVEL);
       return lvl * SymbolInfoDouble(symbol, SYMBOL_POINT);
      }
 
-   // Ajusta SL/TP a la distancia mínima del broker. BUY se valida contra Bid,
-   // SELL contra Ask (así lo evalúa el servidor). Loguea si tuvo que ajustar.
    void EnforceStopsLevel(string symbol, ENUM_ORDER_TYPE type,
                           double &sl, double &tp)
      {
@@ -102,47 +126,129 @@ private:
       tp = tpAdj;
      }
 
-   void LogAttempt(const string &op, int attempt, uint code)
+   void LogAttempt(const string &op, int attempt, bool basicOk, uint code)
      {
       Print("OrderManager [", TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS), "] ",
             op, " attempt=", attempt,
-            " retcode=", code, " comment=", m_trade.ResultComment());
+            " basic_ok=", basicOk ? "true" : "false",
+            " retcode=", code, " class=", (int)ClassifyRetcode(code),
+            " comment=", m_trade.ResultComment());
+     }
+
+   void ResetLastOpenIdentity()
+     {
+      m_lastOrderTicket    = 0;
+      m_lastDealTicket     = 0;
+      m_lastPositionId     = 0;
+      m_lastPositionTicket = 0;
+     }
+
+   // Resuelve el ticket actual desde POSITION_IDENTIFIER. Esto funciona tanto
+   // en hedge como en netting y evita asumir ResultOrder()==position ticket.
+   ulong FindPositionTicketByIdentifier(ulong positionId, string symbol = "")
+     {
+      if(positionId == 0) return 0;
+      for(int i = PositionsTotal() - 1; i >= 0; i--)
+        {
+         ulong ticket = PositionGetTicket(i);
+         if(ticket == 0) continue;
+         if((ulong)PositionGetInteger(POSITION_IDENTIFIER) != positionId) continue;
+         if(symbol != "" && PositionGetString(POSITION_SYMBOL) != symbol) continue;
+         return ticket;
+        }
+      return 0;
+     }
+
+   bool CaptureOpenIdentity(string symbol)
+     {
+      m_lastDealTicket  = m_trade.ResultDeal();
+      m_lastOrderTicket = m_trade.ResultOrder();
+      if(m_lastDealTicket == 0) return false;
+
+      if(!HistoryDealSelect(m_lastDealTicket))
+        {
+         // Refrescar historial por si el terminal todavía no lo tenía seleccionado.
+         HistorySelect(TimeCurrent() - 86400, TimeCurrent() + 60);
+         if(!HistoryDealSelect(m_lastDealTicket)) return false;
+        }
+
+      m_lastPositionId = (ulong)HistoryDealGetInteger(m_lastDealTicket, DEAL_POSITION_ID);
+      if(m_lastPositionId == 0) return false;
+
+      m_lastPositionTicket = FindPositionTicketByIdentifier(m_lastPositionId, symbol);
+      // El deal + POSITION_IDENTIFIER son evidencia suficiente de ejecución.
+      // El ticket actual puede no estar disponible si la posición ya se cerró
+      // inmediatamente o si el estado del terminal aún no se refrescó.
+      return true;
+     }
+
+   bool IsOpenServerConfirmed(uint code, string symbol)
+     {
+      if(!IsDealExecutionCode(code)) return false;
+      if(m_trade.ResultDeal() == 0 || m_trade.ResultVolume() <= 0) return false;
+      return CaptureOpenIdentity(symbol);
+     }
+
+   bool IsModifyServerConfirmed(uint code)
+     {
+      return code == OM_RETCODE_DONE || code == OM_RETCODE_NO_CHANGES;
+     }
+
+   bool IsCloseServerConfirmed(uint code)
+     {
+      return IsDealExecutionCode(code) && m_trade.ResultDeal() != 0;
      }
 
 public:
    void Init(CTrade* tradePtr, int maxRetries = 3, int retryDelayMs = 500)
      {
-      m_trade         = tradePtr;
-      m_maxRetries    = maxRetries;
-      m_retryDelayMs  = retryDelayMs;
-      m_lastSlippage  = 0;
-      m_totalSlippage = 0;
-      m_totalAttempts = 0;
-      m_successCount  = 0;
-      m_failCount     = 0;
+      m_trade          = tradePtr;
+      m_maxRetries     = maxRetries;
+      m_retryDelayMs   = retryDelayMs;
+      m_lastSlippage   = 0;
+      m_totalSlippage  = 0;
+      m_totalAttempts  = 0;
+      m_successCount   = 0;
+      m_failCount      = 0;
+      m_lastResultClass = OM_RESULT_UNKNOWN;
+      ResetLastOpenIdentity();
      }
 
-   // ── Abrir posición (con validación + retry) ───────────────────────
-   // Retorna true solo si el orden fue CONFIRMADA por el servidor.
-   // Rechaza hardcoded si sl==0 o tp==0.
+   // Clasificación pública para tests y telemetría. El éxito final de una
+   // operación requiere además los artefactos server-side específicos.
+   ENUM_OM_RESULT_CLASS ClassifyRetcode(uint code)
+     {
+      if(code == OM_RETCODE_DONE)         return OM_RESULT_SUCCESS;
+      if(code == OM_RETCODE_DONE_PARTIAL) return OM_RESULT_PARTIAL_SUCCESS;
+      if(IsRetryable(code))                return OM_RESULT_RETRYABLE;
+      if(IsFatal(code))                    return OM_RESULT_FATAL;
+      if(code == OM_RETCODE_INVALID_STOPS || code == OM_RETCODE_MARKET_CLOSED ||
+         code == OM_RETCODE_FROZEN || code == OM_RETCODE_PLACED ||
+         code == OM_RETCODE_NO_CHANGES)
+         return OM_RESULT_REJECTED;
+      return OM_RESULT_UNKNOWN;
+     }
+
+   bool IsRetryableCode(uint code) { return IsRetryable(code); }
+   bool IsFatalCode(uint code)     { return IsFatal(code); }
+
    bool OpenPosition(string symbol, ENUM_ORDER_TYPE type, double lots,
                      double price, double sl, double tp, string comment = "")
      {
-      // Validación obligatoria: SL y TP deben estar presentes
+      ResetLastOpenIdentity();
+      m_lastResultClass = OM_RESULT_UNKNOWN;
+
       if(sl == 0)
         { Print("OrderManager: REJECTED — SL=0. Orden no enviada (riesgo indefinido)."); return false; }
       if(tp == 0)
         { Print("OrderManager: REJECTED — TP=0. Orden no enviada (objetivo indefinido)."); return false; }
 
-      // Validar que SL y TP estén en el lado correcto
-      if(type == ORDER_TYPE_BUY  && (sl >= price || tp <= price))
+      if(type == ORDER_TYPE_BUY && (sl >= price || tp <= price))
         { Print("OrderManager: REJECTED BUY — SL debe ser < price y TP > price."); return false; }
       if(type == ORDER_TYPE_SELL && (sl <= price || tp >= price))
         { Print("OrderManager: REJECTED SELL — SL debe ser > price y TP < price."); return false; }
 
-      // v2.50: respetar la distancia mínima de stops del broker
       EnforceStopsLevel(symbol, type, sl, tp);
-
       int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
 
       for(int attempt = 1; attempt <= m_maxRetries + 1; attempt++)
@@ -150,36 +256,42 @@ public:
          if(attempt > 1) Sleep(m_retryDelayMs * (attempt - 1));
 
          m_totalAttempts++;
-         bool ok = m_trade.PositionOpen(symbol, type, lots, price,
-                                        NormalizeDouble(sl, digits),
-                                        NormalizeDouble(tp, digits),
-                                        comment);
+         bool basicOk = m_trade.PositionOpen(symbol, type, lots, price,
+                                             NormalizeDouble(sl, digits),
+                                             NormalizeDouble(tp, digits),
+                                             comment);
          uint code = m_trade.ResultRetcode();
-         LogAttempt("OPEN", attempt, code);
+         m_lastResultClass = ClassifyRetcode(code);
+         LogAttempt("OPEN", attempt, basicOk, code);
 
-         if(IsSuccess(code) || ok)
+         if(IsOpenServerConfirmed(code, symbol))
            {
             double execPrice = m_trade.ResultPrice();
-            m_lastSlippage   = (execPrice > 0)
-                               ? MathAbs(execPrice - price) / SymbolInfoDouble(symbol, SYMBOL_POINT)
-                               : 0;
+            m_lastSlippage = (execPrice > 0)
+                             ? MathAbs(execPrice - price) / SymbolInfoDouble(symbol, SYMBOL_POINT)
+                             : 0;
             m_totalSlippage += m_lastSlippage;
             m_successCount++;
-            Print("OrderManager: OPEN CONFIRMED ticket=", m_trade.ResultOrder(),
+            Print("OrderManager: OPEN SERVER-CONFIRMED order=", m_lastOrderTicket,
+                  " deal=", m_lastDealTicket,
+                  " position_id=", m_lastPositionId,
+                  " position_ticket=", m_lastPositionTicket,
                   " exec=", execPrice, " slip=", m_lastSlippage, "pts");
             return true;
            }
 
+         // Nunca convertir basicOk=true en éxito: solo informa validación local.
          if(IsFatal(code))
            {
-            Print("OrderManager: FATAL retcode=", code, " — Kill Switch activado.");
+            Print("OrderManager: FATAL retcode=", code, " — caller debe activar Kill Switch.");
             m_failCount++;
-            return false;   // Caller debe activar kill switch
+            return false;
            }
 
          if(!IsRetryable(code) || attempt == m_maxRetries + 1)
            {
-            Print("OrderManager: FAILED non-retryable retcode=", code);
+            Print("OrderManager: FAILED server not confirmed retcode=", code,
+                  " basic_ok=", basicOk ? "true" : "false");
             m_failCount++;
             return false;
            }
@@ -191,14 +303,12 @@ public:
       return false;
      }
 
-   // ── Modificar SL/TP (con retry) ──────────────────────────────────
    bool ModifyPosition(ulong ticket, double newSL, double newTP)
      {
       if(!PositionSelectByTicket(ticket)) return false;
-      string symbol  = PositionGetString(POSITION_SYMBOL);
-      int    digits  = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
+      string symbol = PositionGetString(POSITION_SYMBOL);
+      int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
 
-      // v2.50: respetar la distancia mínima de stops del broker en trailing/BE
       long posType = PositionGetInteger(POSITION_TYPE);
       EnforceStopsLevel(symbol,
                         (posType == POSITION_TYPE_BUY) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL,
@@ -209,18 +319,22 @@ public:
          if(attempt > 1) Sleep(m_retryDelayMs);
 
          m_totalAttempts++;
-         bool ok   = m_trade.PositionModify(ticket,
-                                            NormalizeDouble(newSL, digits),
-                                            NormalizeDouble(newTP, digits));
+         bool basicOk = m_trade.PositionModify(ticket,
+                                               NormalizeDouble(newSL, digits),
+                                               NormalizeDouble(newTP, digits));
          uint code = m_trade.ResultRetcode();
-         if(IsSuccess(code) || ok) { m_successCount++; return true; }
+         m_lastResultClass = ClassifyRetcode(code);
+         LogAttempt("MODIFY", attempt, basicOk, code);
+
+         if(IsModifyServerConfirmed(code))
+           { m_successCount++; return true; }
          if(IsFatal(code) || !IsRetryable(code) || attempt == m_maxRetries + 1)
-           { LogAttempt("MODIFY", attempt, code); m_failCount++; return false; }
+           { m_failCount++; return false; }
         }
+      m_failCount++;
       return false;
      }
 
-   // ── Cerrar posición completa (con retry) ─────────────────────────
    bool ClosePosition(ulong ticket)
      {
       for(int attempt = 1; attempt <= m_maxRetries + 1; attempt++)
@@ -228,16 +342,20 @@ public:
          if(attempt > 1) Sleep(m_retryDelayMs);
 
          m_totalAttempts++;
-         bool ok   = m_trade.PositionClose(ticket);
+         bool basicOk = m_trade.PositionClose(ticket);
          uint code = m_trade.ResultRetcode();
-         if(IsSuccess(code) || ok) { m_successCount++; return true; }
+         m_lastResultClass = ClassifyRetcode(code);
+         LogAttempt("CLOSE", attempt, basicOk, code);
+
+         if(IsCloseServerConfirmed(code))
+           { m_successCount++; return true; }
          if(IsFatal(code) || !IsRetryable(code) || attempt == m_maxRetries + 1)
-           { LogAttempt("CLOSE", attempt, code); m_failCount++; return false; }
+           { m_failCount++; return false; }
         }
+      m_failCount++;
       return false;
      }
 
-   // ── Cierre parcial (con retry) ────────────────────────────────────
    bool ClosePartial(ulong ticket, double lots)
      {
       for(int attempt = 1; attempt <= m_maxRetries + 1; attempt++)
@@ -245,33 +363,43 @@ public:
          if(attempt > 1) Sleep(m_retryDelayMs);
 
          m_totalAttempts++;
-         bool ok   = m_trade.PositionClosePartial(ticket, lots);
+         bool basicOk = m_trade.PositionClosePartial(ticket, lots);
          uint code = m_trade.ResultRetcode();
-         if(IsSuccess(code) || ok) { m_successCount++; return true; }
+         m_lastResultClass = ClassifyRetcode(code);
+         LogAttempt("CLOSE_PARTIAL", attempt, basicOk, code);
+
+         if(IsCloseServerConfirmed(code))
+           { m_successCount++; return true; }
          if(IsFatal(code) || !IsRetryable(code) || attempt == m_maxRetries + 1)
-           { LogAttempt("CLOSE_PARTIAL", attempt, code); m_failCount++; return false; }
+           { m_failCount++; return false; }
         }
+      m_failCount++;
       return false;
      }
 
-   // ── Detectar error fatal en última operación ──────────────────────
    bool LastErrorIsFatal()
+     { return IsFatal(m_trade.ResultRetcode()); }
+
+   // Identidad explícita de la última apertura confirmada.
+   ulong GetLastOrderTicket()        const { return m_lastOrderTicket; }
+   ulong GetLastDealTicket()         const { return m_lastDealTicket; }
+   ulong GetLastPositionIdentifier() const { return m_lastPositionId; }
+   ulong GetLastPositionTicket()     const { return m_lastPositionTicket; }
+   ENUM_OM_RESULT_CLASS GetLastResultClass() const { return m_lastResultClass; }
+
+   // Reintenta resolver el ticket actual desde el identificador estable.
+   ulong ResolveLastPositionTicket(string symbol = "")
      {
-      uint rc = m_trade.ResultRetcode();
-      return IsFatal(rc);
+      if(m_lastPositionId == 0) return 0;
+      m_lastPositionTicket = FindPositionTicketByIdentifier(m_lastPositionId, symbol);
+      return m_lastPositionTicket;
      }
 
-   // v2.60: ticket de la posición recién confirmada (llamar justo tras un
-   // OpenPosition() exitoso). En cuentas hedge, ResultOrder() coincide con
-   // el ticket de la posición para órdenes de mercado nuevas.
-   ulong GetLastPositionTicket() const { return m_trade.ResultOrder(); }
-
-   // ── Estadísticas de ejecución ─────────────────────────────────────
-   double GetLastSlippage()   const { return m_lastSlippage; }
-   double GetAvgSlippage()    const
+   double GetLastSlippage() const { return m_lastSlippage; }
+   double GetAvgSlippage() const
      { return m_successCount > 0 ? m_totalSlippage / m_successCount : 0; }
-   int    GetSuccessCount()   const { return m_successCount; }
-   int    GetFailCount()      const { return m_failCount; }
+   int GetSuccessCount() const { return m_successCount; }
+   int GetFailCount() const    { return m_failCount; }
 
    void PrintStats()
      {
