@@ -1,22 +1,17 @@
 //+------------------------------------------------------------------+
 //|                                                TradeLogger.mqh   |
-//|   Golden Trade X — Registro de operaciones en CSV               |
+//|   Golden Trade X v2.62 — Registro auditable por posición        |
 //+------------------------------------------------------------------+
-//  Escribe una línea CSV por cada posición cerrada en:
-//    <Terminal_Files>/GoldenTradeX_{login}_{symbol}_{year}.csv
+//  Una línea CSV por posición cerrada en Common\Files.
 //
-//  Columnas: CloseDate, CloseTime, PositionID, Symbol, Type, Lots,
-//            OpenPrice, InitialSL, InitialTP, ClosePrice,
-//            ProfitLoss, Commission, RMultiple,
-//            OpenDate, OpenTime, Comment          (v2.50)
+//  v2.62: RMultiple ya NO se deduce del precio del último deal. Con cierres
+//  parciales eso era matemáticamente incorrecto. Ahora:
 //
-//  v2.50: OpenDate/OpenTime permiten construir features SIN leakage temporal
-//  (la hora de cierre no se conoce al decidir la entrada) y Comment lleva
-//  el Confidence Score y el régimen ("GoldenTradeX|Conf=72|Reg=TRENDING_BULL")
-//  que consume scripts/ml_pipeline.py.
+//       Realized R = Total Net P/L / Initial Monetary Risk
 //
-//  Uso desde OnTradeTransaction del EA principal:
-//    tradeLogger.LogTrade(dealTicket);
+//  Initial Monetary Risk se reconstruye desde entry price + InitialSL +
+//  volumen inicial mediante OrderCalcProfit(), respetando especificaciones
+//  reales del símbolo/broker. P/L neto agrega todos los cierres de la posición.
 //+------------------------------------------------------------------+
 #property strict
 
@@ -26,26 +21,16 @@ private:
    bool   m_enabled;
    ulong  m_magic;
 
-   // Calcula el R-múltiplo: +1.5 = ganó 1.5R, -1.0 = perdió 1R
-   double CalcRMultiple(bool isBuy, double entry, double close, double initialSL)
-     {
-      double slDist = MathAbs(entry - initialSL);
-      if(slDist <= 0) return(0);
-      return(isBuy ? (close - entry) / slDist
-                   : (entry - close) / slDist);
-     }
-
-   // Abre o crea el archivo CSV, escribiendo el header si es nuevo
    int OpenFile(string filename)
      {
       bool exists = FileIsExist(filename, FILE_COMMON);
-      int flags   = FILE_TXT | FILE_ANSI | FILE_COMMON;
+      int flags = FILE_TXT | FILE_ANSI | FILE_COMMON;
 
       int handle = exists
                    ? FileOpen(filename, FILE_READ | FILE_WRITE | flags)
                    : FileOpen(filename, FILE_WRITE | flags);
 
-      if(handle == INVALID_HANDLE) return(INVALID_HANDLE);
+      if(handle == INVALID_HANDLE) return INVALID_HANDLE;
 
       if(!exists)
          FileWriteString(handle,
@@ -57,119 +42,164 @@ private:
         {
          Print("TradeLogger: FileSeek falló en '", filename, "' | Error: ", GetLastError());
          FileClose(handle);
-         return(INVALID_HANDLE);
+         return INVALID_HANDLE;
         }
 
-      return(handle);
+      return handle;
      }
 
-   // Busca el deal de entrada de una posición para obtener precio, niveles,
-   // hora de apertura y comment (v2.50)
-   bool GetEntryData(ulong positionId, double &entryPrice,
-                     double &initialSL, double &initialTP,
+   bool GetEntryData(ulong positionId, string symbol,
+                     double &entryPrice, double &initialSL, double &initialTP,
                      datetime &openTime, string &comment)
      {
-      entryPrice = 0; initialSL = 0; initialTP = 0; openTime = 0; comment = "";
-      if(!HistorySelectByPosition(positionId)) return(false);
+      entryPrice = 0;
+      initialSL = 0;
+      initialTP = 0;
+      openTime = 0;
+      comment = "";
+      if(!HistorySelectByPosition(positionId)) return false;
 
+      datetime earliest = 0;
       for(int i = 0; i < HistoryDealsTotal(); i++)
         {
          ulong ticket = HistoryDealGetTicket(i);
          if(ticket == 0) continue;
-         if(HistoryDealGetInteger(ticket, DEAL_ENTRY) != DEAL_ENTRY_IN) continue;
-         entryPrice = HistoryDealGetDouble(ticket, DEAL_PRICE);
-         initialSL  = HistoryDealGetDouble(ticket, DEAL_SL);
-         initialTP  = HistoryDealGetDouble(ticket, DEAL_TP);
-         openTime   = (datetime)HistoryDealGetInteger(ticket, DEAL_TIME);
-         comment    = HistoryDealGetString(ticket, DEAL_COMMENT);
-         // El CSV usa coma como separador: sanear el comment
+         if(HistoryDealGetInteger(ticket, DEAL_MAGIC) != (long)m_magic) continue;
+         if(HistoryDealGetString(ticket, DEAL_SYMBOL) != symbol) continue;
+
+         long entry = HistoryDealGetInteger(ticket, DEAL_ENTRY);
+         if(entry != DEAL_ENTRY_IN && entry != DEAL_ENTRY_INOUT) continue;
+
+         datetime t = (datetime)HistoryDealGetInteger(ticket, DEAL_TIME);
+         if(earliest != 0 && t >= earliest) continue;
+
+         double price = HistoryDealGetDouble(ticket, DEAL_PRICE);
+         double sl = HistoryDealGetDouble(ticket, DEAL_SL);
+         if(price <= 0) continue;
+
+         earliest = t;
+         entryPrice = price;
+         initialSL = sl;
+         initialTP = HistoryDealGetDouble(ticket, DEAL_TP);
+         openTime = t;
+         comment = HistoryDealGetString(ticket, DEAL_COMMENT);
          StringReplace(comment, ",", ";");
-         return(true);
         }
-      return(false);
+      return entryPrice > 0;
      }
 
-   // v2.51: totales de la POSICIÓN — con Partial TP la posición genera
-   // varios deals de salida; loguear solo el último ocultaba la mitad
-   // del P/L al análisis. Retorna volumen de entrada, P/L total y
-   // comisión+swap total de todos los deals de salida.
+   // Totales completos de la posición para los deals atribuibles a este EA.
+   // Con partial exits suma todos los cierres; entryVolume conserva el volumen
+   // inicialmente expuesto por Golden Trade X.
    bool GetPositionTotals(ulong positionId, double &entryVolume,
                           double &totalProfit, double &totalCommSwap)
      {
-      entryVolume = 0; totalProfit = 0; totalCommSwap = 0;
-      if(!HistorySelectByPosition(positionId)) return(false);
+      entryVolume = 0;
+      totalProfit = 0;
+      totalCommSwap = 0;
+      if(!HistorySelectByPosition(positionId)) return false;
 
       for(int i = 0; i < HistoryDealsTotal(); i++)
         {
          ulong ticket = HistoryDealGetTicket(i);
          if(ticket == 0) continue;
+         if(HistoryDealGetInteger(ticket, DEAL_MAGIC) != (long)m_magic) continue;
+
          long entry = HistoryDealGetInteger(ticket, DEAL_ENTRY);
          if(entry == DEAL_ENTRY_IN)
             entryVolume += HistoryDealGetDouble(ticket, DEAL_VOLUME);
          else if(entry == DEAL_ENTRY_OUT || entry == DEAL_ENTRY_INOUT)
            {
-            totalProfit   += HistoryDealGetDouble(ticket, DEAL_PROFIT);
+            totalProfit += HistoryDealGetDouble(ticket, DEAL_PROFIT);
             totalCommSwap += HistoryDealGetDouble(ticket, DEAL_COMMISSION)
-                           + HistoryDealGetDouble(ticket, DEAL_SWAP);
+                           + HistoryDealGetDouble(ticket, DEAL_SWAP)
+                           + HistoryDealGetDouble(ticket, DEAL_FEE);
            }
         }
-      return(entryVolume > 0);
+      return entryVolume > 0;
+     }
+
+   double CalcInitialRiskMoney(string symbol, bool isBuy, double entryPrice,
+                               double initialSL, double initialVolume)
+     {
+      if(entryPrice <= 0 || initialSL <= 0 || initialVolume <= 0) return 0.0;
+      if(isBuy && initialSL >= entryPrice) return 0.0;
+      if(!isBuy && initialSL <= entryPrice) return 0.0;
+
+      double pnlAtStop = 0.0;
+      ENUM_ORDER_TYPE type = isBuy ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+      if(!OrderCalcProfit(type, symbol, initialVolume,
+                          entryPrice, initialSL, pnlAtStop))
+        {
+         Print("TradeLogger: OrderCalcProfit no pudo reconstruir Initial Risk | symbol=",
+               symbol, " error=", GetLastError());
+         return 0.0;
+        }
+      return MathAbs(pnlAtStop);
      }
 
 public:
    void Init(bool enabled, ulong magic)
      {
       m_enabled = enabled;
-      m_magic   = magic;
+      m_magic = magic;
      }
 
-   //--- Registrar un deal de cierre en el CSV
    void LogTrade(ulong exitDealTicket)
      {
       if(!m_enabled) return;
       if(!HistoryDealSelect(exitDealTicket)) return;
 
-      // Verificar que el deal pertenece a este EA
-      if(HistoryDealGetInteger(exitDealTicket, DEAL_MAGIC) != (long)m_magic) return;
+      // El caller debe haber establecido que la posición pertenece a GTX.
+      // Mantener esta comprobación para cierres normales del propio EA.
+      long exitMagic = HistoryDealGetInteger(exitDealTicket, DEAL_MAGIC);
+      if(exitMagic != (long)m_magic)
+        {
+         Print("TradeLogger: exit deal ", exitDealTicket,
+               " tiene magic distinto (", exitMagic,
+               "). Se intentará reconstruir por POSITION_ID.");
+        }
 
       long exitType = HistoryDealGetInteger(exitDealTicket, DEAL_TYPE);
       if(exitType != DEAL_TYPE_BUY && exitType != DEAL_TYPE_SELL) return;
 
-      // Datos del deal de salida
-      ulong    positionId = HistoryDealGetInteger(exitDealTicket, DEAL_POSITION_ID);
-      datetime closeTime  = (datetime)HistoryDealGetInteger(exitDealTicket, DEAL_TIME);
-      double   lots       = HistoryDealGetDouble(exitDealTicket, DEAL_VOLUME);
-      double   closePrice = HistoryDealGetDouble(exitDealTicket, DEAL_PRICE);
-      double   profit     = HistoryDealGetDouble(exitDealTicket, DEAL_PROFIT);
-      double   commission = HistoryDealGetDouble(exitDealTicket, DEAL_COMMISSION);
-      string   symbol     = HistoryDealGetString(exitDealTicket, DEAL_SYMBOL);
+      ulong positionId = (ulong)HistoryDealGetInteger(exitDealTicket, DEAL_POSITION_ID);
+      datetime closeTime = (datetime)HistoryDealGetInteger(exitDealTicket, DEAL_TIME);
+      double closePrice = HistoryDealGetDouble(exitDealTicket, DEAL_PRICE);
+      string symbol = HistoryDealGetString(exitDealTicket, DEAL_SYMBOL);
 
-      // Datos del deal de entrada
-      double   entryPrice, initialSL, initialTP;
+      double entryPrice, initialSL, initialTP;
       datetime openTime;
-      string   entryComment;
-      GetEntryData(positionId, entryPrice, initialSL, initialTP,
-                   openTime, entryComment);
-
-      // v2.51: totales de la posición (incluye deals de cierre parcial)
-      double entryVol, totProfit, totCommSwap;
-      if(GetPositionTotals(positionId, entryVol, totProfit, totCommSwap))
+      string entryComment;
+      if(!GetEntryData(positionId, symbol, entryPrice, initialSL, initialTP,
+                       openTime, entryComment))
         {
-         lots       = entryVol;
-         profit     = totProfit;
-         commission = totCommSwap;
+         Print("TradeLogger: no se pudo reconstruir entrada para position_id=", positionId);
+         return;
         }
 
-      // BUY position = exited by a SELL deal; SELL position = exited by a BUY deal
-      bool   isBuy   = (exitType == DEAL_TYPE_SELL);
-      double rMult   = CalcRMultiple(isBuy, entryPrice, closePrice, initialSL);
+      double entryVol, totalProfit, totalCosts;
+      if(!GetPositionTotals(positionId, entryVol, totalProfit, totalCosts))
+        {
+         Print("TradeLogger: no se pudieron reconstruir totales para position_id=", positionId);
+         return;
+        }
+
+      // BUY position exits through SELL deal; SELL exits through BUY deal.
+      bool isBuy = (exitType == DEAL_TYPE_SELL);
       string typeStr = isBuy ? "BUY" : "SELL";
+      double initialRiskMoney = CalcInitialRiskMoney(symbol, isBuy, entryPrice,
+                                                     initialSL, entryVol);
+      double netPnl = totalProfit + totalCosts;
+      double realizedR = initialRiskMoney > 0 ? netPnl / initialRiskMoney : 0.0;
+      if(initialRiskMoney <= 0)
+         Print("TradeLogger: Initial Risk inválido para position_id=", positionId,
+               " — RMultiple se registra 0.0 (fail-safe, no inventado).");
 
       MqlDateTime dt;
       TimeToStruct(closeTime, dt);
 
-      // Nombre de archivo incluye cuenta, símbolo y año para evitar archivos gigantes
-      long   login    = AccountInfoInteger(ACCOUNT_LOGIN);
+      long login = AccountInfoInteger(ACCOUNT_LOGIN);
       string filename = StringFormat("GoldenTradeX_%d_%s_%d.csv",
                                      (int)login, symbol, dt.year);
 
@@ -184,12 +214,12 @@ public:
       TimeToStruct(openTime, odt);
 
       string line = StringFormat(
-        "%04d-%02d-%02d,%02d:%02d:%02d,%s,%s,%s,%.2f,%.5f,%.5f,%.5f,%.5f,%.2f,%.2f,%.2f,"
+        "%04d-%02d-%02d,%02d:%02d:%02d,%s,%s,%s,%.2f,%.5f,%.5f,%.5f,%.5f,%.2f,%.2f,%.4f,"
         "%04d-%02d-%02d,%02d:%02d:%02d,%s\n",
         dt.year, dt.mon, dt.day, dt.hour, dt.min, dt.sec,
         IntegerToString((long)positionId), symbol, typeStr,
-        lots, entryPrice, initialSL, initialTP, closePrice,
-        profit, commission, rMult,
+        entryVol, entryPrice, initialSL, initialTP, closePrice,
+        totalProfit, totalCosts, realizedR,
         odt.year, odt.mon, odt.day, odt.hour, odt.min, odt.sec,
         entryComment
       );
