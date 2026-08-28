@@ -1,4 +1,4 @@
-name: MQL5 Windows Build
+name: MQL5 Windows Verification
 
 on:
   push:
@@ -7,16 +7,20 @@ on:
     branches: [main]
 
 jobs:
-  mql5-compile:
-    name: MQL5 compile (MetaEditor)
+  mql5-verification:
+    name: MQL5 compile + automated tests (MetaTrader)
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v7
 
       - name: Install MetaTrader 5 and compile GoldenTradeX.mq5
         shell: pwsh
         run: .github/scripts/compile-mql5.ps1
+
+      - name: Compile and execute MQL5 test suite
+        shell: pwsh
+        run: .github/scripts/verify-mql5-tests.ps1
 
       - name: Upload MetaEditor build evidence
         if: always()
@@ -27,3 +31,11 @@ jobs:
           path: |
             ${{ env.GTX_COMPILE_LOG }}
             ${{ env.GTX_EX5 }}
+
+      - name: Upload MQL5 test evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mql5-automated-tests
+          if-no-files-found: warn
+          path: ${{ env.GTX_MQL5_TEST_EVIDENCE }}
