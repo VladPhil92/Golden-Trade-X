@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   dependency-integrity:
     name: Dependency integrity
@@ -28,6 +31,21 @@ jobs:
         run: python -m compileall -q scripts tests
       - name: Environment smoke tests
         run: pytest tests/test_environment.py -v --tb=short
+
+  security-scan:
+    name: Tracked secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Scan tracked repository content
+        run: python scripts/security_scan.py
+      - name: Scanner regression tests
+        run: pytest tests/test_security_scan.py -v --tb=short
 
   python-lint:
     name: Python lint (ruff)
@@ -109,6 +127,7 @@ jobs:
             "scripts/live_monitor.py" \
             "scripts/mql5_lint.py" \
             "scripts/performance_report.py" \
+            "scripts/security_scan.py" \
             "tests/test_backtest_analysis.py" \
             "tests/test_backtest_io.py" \
             "tests/test_performance_report.py" \
@@ -117,6 +136,12 @@ jobs:
             "tests/test_ml_pipeline.py" \
             "tests/test_mql5_lint.py" \
             "tests/test_validate_set.py" \
+            "tests/test_security_scan.py" \
+            ".github/scripts/compile-mql5.ps1" \
+            ".github/scripts/verify-mql5-tests.ps1" \
+            ".github/CODEOWNERS" \
+            "CONTRIBUTING.md" \
+            "SECURITY.md" \
             ".coveragerc" \
             ".env.example" \
             "dashboard/index.html" \
