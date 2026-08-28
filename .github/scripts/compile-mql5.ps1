@@ -8,6 +8,10 @@ $source = Join-Path $env:GITHUB_WORKSPACE "MQL5\Experts\GoldenTradeX\GoldenTrade
 $includeRoot = Join-Path $env:GITHUB_WORKSPACE "MQL5"
 $compileLog = Join-Path $env:RUNNER_TEMP "GoldenTradeX-compile.log"
 
+# Export evidence paths up-front so the artifact step can collect diagnostics
+# even when installation/compilation fails before the EX5 exists.
+"GTX_COMPILE_LOG=$compileLog" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
 Write-Host "Downloading official MetaTrader 5 installer..."
 Invoke-WebRequest -Uri $installerUrl -OutFile $installer -UseBasicParsing
 
@@ -16,12 +20,17 @@ $install = Start-Process -FilePath $installer -ArgumentList @(
     "/auto",
     "/path:`"$installDir`""
 ) -PassThru -Wait
+Write-Host "MetaTrader installer process exit code: $($install.ExitCode)"
 if ($install.ExitCode -ne 0) {
-    throw "MetaTrader 5 installer exited with code $($install.ExitCode)"
+    Write-Warning "Installer returned non-zero. The gate will verify the installed MetaEditor executable instead of trusting the installer exit code."
 }
 
 # The installer may launch the terminal after setup. CI only needs MetaEditor.
 Get-Process terminal64, terminal -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
+$searchRoots = @($installDir)
+if ($env:ProgramFiles) { $searchRoots += $env:ProgramFiles }
+if (${env:ProgramFiles(x86)}) { $searchRoots += ${env:ProgramFiles(x86)} }
 
 $metaEditorCandidates = @(
     (Join-Path $installDir "metaeditor64.exe"),
@@ -31,11 +40,17 @@ $metaEditorCandidates = @(
 )
 $metaEditor = $metaEditorCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $metaEditor) {
-    $found = Get-ChildItem -Path $installDir -Filter "MetaEditor*.exe" -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($found) { $metaEditor = $found.FullName }
+    foreach ($root in $searchRoots | Select-Object -Unique) {
+        if (-not (Test-Path $root)) { continue }
+        $found = Get-ChildItem -Path $root -Filter "MetaEditor*.exe" -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($found) {
+            $metaEditor = $found.FullName
+            break
+        }
+    }
 }
 if (-not $metaEditor) {
-    throw "MetaEditor executable was not found under $installDir"
+    throw "MetaEditor executable was not found after automated installation (installer exit code $($install.ExitCode))"
 }
 
 if (-not (Test-Path $source)) {
@@ -83,4 +98,3 @@ Write-Host "EX5:    $ex5"
 Write-Host "SHA256: $sha256"
 
 "GTX_EX5=$ex5" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-"GTX_COMPILE_LOG=$compileLog" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
