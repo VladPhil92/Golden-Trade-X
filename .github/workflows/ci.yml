@@ -113,17 +113,20 @@ jobs:
             "scripts/mql5_lint.py" \
             "scripts/performance_report.py" \
             "tests/test_backtest_analysis.py" \
+            "tests/test_backtest_io.py" \
             "tests/test_performance_report.py" \
             "tests/test_environment.py" \
             "tests/test_ml_pipeline.py" \
             "tests/test_mql5_lint.py" \
             "tests/test_validate_set.py" \
+            ".coveragerc" \
             ".env.example" \
             "dashboard/index.html" \
             "config/GoldenTradeX.set" \
             "config/GoldenTradeX_XAGUSD.set" \
             "requirements.txt" \
             "CHANGELOG.md" \
+            "docs/CI.md" \
             "docs/STRATEGY.md" \
             "docs/ARCHITECTURE.md"; do
             if [ ! -f "$f" ]; then
@@ -172,10 +175,13 @@ jobs:
       - name: Verify installed dependencies
         run: pip check
       - name: Run unit tests with coverage gate
+        env:
+          PYTHONPATH: ${{ github.workspace }}/scripts:${{ github.workspace }}
         run: |
           pytest tests/ --ignore=tests/test_ml_pipeline.py -v --tb=short \
             --cov=scripts.backtest_analysis \
-            --cov=scripts.performance_report \
+            --cov=performance_report \
+            --cov-config=.coveragerc \
             --cov-report=term-missing \
             --cov-report=xml \
             --cov-fail-under=80
