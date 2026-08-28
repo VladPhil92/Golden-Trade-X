@@ -110,6 +110,7 @@ jobs:
             "MQL5/Include/GoldenTradeX/OrderManager.mqh" \
             "MQL5/Include/GoldenTradeX/HealthMonitor.mqh" \
             "MQL5/Include/GoldenTradeX/PositionStateManager.mqh" \
+            "MQL5/Scripts/Tests/TestIntegration.mq5" \
             "MQL5/Scripts/Tests/TestOrderManager.mq5" \
             "MQL5/Scripts/Tests/TestNewsFilter.mq5" \
             "MQL5/Scripts/Tests/TestRiskManager.mq5" \
