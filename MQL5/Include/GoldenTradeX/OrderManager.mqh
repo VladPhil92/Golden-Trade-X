@@ -18,7 +18,6 @@
 #property strict
 #include <Trade/Trade.mqh>
 
-// ── Códigos de retorno MQL5 relevantes ─────────────────────────────
 #define OM_RETCODE_PLACED          10008
 #define OM_RETCODE_DONE            10009
 #define OM_RETCODE_DONE_PARTIAL    10010
@@ -60,11 +59,10 @@ private:
    int        m_successCount;
    int        m_failCount;
 
-   // Identidad de la última APERTURA confirmada. Son conceptos distintos.
    ulong      m_lastOrderTicket;
    ulong      m_lastDealTicket;
-   ulong      m_lastPositionId;       // POSITION_IDENTIFIER / DEAL_POSITION_ID
-   ulong      m_lastPositionTicket;   // ticket actual de la posición, si existe
+   ulong      m_lastPositionId;
+   ulong      m_lastPositionTicket;
    ENUM_OM_RESULT_CLASS m_lastResultClass;
 
    bool IsRetryable(uint code)
@@ -143,8 +141,6 @@ private:
       m_lastPositionTicket = 0;
      }
 
-   // Resuelve el ticket actual desde POSITION_IDENTIFIER. Esto funciona tanto
-   // en hedge como en netting y evita asumir ResultOrder()==position ticket.
    ulong FindPositionTicketByIdentifier(ulong positionId, string symbol = "")
      {
       if(positionId == 0) return 0;
@@ -167,7 +163,6 @@ private:
 
       if(!HistoryDealSelect(m_lastDealTicket))
         {
-         // Refrescar historial por si el terminal todavía no lo tenía seleccionado.
          HistorySelect(TimeCurrent() - 86400, TimeCurrent() + 60);
          if(!HistoryDealSelect(m_lastDealTicket)) return false;
         }
@@ -176,9 +171,6 @@ private:
       if(m_lastPositionId == 0) return false;
 
       m_lastPositionTicket = FindPositionTicketByIdentifier(m_lastPositionId, symbol);
-      // El deal + POSITION_IDENTIFIER son evidencia suficiente de ejecución.
-      // El ticket actual puede no estar disponible si la posición ya se cerró
-      // inmediatamente o si el estado del terminal aún no se refrescó.
       return true;
      }
 
@@ -214,8 +206,6 @@ public:
       ResetLastOpenIdentity();
      }
 
-   // Clasificación pública para tests y telemetría. El éxito final de una
-   // operación requiere además los artefactos server-side específicos.
    ENUM_OM_RESULT_CLASS ClassifyRetcode(uint code)
      {
       if(code == OM_RETCODE_DONE)         return OM_RESULT_SUCCESS;
@@ -232,21 +222,30 @@ public:
    bool IsRetryableCode(uint code) { return IsRetryable(code); }
    bool IsFatalCode(uint code)     { return IsFatal(code); }
 
+   // Pure pre-trade geometry guard used by production OpenPosition() and
+   // deterministic tests. Broker stops_level enforcement is a separate step.
+   bool ValidateInitialStops(ENUM_ORDER_TYPE type, double price,
+                             double sl, double tp)
+     {
+      if(price <= 0 || sl == 0 || tp == 0) return false;
+      if(type == ORDER_TYPE_BUY)
+         return sl < price && tp > price;
+      if(type == ORDER_TYPE_SELL)
+         return sl > price && tp < price;
+      return false;
+     }
+
    bool OpenPosition(string symbol, ENUM_ORDER_TYPE type, double lots,
                      double price, double sl, double tp, string comment = "")
      {
       ResetLastOpenIdentity();
       m_lastResultClass = OM_RESULT_UNKNOWN;
 
-      if(sl == 0)
-        { Print("OrderManager: REJECTED — SL=0. Orden no enviada (riesgo indefinido)."); return false; }
-      if(tp == 0)
-        { Print("OrderManager: REJECTED — TP=0. Orden no enviada (objetivo indefinido)."); return false; }
-
-      if(type == ORDER_TYPE_BUY && (sl >= price || tp <= price))
-        { Print("OrderManager: REJECTED BUY — SL debe ser < price y TP > price."); return false; }
-      if(type == ORDER_TYPE_SELL && (sl <= price || tp >= price))
-        { Print("OrderManager: REJECTED SELL — SL debe ser > price y TP < price."); return false; }
+      if(!ValidateInitialStops(type, price, sl, tp))
+        {
+         Print("OrderManager: REJECTED — geometría inicial SL/TP inválida.");
+         return false;
+        }
 
       EnforceStopsLevel(symbol, type, sl, tp);
       int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
@@ -280,7 +279,6 @@ public:
             return true;
            }
 
-         // Nunca convertir basicOk=true en éxito: solo informa validación local.
          if(IsFatal(code))
            {
             Print("OrderManager: FATAL retcode=", code, " — caller debe activar Kill Switch.");
@@ -380,14 +378,12 @@ public:
    bool LastErrorIsFatal()
      { return IsFatal(m_trade.ResultRetcode()); }
 
-   // Identidad explícita de la última apertura confirmada.
    ulong GetLastOrderTicket()        const { return m_lastOrderTicket; }
    ulong GetLastDealTicket()         const { return m_lastDealTicket; }
    ulong GetLastPositionIdentifier() const { return m_lastPositionId; }
    ulong GetLastPositionTicket()     const { return m_lastPositionTicket; }
    ENUM_OM_RESULT_CLASS GetLastResultClass() const { return m_lastResultClass; }
 
-   // Reintenta resolver el ticket actual desde el identificador estable.
    ulong ResolveLastPositionTicket(string symbol = "")
      {
       if(m_lastPositionId == 0) return 0;
