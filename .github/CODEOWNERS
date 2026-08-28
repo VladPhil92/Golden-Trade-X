@@ -1,0 +1,11 @@
+# Golden Trade X — code ownership
+# Changes to trading logic, CI, research tooling and governance require review
+# by the repository owner before promotion.
+* @VladPhil92
+
+/MQL5/ @VladPhil92
+/scripts/ @VladPhil92
+/tests/ @VladPhil92
+/config/ @VladPhil92
+/.github/ @VladPhil92
+/docs/ @VladPhil92
