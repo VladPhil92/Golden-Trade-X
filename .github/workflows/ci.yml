@@ -14,89 +14,67 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
-
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: requirements.txt
-
       - name: Install complete supported environment
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-
       - name: Verify dependency resolver state
         run: pip check
-
       - name: Compile Python sources
         run: python -m compileall -q scripts tests
-
       - name: Environment smoke tests
         run: pytest tests/test_environment.py -v --tb=short
 
-  # ── 1. Python lint ─────────────────────────────────────────────────
+  # ── 1. Python quality ───────────────────────────────────────────────
   python-lint:
     name: Python lint (ruff)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
-
-      - name: Install dependencies
-        # Version fijada: los defaults de ruff cambian entre versiones y
-        # romperían el CI sin que cambie el código.
+      - name: Install pinned Ruff
         run: pip install "ruff==0.15.8"
-
-      - name: ruff — scripts/ and tests/
-        # E4/E7/E9/F = paridad con flake8 (errores reales, no estilo)
+      - name: Ruff critical rules
         run: ruff check scripts/ tests/ --line-length 120 --select E4,E7,E9,F
 
-  # ── 1b. MQL5 lint (MQL4-ismos y API inexistente) ───────────────────
-  # No compila (MetaEditor no corre en Linux) pero detecta las clases de
-  # error que ya rompieron el build una vez: iATR/iMA con firma MQL4,
-  # operador '->', ArraySetAsSeries sobre arrays estáticos,
-  # ResultRetcodeDescription().
+  # ── 2. MQL5 static analysis ─────────────────────────────────────────
   mql5-lint:
-    name: MQL5 lint (MQL4-isms)
+    name: MQL5 static analysis
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-
       - name: Lint MQL5 sources
         run: python scripts/mql5_lint.py
 
-  # ── 2. Config validation ────────────────────────────────────────────
+  # ── 3. Config validation ────────────────────────────────────────────
   config-validate:
-    name: Validate GoldenTradeX.set
+    name: Config validation
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+      - name: Validate presets and cross-preset invariants
+        run: python scripts/validate_set.py config/GoldenTradeX.set config/GoldenTradeX_XAGUSD.set
 
-      - name: Check all required parameters are present
-        run: |
-          python scripts/validate_set.py config/GoldenTradeX.set
-          python scripts/validate_set.py config/GoldenTradeX_XAGUSD.set
-
-  # ── 3. Repository structure check ──────────────────────────────────
+  # ── 4. Repository structure check ──────────────────────────────────
   structure-check:
     name: Repository structure
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-
       - name: Verify required files exist
         run: |
           missing=0
@@ -137,6 +115,9 @@ jobs:
             "tests/test_backtest_analysis.py" \
             "tests/test_performance_report.py" \
             "tests/test_environment.py" \
+            "tests/test_ml_pipeline.py" \
+            "tests/test_mql5_lint.py" \
+            "tests/test_validate_set.py" \
             ".env.example" \
             "dashboard/index.html" \
             "config/GoldenTradeX.set" \
@@ -154,13 +135,12 @@ jobs:
           done
           exit $missing
 
-  # ── 4. Version consistency ──────────────────────────────────────────
+  # ── 5. Version consistency ──────────────────────────────────────────
   version-check:
     name: Version consistency
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-
       - name: EA version matches CHANGELOG latest entry
         run: |
           ea_ver=$(grep -m1 '#property version' \
@@ -175,36 +155,54 @@ jobs:
             exit 1
           fi
 
-  # ── 5. Python unit tests (pytest) ──────────────────────────────────
+  # ── 6. Python tests + coverage ─────────────────────────────────────
   python-tests:
-    name: Python unit tests (pytest)
+    name: Python tests + coverage
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
-
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: requirements.txt
-
       - name: Install project dependencies
         run: pip install -r requirements.txt
-
       - name: Verify installed dependencies
         run: pip check
+      - name: Run unit tests with coverage gate
+        run: |
+          pytest tests/ --ignore=tests/test_ml_pipeline.py -v --tb=short \
+            --cov=scripts.backtest_analysis \
+            --cov=scripts.performance_report \
+            --cov-report=term-missing \
+            --cov-report=xml \
+            --cov-fail-under=80
 
-      - name: Run pytest
-        run: pytest tests/ -v --tb=short
+  # ── 7. ML dependency/API compatibility ─────────────────────────────
+  ml-compatibility:
+    name: ML compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install project dependencies
+        run: pip install -r requirements.txt
+      - name: XGBoost/scikit-learn train-predict-save-load smoke test
+        run: pytest tests/test_ml_pipeline.py -v --tb=short
 
-  # ── 6. Dashboard validation ─────────────────────────────────────────
+  # ── 8. Dashboard validation ─────────────────────────────────────────
   dashboard-check:
     name: Dashboard HTML valid
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-
       - name: Check dashboard exists and references Chart.js
         run: |
           if ! grep -q "chart.js" dashboard/index.html; then
