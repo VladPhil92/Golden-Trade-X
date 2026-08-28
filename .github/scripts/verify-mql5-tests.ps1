@@ -60,7 +60,6 @@ function Read-TestJournal {
 function Get-TestSummary {
     param([string]$Journal, [string]$Base)
 
-    # Canonical v2.63 format: === TestX END | PASS=N FAIL=N ===
     $canonical = [regex]::Match(
         $Journal,
         "===\s+" + [regex]::Escape($Base) + "\s+END\s+\|\s+PASS=(\d+)\s+FAIL=(\d+)\s+==="
@@ -72,7 +71,6 @@ function Get-TestSummary {
         }
     }
 
-    # v2.62 counted format: TestX: N tests | P PASS | F FAIL
     $counted = [regex]::Match(
         $Journal,
         [regex]::Escape($Base) + ":\s+\d+\s+tests\s+\|\s+(\d+)\s+PASS\s+\|\s+(\d+)\s+FAIL"
@@ -84,8 +82,6 @@ function Get-TestSummary {
         }
     }
 
-    # Older suite format retained during migration:
-    # PASS: P / FAIL: F / TOTAL: N
     $legacy = [regex]::Match(
         $Journal,
         "PASS:\s*(\d+)\s*/\s*FAIL:\s*(\d+)\s*/\s*TOTAL:\s*(\d+)"
@@ -154,25 +150,20 @@ foreach ($source in $testSources) {
 
 Write-Host "MQL5 TEST COMPILE PASS — $($testSources.Count) scripts, 0 errors"
 
-# Gate 2: execute every script through the documented [StartUp] configuration
-# interface. The runner polls terminal/MQL5 journals and fails closed on
-# timeout, missing summary, or FAIL>0. Live trading and DLL imports are off.
+# Gate 2: execute every script through MetaTrader [StartUp]. Some fresh hosted
+# runners intermittently load a startup script while the terminal performs its
+# own full recompilation, but never dispatch OnStart(). That condition is a
+# launcher race, not a passing test. We retry a missing-summary launch up to
+# three times while preserving every attempt's journal. Any emitted FAIL>0 is
+# never retried and remains an immediate hard failure.
 $journalRoots = @(
     (Join-Path $installDir "Logs"),
     (Join-Path $mql5Root "Logs")
 )
+$maxLaunchAttempts = 3
 
 foreach ($source in $testSources) {
     $base = [System.IO.Path]::GetFileNameWithoutExtension($source.Name)
-    Stop-MetaTraderProcesses
-
-    foreach ($root in $journalRoots) {
-        if (Test-Path $root) {
-            Get-ChildItem -Path $root -Filter "*.log" -File -ErrorAction SilentlyContinue |
-                Remove-Item -Force -ErrorAction SilentlyContinue
-        }
-    }
-
     $configPath = Join-Path $evidenceDir "$base.ini"
     @"
 [Charts]
@@ -196,38 +187,81 @@ Template=default.tpl
     $args = @("/config:$configPath")
     if ($portableMode) { $args += "/portable" }
 
-    Write-Host "Running $base through MetaTrader [StartUp]..."
-    $terminalProc = Start-Process -FilePath $terminal -ArgumentList $args -PassThru
-    $deadline = (Get-Date).AddSeconds(45)
     $summary = $null
-    $journal = ""
+    $attemptEvidence = @()
 
-    try {
-        while ((Get-Date) -lt $deadline) {
-            Start-Sleep -Milliseconds 500
-            $journal = Read-TestJournal -LogRoots $journalRoots
-            $summary = Get-TestSummary -Journal $journal -Base $base
-            if ($null -ne $summary) { break }
-            if ($terminalProc.HasExited) { break }
-        }
-    }
-    finally {
-        if ($terminalProc -and -not $terminalProc.HasExited) {
-            Stop-Process -Id $terminalProc.Id -Force -ErrorAction SilentlyContinue
-        }
+    for ($attempt = 1; $attempt -le $maxLaunchAttempts; $attempt++) {
         Stop-MetaTraderProcesses
+        Start-Sleep -Milliseconds 500
+
+        foreach ($root in $journalRoots) {
+            if (Test-Path $root) {
+                Get-ChildItem -Path $root -Filter "*.log" -File -ErrorAction SilentlyContinue |
+                    Remove-Item -Force -ErrorAction SilentlyContinue
+            }
+        }
+
+        Write-Host "Running $base through MetaTrader [StartUp] (attempt $attempt/$maxLaunchAttempts)..."
+        $terminalProc = Start-Process -FilePath $terminal -ArgumentList $args -PassThru
+        $deadline = (Get-Date).AddSeconds(45)
+        $journal = ""
+        $exitedAt = $null
+
+        try {
+            while ((Get-Date) -lt $deadline) {
+                Start-Sleep -Milliseconds 500
+                $journal = Read-TestJournal -LogRoots $journalRoots
+                $summary = Get-TestSummary -Journal $journal -Base $base
+                if ($null -ne $summary) { break }
+
+                if ($terminalProc.HasExited) {
+                    if ($null -eq $exitedAt) { $exitedAt = Get-Date }
+                    if (((Get-Date) - $exitedAt).TotalSeconds -ge 3) { break }
+                }
+            }
+        }
+        finally {
+            if ($terminalProc -and -not $terminalProc.HasExited) {
+                Stop-Process -Id $terminalProc.Id -Force -ErrorAction SilentlyContinue
+            }
+            Stop-MetaTraderProcesses
+        }
+
+        $attemptEvidence += "===== $base attempt $attempt/$maxLaunchAttempts =====`n$journal"
+
+        if ($null -ne $summary) {
+            if ($summary.Fail -ne 0) {
+                $journalPath = Join-Path $evidenceDir "$base-runtime.log"
+                ($attemptEvidence -join "`n") | Set-Content -Path $journalPath -Encoding utf8
+                throw "$base reported $($summary.Fail) failed assertion(s)"
+            }
+            if ($summary.Pass -le 0) {
+                $journalPath = Join-Path $evidenceDir "$base-runtime.log"
+                ($attemptEvidence -join "`n") | Set-Content -Path $journalPath -Encoding utf8
+                throw "$base reported no passing assertions"
+            }
+            break
+        }
+
+        $loadedWithoutSummary = $journal -match (
+            "(?im)script\s+" + [regex]::Escape($base) + ".*loaded successfully"
+        )
+        if ($loadedWithoutSummary -and $attempt -lt $maxLaunchAttempts) {
+            Write-Warning "$base loaded but OnStart summary was not emitted; retrying clean terminal launch."
+        }
+        elseif ($attempt -lt $maxLaunchAttempts) {
+            Write-Warning "$base produced no recognized summary; retrying clean terminal launch."
+        }
     }
 
     $journalPath = Join-Path $evidenceDir "$base-runtime.log"
-    $journal | Set-Content -Path $journalPath -Encoding utf8
+    ($attemptEvidence -join "`n") | Set-Content -Path $journalPath -Encoding utf8
 
     if ($null -eq $summary) {
-        throw "$base did not emit a recognized test summary before timeout/exit — see $journalPath"
+        throw "$base did not emit a recognized test summary after $maxLaunchAttempts clean launch attempts — see $journalPath"
     }
 
     Write-Host "$base runtime result: PASS=$($summary.Pass) FAIL=$($summary.Fail)"
-    if ($summary.Fail -ne 0) { throw "$base reported $($summary.Fail) failed assertion(s)" }
-    if ($summary.Pass -le 0) { throw "$base reported no passing assertions" }
 }
 
 Write-Host "MQL5 AUTOMATED TESTS PASS — $($testSources.Count) scripts compiled and executed"
