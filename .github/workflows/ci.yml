@@ -143,6 +143,7 @@ jobs:
             "tests/test_security_scan.py" \
             ".github/scripts/compile-mql5.ps1" \
             ".github/scripts/verify-mql5-tests.ps1" \
+            ".github/scripts/configure-governance.ps1" \
             ".github/CODEOWNERS" \
             "CONTRIBUTING.md" \
             "SECURITY.md" \
@@ -239,3 +240,35 @@ jobs:
             exit 1
           fi
           echo "OK: dashboard/index.html valid"
+
+  ci-required:
+    name: CI required gate
+    if: always()
+    needs:
+      - dependency-integrity
+      - security-scan
+      - python-lint
+      - mql5-lint
+      - config-validate
+      - structure-check
+      - version-check
+      - python-tests
+      - ml-compatibility
+      - dashboard-check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce CI job conclusions
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ needs.dependency-integrity.result }}" = "success"
+          test "${{ needs.security-scan.result }}" = "success"
+          test "${{ needs.python-lint.result }}" = "success"
+          test "${{ needs.mql5-lint.result }}" = "success"
+          test "${{ needs.config-validate.result }}" = "success"
+          test "${{ needs.structure-check.result }}" = "success"
+          test "${{ needs.version-check.result }}" = "success"
+          test "${{ needs.python-tests.result }}" = "success"
+          test "${{ needs.ml-compatibility.result }}" = "success"
+          test "${{ needs.dashboard-check.result }}" = "success"
+          echo "CI REQUIRED GATE PASS"
