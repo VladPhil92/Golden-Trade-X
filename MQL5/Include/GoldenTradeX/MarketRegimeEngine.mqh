@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
 //|                                          MarketRegimeEngine.mqh  |
-//|   Golden Trade X v2.00 — Detección automática de régimen         |
+//|   Golden Trade X — Detección automática de régimen              |
 //+------------------------------------------------------------------+
 //  Regímenes:
 //    REGIME_TRENDING_BULL  — ADX > umbral, EMA slope y precio alcistas
@@ -78,6 +78,16 @@ private:
      }
 
 public:
+   CMarketRegimeEngine()
+     {
+      m_hAdx = INVALID_HANDLE;
+      m_hAtr = INVALID_HANDLE;
+      m_hBb = INVALID_HANDLE;
+      m_hEmaFast = INVALID_HANDLE;
+      m_hEmaSlow = INVALID_HANDLE;
+      m_lastRegime = REGIME_UNKNOWN;
+     }
+
    bool Init(string symbol, ENUM_TIMEFRAMES tf,
              int emaFast      = 21,
              int emaSlow      = 55,
@@ -96,10 +106,6 @@ public:
       m_bbwSqueezeRatio = bbwSqz;
       m_lastRegime      = REGIME_UNKNOWN;
 
-      // v2.61: períodos ATR/ADX propagados desde el EA (antes 14 fijo aunque
-      // InpAtrPeriod fuera distinto — el EA operaba con dos ATRs en silencio).
-      // Las Bandas de Bollinger (20, 2.0) siguen fijas: son internas a la
-      // clasificación de régimen (BBW squeeze), no un parámetro de señal.
       m_hAdx     = iADX(symbol, tf, adxPeriod);
       m_hAtr     = iATR(symbol, tf, atrPeriod);
       m_hBb      = iBands(symbol, tf, 20, 0, 2.0, PRICE_CLOSE);
@@ -113,11 +119,11 @@ public:
 
    void Release()
      {
-      if(m_hAdx     != INVALID_HANDLE) IndicatorRelease(m_hAdx);
-      if(m_hAtr     != INVALID_HANDLE) IndicatorRelease(m_hAtr);
-      if(m_hBb      != INVALID_HANDLE) IndicatorRelease(m_hBb);
-      if(m_hEmaFast != INVALID_HANDLE) IndicatorRelease(m_hEmaFast);
-      if(m_hEmaSlow != INVALID_HANDLE) IndicatorRelease(m_hEmaSlow);
+      if(m_hAdx     != INVALID_HANDLE) { IndicatorRelease(m_hAdx);     m_hAdx = INVALID_HANDLE; }
+      if(m_hAtr     != INVALID_HANDLE) { IndicatorRelease(m_hAtr);     m_hAtr = INVALID_HANDLE; }
+      if(m_hBb      != INVALID_HANDLE) { IndicatorRelease(m_hBb);      m_hBb = INVALID_HANDLE; }
+      if(m_hEmaFast != INVALID_HANDLE) { IndicatorRelease(m_hEmaFast); m_hEmaFast = INVALID_HANDLE; }
+      if(m_hEmaSlow != INVALID_HANDLE) { IndicatorRelease(m_hEmaSlow); m_hEmaSlow = INVALID_HANDLE; }
      }
 
    ENUM_MARKET_REGIME Detect()
@@ -137,12 +143,13 @@ public:
       if(atrSma <= 0) return REGIME_UNKNOWN;
       double atrRatio = atr / atrSma;
 
-      // BBW actual y su media 20 barras
       double bbw    = CalcBbw(bbUpper, bbLower, bbMid);
       double bbwSma = 0;
         {
          double bbU[], bbL[], bbM[];
-         ArraySetAsSeries(bbU, true); ArraySetAsSeries(bbL, true); ArraySetAsSeries(bbM, true);
+         ArraySetAsSeries(bbU, true);
+         ArraySetAsSeries(bbL, true);
+         ArraySetAsSeries(bbM, true);
          if(CopyBuffer(m_hBb, 1, 1, 20, bbU) == 20 &&
             CopyBuffer(m_hBb, 2, 1, 20, bbL) == 20 &&
             CopyBuffer(m_hBb, 0, 1, 20, bbM) == 20)
@@ -158,12 +165,10 @@ public:
       bool slopeDown = (emaFast1 < emaFast5);
       bool emaBull   = (emaFast1 > emaSlow1);
 
-      // ADX anterior para detectar decaimiento
       double adxPrev;
       if(!CopyOne(m_hAdx, 0, 5, adxPrev)) adxPrev = adx;
       bool adxDecaying = (adx < adxPrev);
 
-      // ── Clasificación por prioridad ───────────────────────────────────
       if(atrRatio >= m_atrVolatile)
          return m_lastRegime = REGIME_VOLATILE;
 
@@ -185,21 +190,27 @@ public:
       return m_lastRegime = REGIME_UNKNOWN;
      }
 
-   ENUM_MARKET_REGIME GetLast()  { return m_lastRegime; }
+   ENUM_MARKET_REGIME GetLast() { return m_lastRegime; }
 
-   // Retorna un score de alineación 0-25 según régimen y dirección de operación
-   int RegimeScore(bool isBuy)
+   // Deterministic scoring seam. It contains the production mapping and has
+   // no symbol/history dependency, so L2 tests do not need a broker session.
+   int ScoreForRegime(ENUM_MARKET_REGIME regime, bool isBuy)
      {
-      switch(m_lastRegime)
+      switch(regime)
         {
          case REGIME_TRENDING_BULL: return isBuy  ? 25 : 0;
          case REGIME_TRENDING_BEAR: return !isBuy ? 25 : 0;
-         case REGIME_ACCUMULATION:  return 15;   // oportunidad pre-breakout en ambas dir
-         case REGIME_RANGING:       return 5;    // señales de menor calidad en rangos
-         case REGIME_VOLATILE:      return 0;    // bloqueo total
+         case REGIME_ACCUMULATION:  return 15;
+         case REGIME_RANGING:       return 5;
+         case REGIME_VOLATILE:      return 0;
          case REGIME_DISTRIBUTION:  return 5;
          default:                   return 10;
         }
+     }
+
+   int RegimeScore(bool isBuy)
+     {
+      return ScoreForRegime(m_lastRegime, isBuy);
      }
   };
 //+------------------------------------------------------------------+
