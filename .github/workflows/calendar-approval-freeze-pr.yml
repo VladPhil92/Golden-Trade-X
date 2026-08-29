@@ -77,12 +77,15 @@ jobs:
           print(f"GTX_SOURCE_MERGE_COMMIT={source_merge}")
           PY
 
-      - name: Bind approval request to exact source merge
+      - name: Bind approval request to exact frozen source tree
         shell: bash
         run: |
           set -euo pipefail
           git fetch origin main --quiet
-          test "$(git merge-base HEAD origin/main)" = "$GTX_SOURCE_MERGE_COMMIT"
+          git merge-base --is-ancestor "$GTX_SOURCE_MERGE_COMMIT" HEAD
+          git merge-base --is-ancestor "$GTX_SOURCE_MERGE_COMMIT" origin/main
+          git diff --quiet "$GTX_SOURCE_MERGE_COMMIT" HEAD -- data/research/calendar-sources/v1
+          git diff --quiet "$GTX_SOURCE_MERGE_COMMIT" origin/main -- data/research/calendar-sources/v1
 
       - name: Freeze approved contract from exact reviewed snapshots
         shell: bash
