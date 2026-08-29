@@ -1,0 +1,90 @@
+{
+  "approved": false,
+  "counts_by_year": {
+    "2021": {
+      "CPI": 12,
+      "FOMC": 8,
+      "NFP": 12
+    },
+    "2022": {
+      "CPI": 12,
+      "FOMC": 8,
+      "NFP": 12
+    },
+    "2023": {
+      "CPI": 12,
+      "FOMC": 8,
+      "NFP": 12
+    },
+    "2024": {
+      "CPI": 12,
+      "FOMC": 8,
+      "NFP": 12
+    },
+    "2025": {
+      "CPI": 11,
+      "FOMC": 8,
+      "NFP": 11
+    }
+  },
+  "end_year": 2025,
+  "event_count": 158,
+  "live_trading_authorized": false,
+  "methodology": "OFFICIAL_ECONOMIC_CALENDAR_MATERIALIZATION_V2",
+  "real_capital_authorized": false,
+  "schema_version": 2,
+  "source_manifest": {
+    "methodology": "OFFICIAL_CALENDAR_SOURCE_SNAPSHOT_V1",
+    "path": "source_manifest.json",
+    "sha256": "8776cb9955bcc8c94185a30915b461974ae549bf86b660ebccc563332cae84c6"
+  },
+  "source_manifest_verified": true,
+  "source_mode": "IMMUTABLE_OFFICIAL_SNAPSHOTS",
+  "sources": {
+    "bls": [
+      {
+        "mode": "SNAPSHOT",
+        "snapshot_name": "bls-2021.html",
+        "snapshot_sha256": "614a81c3e2b1daf5a521949043888396ddae73bfc40f2785e96f764a5052e479",
+        "snapshot_size_bytes": 98368,
+        "url": "https://www.bls.gov/schedule/2021/"
+      },
+      {
+        "mode": "SNAPSHOT",
+        "snapshot_name": "bls-2022.html",
+        "snapshot_sha256": "429e36522423aea0a4f41353bb5209ac5de861412ec4ad3ce6c4fad490494b8c",
+        "snapshot_size_bytes": 100702,
+        "url": "https://www.bls.gov/schedule/2022/"
+      },
+      {
+        "mode": "SNAPSHOT",
+        "snapshot_name": "bls-2023.html",
+        "snapshot_sha256": "1cd8d925e577c26b8ddda6c8dbe63b0ce6e474c8db6d199173c4eb5c6983743d",
+        "snapshot_size_bytes": 100157,
+        "url": "https://www.bls.gov/schedule/2023/"
+      },
+      {
+        "mode": "SNAPSHOT",
+        "snapshot_name": "bls-2024.html",
+        "snapshot_sha256": "74c74d7b5749861f519f7461b7aa39233f72213afbc60a927411fa7dcfd0685f",
+        "snapshot_size_bytes": 101430,
+        "url": "https://www.bls.gov/schedule/2024/"
+      },
+      {
+        "mode": "SNAPSHOT",
+        "snapshot_name": "bls-2025.html",
+        "snapshot_sha256": "cce28bc1ec6589c12eed35566e3db9522fd0279a428856066847f25976762f99",
+        "snapshot_size_bytes": 96699,
+        "url": "https://www.bls.gov/schedule/2025/"
+      }
+    ],
+    "federal_reserve": {
+      "mode": "SNAPSHOT",
+      "snapshot_name": "fomccalendars.html",
+      "snapshot_sha256": "aa106b6f731733d5bd3b382088a7fecfb7a3b4aca41bf68ed6454b024693b2dd",
+      "snapshot_size_bytes": 166936,
+      "url": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
+    }
+  },
+  "start_year": 2021
+}
