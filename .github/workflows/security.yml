@@ -16,6 +16,17 @@ permissions:
   contents: read
 
 jobs:
+  workflow-supply-chain:
+    name: Workflow supply-chain pins
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - name: Reject mutable action references
+        run: python scripts/workflow_supply_chain_check.py
+
   codeql:
     name: CodeQL (Python)
     runs-on: ubuntu-latest
@@ -75,6 +86,7 @@ jobs:
     name: Security required gate
     if: always()
     needs:
+      - workflow-supply-chain
       - codeql
       - python-dependency-audit
       - dependency-manifest-review
@@ -84,6 +96,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test "${{ needs.workflow-supply-chain.result }}" = "success"
           test "${{ needs.codeql.result }}" = "success"
           test "${{ needs.python-dependency-audit.result }}" = "success"
           if [ "${{ github.event_name }}" = "pull_request" ]; then
