@@ -34,6 +34,8 @@ jobs:
           scripts/ablation_report.py
           scripts/telemetry_db.py
           scripts/campaign_contract.py
+          scripts/execution_environment.py
+          scripts/mt5_environment_probe.py
           scripts/walk_forward_planner.py
           scripts/walk_forward_selector.py
           scripts/walk_forward_aggregate.py
@@ -46,6 +48,7 @@ jobs:
           scripts/forward_demo_evaluator.py
           scripts/forward_demo_gate.py
           scripts/official_campaign_freeze.py
+          scripts/official_campaign_runner.py
           scripts/rc1_release_review_gate.py
       - name: Run reproducibility contract tests
         env:
@@ -62,6 +65,7 @@ jobs:
           tests/test_robustness_validation.py
           tests/test_forward_demo_validation.py
           tests/test_official_campaign.py
+          tests/test_official_campaign_runner.py
           tests/test_real_money_interlock.py
           -v --tb=short
 
