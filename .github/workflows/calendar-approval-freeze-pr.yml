@@ -1,0 +1,137 @@
+name: Calendar Approval Freeze Candidate
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "data/research/calendar-freeze/approval_request.json"
+      - "data/research/calendar-sources/v1/**"
+      - "data/research/calendar-review/**"
+      - "scripts/freeze_approved_economic_calendar.py"
+      - "scripts/official_calendar_snapshot.py"
+      - "scripts/materialize_official_calendar.py"
+      - "scripts/economic_calendar_contract.py"
+      - ".github/workflows/calendar-approval-freeze-pr.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  freeze-candidate:
+    name: Reproduce explicit validation-only calendar approval freeze
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+
+      - name: Install exact parser dependency
+        run: python -m pip install --disable-pip-version-check "requests==2.34.2"
+
+      - name: Validate versioned approval request and bind source merge
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY' >> "$GITHUB_ENV"
+          import json
+          from pathlib import Path
+
+          request = json.loads(Path("data/research/calendar-freeze/approval_request.json").read_text(encoding="utf-8"))
+          if request.get("schema_version") != 1:
+              raise SystemExit("approval request schema_version must be 1")
+          if request.get("decision_requested") != "APPROVE_OFFICIAL_ECONOMIC_CALENDAR":
+              raise SystemExit("approval request decision is invalid")
+          if request.get("validation_scope") != "OFFICIAL_VALIDATION_ONLY":
+              raise SystemExit("approval request scope must remain validation-only")
+          if request.get("live_trading_authorized") is not False:
+              raise SystemExit("approval request must deny live trading")
+          if request.get("real_capital_authorized") is not False:
+              raise SystemExit("approval request must deny real capital")
+          approved_by = str(request.get("approved_by", "")).strip()
+          note = str(request.get("approval_note", "")).strip()
+          approved_at = str(request.get("approved_at_utc", "")).strip()
+          source_merge = str(request.get("source_merge_commit", "")).strip()
+          if not approved_by:
+              raise SystemExit("approved_by is required")
+          if len(note) < 8:
+              raise SystemExit("approval_note must contain at least 8 characters")
+          if not approved_at.endswith("Z"):
+              raise SystemExit("approved_at_utc must be UTC")
+          if len(source_merge) != 40:
+              raise SystemExit("source_merge_commit must be a full SHA")
+          print(f"GTX_APPROVED_BY={approved_by}")
+          print(f"GTX_APPROVAL_NOTE={note}")
+          print(f"GTX_APPROVED_AT_UTC={approved_at}")
+          print(f"GTX_SOURCE_MERGE_COMMIT={source_merge}")
+          PY
+          git fetch origin main --quiet
+          test "$(git merge-base HEAD origin/main)" = "$GTX_SOURCE_MERGE_COMMIT"
+
+      - name: Freeze approved contract from exact reviewed snapshots
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/freeze_approved_economic_calendar.py \
+            --start-year 2021 \
+            --end-year 2025 \
+            --source-dir data/research/calendar-sources/v1 \
+            --review-calendar data/research/calendar-review/economic_calendar.generated.json \
+            --review-audit data/research/calendar-review/economic_calendar.audit.json \
+            --approved-by "$GTX_APPROVED_BY" \
+            --approval-note "$GTX_APPROVAL_NOTE" \
+            --approved-at-utc "$GTX_APPROVED_AT_UTC" \
+            --confirmation APPROVE_OFFICIAL_ECONOMIC_CALENDAR \
+            --output data/research/calendar-freeze/economic_calendar.approved.json \
+            --approval-record data/research/calendar-freeze/economic_calendar.approval.json
+
+      - name: Generate and verify exact MQL5 include
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/economic_calendar_contract.py \
+            --contract data/research/calendar-freeze/economic_calendar.approved.json \
+            --require-approved \
+            --generate-mql5 data/research/calendar-freeze/EconomicCalendarData.approved.mqh
+          python scripts/economic_calendar_contract.py \
+            --contract data/research/calendar-freeze/economic_calendar.approved.json \
+            --require-approved \
+            --verify-mql5 data/research/calendar-freeze/EconomicCalendarData.approved.mqh
+
+      - name: Enforce validation-only decision
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          record = json.loads(Path("data/research/calendar-freeze/economic_calendar.approval.json").read_text(encoding="utf-8"))
+          if record.get("decision") != "APPROVED_FOR_OFFICIAL_VALIDATION":
+              raise SystemExit("calendar freeze decision is invalid")
+          if record.get("live_trading_authorized") is not False:
+              raise SystemExit("calendar freeze must deny live trading")
+          if record.get("real_capital_authorized") is not False:
+              raise SystemExit("calendar freeze must deny real capital")
+          print("CALENDAR APPROVAL FREEZE CANDIDATE PASS — validation only")
+          PY
+
+      - name: Upload immutable freeze candidate
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: economic-calendar-approval-freeze-candidate-${{ github.run_id }}
+          retention-days: 90
+          if-no-files-found: error
+          path: |
+            data/research/calendar-freeze/economic_calendar.approved.json
+            data/research/calendar-freeze/economic_calendar.approval.json
+            data/research/calendar-freeze/EconomicCalendarData.approved.mqh
