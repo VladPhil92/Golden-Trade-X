@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "plan_id": "GTX-WF-V1",
+  "start_date": "2021-01-01",
+  "end_date": "2026-01-01",
+  "in_sample_months": 12,
+  "oos_months": 3,
+  "step_months": 3,
+  "embargo_days": 0,
+  "minimum_folds": 4,
+  "selection_policy": {
+    "policy_id": "GTX-IS-SELECT-V1",
+    "objective": {
+      "metric": "profit_factor",
+      "direction": "maximize"
+    },
+    "constraints": [
+      {
+        "metric": "total_trades",
+        "operator": ">=",
+        "value": 30
+      },
+      {
+        "metric": "max_drawdown_pct",
+        "operator": "<=",
+        "value": 15.0
+      }
+    ],
+    "tie_breakers": [
+      {
+        "metric": "expected_payoff",
+        "direction": "maximize"
+      },
+      {
+        "metric": "total_net_profit",
+        "direction": "maximize"
+      }
+    ]
+  },
+  "promotion_policy_path": "promotion_policy.v1.json"
+}
