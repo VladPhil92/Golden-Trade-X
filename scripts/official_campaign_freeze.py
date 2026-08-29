@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
 """Freeze all pre-observation inputs for a Golden Trade X v3.0-rc1 campaign.
 
-An official lock is created only when the OOS promotion, robustness and forward
-policies were approved before evidence generation. Draft locks are allowed only
-through an explicit engineering flag and can never be promoted by the rc1 gate.
+An official lock is created only when the execution environment and the OOS
+promotion, robustness and forward policies were approved before evidence
+generation. Draft locks are allowed only through an explicit engineering flag
+and can never be promoted by the rc1 gate.
+
+The build SHA can be injected at freeze time (for example from GITHUB_SHA). This
+avoids the impossible requirement for a tracked JSON file to contain the SHA of
+the same commit that contains that file. The injected SHA is frozen before any
+evidence is generated and becomes part of the campaign fingerprint.
 """
 
 from __future__ import annotations
@@ -22,6 +28,10 @@ try:
         robustness_template_sha256,
         robustness_template_snapshot,
     )
+    from scripts.execution_environment import (
+        canonical_environment_sha256,
+        load_execution_environment_contract,
+    )
     from scripts.experiment_registry import RegistryValidationError, sha256_file
     from scripts.walk_forward_planner import generate_walk_forward_plan
 except ModuleNotFoundError:
@@ -31,10 +41,16 @@ except ModuleNotFoundError:
         robustness_template_sha256,
         robustness_template_snapshot,
     )
+    from execution_environment import (
+        canonical_environment_sha256,
+        load_execution_environment_contract,
+    )
     from experiment_registry import RegistryValidationError, sha256_file
     from walk_forward_planner import generate_walk_forward_plan
 
 _BUILD_RE = re.compile(r"^[0-9a-fA-F]{40}$")
+_CANDIDATE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+_ZERO_SHA = "0" * 40
 
 
 def _load(path: str | Path) -> dict[str, Any]:
@@ -76,13 +92,22 @@ def _policy_snapshot(path: Path, role: str) -> dict[str, Any]:
 
 
 def _preset_allows_real_trading(path: Path) -> bool:
+    values: list[str] = []
     for raw in path.read_text(encoding="utf-8-sig").splitlines():
         line = raw.strip()
         if line.startswith("InpAllowRealTrading="):
-            value = line.split("=", 1)[1].strip().lower()
-            return value in {"true", "1"}
+            values.append(line.split("=", 1)[1].strip().lower())
+    if len(values) != 1:
+        raise RegistryValidationError(
+            "candidate preset must contain exactly one InpAllowRealTrading=false entry: "
+            f"{path}"
+        )
+    if values[0] == "false":
+        return False
+    if values[0] == "true":
+        return True
     raise RegistryValidationError(
-        f"candidate preset must explicitly declare InpAllowRealTrading=false: {path}"
+        f"candidate preset has invalid InpAllowRealTrading value {values[0]!r}: {path}"
     )
 
 
@@ -90,12 +115,16 @@ def _candidate_universe(config_path: Path, raw: Any) -> tuple[list[dict[str, Any
     if not isinstance(raw, list) or not raw:
         raise RegistryValidationError("candidate_universe must be a non-empty array")
     records: list[dict[str, Any]] = []
+    names: set[str] = set()
     for item in raw:
         if not isinstance(item, dict):
             raise RegistryValidationError("candidate_universe entry must be an object")
         name = item.get("name")
-        if not isinstance(name, str) or not name.strip():
-            raise RegistryValidationError("candidate_universe entry requires name")
+        if not isinstance(name, str) or not _CANDIDATE_RE.fullmatch(name):
+            raise RegistryValidationError(f"invalid candidate name: {name!r}")
+        if name in names:
+            raise RegistryValidationError(f"duplicate candidate name: {name}")
+        names.add(name)
         path = _resolve(config_path.parent, item.get("preset_path"), f"candidate {name}.preset_path")
         if _preset_allows_real_trading(path):
             raise RegistryValidationError(
@@ -103,7 +132,7 @@ def _candidate_universe(config_path: Path, raw: Any) -> tuple[list[dict[str, Any
             )
         records.append(
             {
-                "name": name.strip(),
+                "name": name,
                 "preset_path": Path(str(item.get("preset_path"))).as_posix(),
                 "preset_sha256": sha256_file(path),
             }
@@ -113,6 +142,30 @@ def _candidate_universe(config_path: Path, raw: Any) -> tuple[list[dict[str, Any
     by_name = {item["name"]: item for item in records}
     ordered = [by_name[item["name"]] for item in normalized]
     return ordered, candidate_universe_sha256(normalized)
+
+
+def _resolve_build_id(config: dict[str, Any], build_id_override: str | None) -> str:
+    configured = config.get("build_id")
+    if build_id_override is None:
+        if not isinstance(configured, str) or not _BUILD_RE.fullmatch(configured):
+            raise RegistryValidationError("build_id must be an exact 40-character Git SHA")
+        return configured.lower()
+
+    override = build_id_override.strip().lower()
+    if not _BUILD_RE.fullmatch(override):
+        raise RegistryValidationError("build_id override must be an exact 40-character Git SHA")
+
+    if configured is not None:
+        if not isinstance(configured, str) or not _BUILD_RE.fullmatch(configured):
+            raise RegistryValidationError(
+                "configured build_id must be a full Git SHA or be omitted when using a build override"
+            )
+        configured = configured.lower()
+        if configured not in {_ZERO_SHA, override}:
+            raise RegistryValidationError(
+                "configured build_id differs from the build SHA supplied at campaign freeze"
+            )
+    return override
 
 
 def _campaign_fingerprint(core: dict[str, Any]) -> str:
@@ -130,6 +183,7 @@ def freeze_official_campaign(
     output_dir: str | Path,
     *,
     allow_draft: bool = False,
+    build_id_override: str | None = None,
 ) -> dict[str, Any]:
     config_path = Path(config_path).resolve()
     config = _load(config_path)
@@ -138,12 +192,19 @@ def freeze_official_campaign(
     campaign_id = config.get("campaign_id")
     if not isinstance(campaign_id, str) or not campaign_id.strip():
         raise RegistryValidationError("campaign_id is required")
-    build_id = config.get("build_id")
-    if not isinstance(build_id, str) or not _BUILD_RE.fullmatch(build_id):
-        raise RegistryValidationError("build_id must be an exact 40-character Git SHA")
-    build_id = build_id.lower()
+    build_id = _resolve_build_id(config, build_id_override)
 
     candidates, universe_sha = _candidate_universe(config_path, config.get("candidate_universe"))
+
+    environment_path = _resolve(
+        base,
+        config.get("execution_environment_path"),
+        "execution_environment_path",
+    )
+    execution_environment, environment_file_sha = load_execution_environment_contract(
+        environment_path
+    )
+    environment_canonical_sha = canonical_environment_sha256(execution_environment)
 
     walk_config = _resolve(base, config.get("walk_forward_config_path"), "walk_forward_config_path")
     robustness_template_path = _resolve(
@@ -167,21 +228,25 @@ def freeze_official_campaign(
     if not isinstance(promotion_policy, dict):
         raise RegistryValidationError("generated walk-forward plan lacks promotion policy snapshot")
 
-    all_policies_approved = (
-        walk_plan.get("status") == "READY_FOR_REGISTERED_EXECUTION"
+    all_inputs_approved = (
+        execution_environment["approved"] is True
+        and walk_plan.get("status") == "READY_FOR_REGISTERED_EXECUTION"
         and promotion_policy.get("approved") is True
         and robustness_policy["approved"] is True
         and forward_policy["approved"] is True
     )
-    if not all_policies_approved and not allow_draft:
+    if not all_inputs_approved and not allow_draft:
         raise RegistryValidationError(
-            "official campaign freeze requires approved OOS promotion, robustness and forward-demo policies"
+            "official campaign freeze requires an approved execution environment and approved "
+            "OOS promotion, robustness and forward-demo policies"
         )
 
     core = {
         "campaign_id": campaign_id.strip(),
         "build_id": build_id,
         "candidate_universe_sha256": universe_sha,
+        "execution_environment_file_sha256": environment_file_sha,
+        "execution_environment_sha256": environment_canonical_sha,
         "walk_forward_plan_sha256": sha256_file(walk_plan_path),
         "promotion_policy_sha256": promotion_policy.get("sha256"),
         "robustness_template_sha256": robustness_template_sha256(robustness_template),
@@ -195,7 +260,7 @@ def freeze_official_campaign(
         "campaign_id": campaign_id.strip(),
         "status": (
             "OFFICIAL_CAMPAIGN_FROZEN"
-            if all_policies_approved
+            if all_inputs_approved
             else "ENGINEERING_DRAFT_NOT_OFFICIAL"
         ),
         "decision_scope": "EVIDENCE_GENERATION_ONLY",
@@ -205,6 +270,12 @@ def freeze_official_campaign(
             "sha256": universe_sha,
             "count": len(candidates),
             "candidates": candidates,
+        },
+        "execution_environment": {
+            "path": Path(str(config.get("execution_environment_path"))).as_posix(),
+            "file_sha256": environment_file_sha,
+            "canonical_sha256": environment_canonical_sha,
+            "contract": execution_environment,
         },
         "walk_forward": {
             "config_path": Path(str(config.get("walk_forward_config_path"))).as_posix(),
@@ -227,6 +298,7 @@ def freeze_official_campaign(
             "policy": forward_policy,
         },
         "required_sequence": [
+            "MT5_EXECUTION_ENVIRONMENT_ATTESTATION_V1",
             "ROLLING_IS_FROZEN_OOS",
             "OOS_PROMOTION_GATE",
             "ROBUSTNESS_V1",
@@ -253,11 +325,20 @@ def main() -> None:
     parser.add_argument(
         "--allow-draft",
         action="store_true",
-        help="Generate an engineering-only lock when policies are still unapproved.",
+        help="Generate an engineering-only lock when inputs are still unapproved.",
+    )
+    parser.add_argument(
+        "--build-id",
+        help="Exact checked-out Git SHA to freeze before evidence generation.",
     )
     args = parser.parse_args()
     try:
-        result = freeze_official_campaign(args.config, args.output_dir, allow_draft=args.allow_draft)
+        result = freeze_official_campaign(
+            args.config,
+            args.output_dir,
+            allow_draft=args.allow_draft,
+            build_id_override=args.build_id,
+        )
     except RegistryValidationError as exc:
         parser.error(str(exc))
         return
