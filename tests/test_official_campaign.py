@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from scripts.campaign_contract import candidate_universe_sha256
+from scripts.execution_environment import canonical_environment_sha256
 from scripts.experiment_registry import RegistryValidationError, sha256_file
 from scripts.official_campaign_freeze import freeze_official_campaign
 from scripts.rc1_release_review_gate import evaluate_rc1_release_review
@@ -27,13 +28,45 @@ def _policy(path: Path, policy_id: str, *, approved: bool = True) -> Path:
     )
 
 
-def _campaign_inputs(tmp_path: Path, *, promotion_approved: bool = True) -> tuple[Path, Path]:
+def _environment() -> dict:
+    return {
+        "schema_version": 1,
+        "environment_id": "TEST-RC1-DEMO-ENV",
+        "approved": True,
+        "live_trading_authorized": False,
+        "require_trade_mode": "DEMO",
+        "broker_label": "TEST-BROKER-CANONICAL",
+        "account_company": "Test Broker Ltd",
+        "account_server": "TestBroker-Demo",
+        "symbol": "XAUUSD",
+        "timeframe": "M15",
+        "mt5_build": "5555",
+        "modelling": "Every tick based on real ticks",
+        "tester_model": 4,
+        "expert": "GoldenTradeX\\GoldenTradeX.ex5",
+        "execution_mode": 0,
+        "portable_mode": True,
+        "deposit": 10000,
+        "currency": "USD",
+        "leverage": 100,
+        "spread_mode": "tester/broker observed",
+        "commission": None,
+        "swap_mode": "tester/broker observed",
+        "slippage_points": 0,
+        "optimization": False,
+        "forward_mode": "disabled",
+        "forward_mode_code": 0,
+    }
+
+
+def _campaign_inputs(tmp_path: Path, *, promotion_approved: bool = True) -> tuple[Path, Path, Path]:
     preset = tmp_path / "candidate.set"
     preset.write_text(Path("config/GoldenTradeX.set").read_text(encoding="utf-8"), encoding="utf-8")
 
     promotion = _policy(tmp_path / "promotion.json", "TEST-PROMOTION", approved=promotion_approved)
     robustness = _policy(tmp_path / "robustness.json", "TEST-ROBUSTNESS")
     forward = _policy(tmp_path / "forward.json", "TEST-FORWARD")
+    environment = _write_json(tmp_path / "environment.json", _environment())
 
     walk = _write_json(
         tmp_path / "walk.json",
@@ -86,18 +119,19 @@ def _campaign_inputs(tmp_path: Path, *, promotion_approved: bool = True) -> tupl
             "candidate_universe": [
                 {"name": "baseline", "preset_path": preset.name}
             ],
+            "execution_environment_path": environment.name,
             "walk_forward_config_path": walk.name,
             "robustness_template_path": template.name,
             "robustness_policy_path": robustness.name,
             "forward_policy_path": forward.name,
         },
     )
-    return config, preset
+    return config, preset, environment
 
 
 def test_official_freeze_requires_all_policies_approved(tmp_path: Path) -> None:
-    config, _ = _campaign_inputs(tmp_path, promotion_approved=False)
-    with pytest.raises(RegistryValidationError, match="requires approved"):
+    config, _, _ = _campaign_inputs(tmp_path, promotion_approved=False)
+    with pytest.raises(RegistryValidationError, match="requires an approved execution environment"):
         freeze_official_campaign(config, tmp_path / "out")
 
     draft = freeze_official_campaign(config, tmp_path / "draft", allow_draft=True)
@@ -105,8 +139,8 @@ def test_official_freeze_requires_all_policies_approved(tmp_path: Path) -> None:
     assert draft["live_trading_authorized"] is False
 
 
-def test_official_freeze_hashes_candidate_universe_and_walk_plan(tmp_path: Path) -> None:
-    config, preset = _campaign_inputs(tmp_path)
+def test_official_freeze_hashes_environment_candidate_universe_and_walk_plan(tmp_path: Path) -> None:
+    config, preset, environment = _campaign_inputs(tmp_path)
     result = freeze_official_campaign(config, tmp_path / "out")
 
     assert result["status"] == "OFFICIAL_CAMPAIGN_FROZEN"
@@ -114,6 +148,10 @@ def test_official_freeze_hashes_candidate_universe_and_walk_plan(tmp_path: Path)
     assert result["candidate_universe"]["candidates"][0]["preset_sha256"] == sha256_file(preset)
     assert result["candidate_universe"]["sha256"] == candidate_universe_sha256(
         result["candidate_universe"]["candidates"]
+    )
+    assert result["execution_environment"]["file_sha256"] == sha256_file(environment)
+    assert result["execution_environment"]["canonical_sha256"] == canonical_environment_sha256(
+        json.loads(environment.read_text(encoding="utf-8"))
     )
     assert (tmp_path / "out" / "walk_forward_plan.json").is_file()
     assert result["walk_forward"]["plan_sha256"] == sha256_file(
@@ -123,7 +161,7 @@ def test_official_freeze_hashes_candidate_universe_and_walk_plan(tmp_path: Path)
 
 
 def test_official_freeze_rejects_candidate_that_enables_real_trading(tmp_path: Path) -> None:
-    config, preset = _campaign_inputs(tmp_path)
+    config, preset, _ = _campaign_inputs(tmp_path)
     text = preset.read_text(encoding="utf-8")
     assert "InpAllowRealTrading=false" in text
     preset.write_text(text.replace("InpAllowRealTrading=false", "InpAllowRealTrading=true"), encoding="utf-8")
@@ -133,7 +171,7 @@ def test_official_freeze_rejects_candidate_that_enables_real_trading(tmp_path: P
 
 
 def _build_release_bundle(tmp_path: Path) -> tuple[Path, dict]:
-    config, _ = _campaign_inputs(tmp_path)
+    config, _, _ = _campaign_inputs(tmp_path)
     out = tmp_path / "freeze"
     lock = freeze_official_campaign(config, out)
     lock_path = out / "campaign_lock.json"
