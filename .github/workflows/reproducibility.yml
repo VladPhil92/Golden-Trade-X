@@ -71,6 +71,7 @@ jobs:
           tests/test_strategy_tester_results.py
           tests/test_strategy_tester_harness.py
           tests/test_strategy_tester_matrix.py
+          tests/test_strategy_tester_matrix_adversarial.py
           tests/test_telemetry_db.py
           tests/test_economic_calendar_contract.py
           tests/test_materialize_official_calendar.py
@@ -80,9 +81,13 @@ jobs:
           tests/test_walk_forward_validation.py
           tests/test_robustness_validation.py
           tests/test_forward_demo_validation.py
+          tests/test_forward_readiness_adversarial.py
           tests/test_official_campaign.py
           tests/test_official_campaign_runner.py
           tests/test_official_campaign_runner_fail_closed.py
+          tests/test_official_campaign_execution_orchestration.py
+          tests/test_quant_orchestration_adversarial.py
+          tests/test_quant_contracts_adversarial.py
           tests/test_real_money_interlock.py
           -v --tb=short
 
@@ -108,6 +113,7 @@ jobs:
             tests/test_strategy_tester_results.py \
             tests/test_strategy_tester_harness.py \
             tests/test_strategy_tester_matrix.py \
+            tests/test_strategy_tester_matrix_adversarial.py \
             tests/test_economic_calendar_contract.py \
             tests/test_materialize_official_calendar.py \
             tests/test_daily_opportunity_metrics.py \
@@ -116,9 +122,13 @@ jobs:
             tests/test_walk_forward_validation.py \
             tests/test_robustness_validation.py \
             tests/test_forward_demo_validation.py \
+            tests/test_forward_readiness_adversarial.py \
             tests/test_official_campaign.py \
             tests/test_official_campaign_runner.py \
             tests/test_official_campaign_runner_fail_closed.py \
+            tests/test_official_campaign_execution_orchestration.py \
+            tests/test_quant_orchestration_adversarial.py \
+            tests/test_quant_contracts_adversarial.py \
             --tb=short \
             --cov=scripts.experiment_registry \
             --cov=scripts.strategy_tester_results \
@@ -146,7 +156,7 @@ jobs:
             --cov=scripts.official_campaign_runner \
             --cov=scripts.rc1_release_review_gate \
             --cov-report=term-missing \
-            --cov-fail-under=70
+            --cov-fail-under=80
 
   reproducibility-required:
     name: Reproducibility required gate
