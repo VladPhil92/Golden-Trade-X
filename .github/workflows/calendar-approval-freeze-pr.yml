@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - "data/research/calendar-freeze/approval_request.json"
+      - "data/research/calendar-freeze/economic_calendar.approved.json"
+      - "data/research/calendar-freeze/economic_calendar.approval.json"
+      - "data/research/calendar-freeze/EconomicCalendarData.approved.mqh"
       - "data/research/calendar-sources/v1/**"
       - "data/research/calendar-review/**"
       - "scripts/freeze_approved_economic_calendar.py"
@@ -13,10 +16,8 @@ on:
       - "scripts/economic_calendar_contract.py"
       - ".github/workflows/calendar-approval-freeze-pr.yml"
 
-# TEMPORARY branch-local permission used only to persist the deterministic freeze outputs.
-# This workflow is reverted to contents: read before PR merge.
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
@@ -87,6 +88,20 @@ jobs:
           git diff --quiet "$GTX_SOURCE_MERGE_COMMIT" HEAD -- data/research/calendar-sources/v1
           git diff --quiet "$GTX_SOURCE_MERGE_COMMIT" origin/main -- data/research/calendar-sources/v1
 
+      - name: Snapshot committed approved outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="$RUNNER_TEMP/calendar-freeze-expected"
+          mkdir -p "$expected"
+          for name in \
+            economic_calendar.approved.json \
+            economic_calendar.approval.json \
+            EconomicCalendarData.approved.mqh; do
+            test -f "data/research/calendar-freeze/$name"
+            cp "data/research/calendar-freeze/$name" "$expected/$name"
+          done
+
       - name: Freeze approved contract from exact reviewed snapshots
         shell: bash
         run: |
@@ -134,25 +149,19 @@ jobs:
           print("CALENDAR APPROVAL FREEZE CANDIDATE PASS — validation only")
           PY
 
-      - name: Persist exact generated outputs to this PR branch
-        if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'data/official-calendar-approval-freeze'
+      - name: Verify committed outputs are byte-identical to deterministic regeneration
         shell: bash
-        env:
-          GTX_HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
           set -euo pipefail
-          git add \
-            data/research/calendar-freeze/economic_calendar.approved.json \
-            data/research/calendar-freeze/economic_calendar.approval.json \
-            data/research/calendar-freeze/EconomicCalendarData.approved.mqh
-          if git diff --cached --quiet; then
-            echo "Approved freeze outputs already match deterministic generation."
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "data: persist deterministic approved calendar freeze"
-          git push origin "HEAD:${GTX_HEAD_REF}"
+          expected="$RUNNER_TEMP/calendar-freeze-expected"
+          for name in \
+            economic_calendar.approved.json \
+            economic_calendar.approval.json \
+            EconomicCalendarData.approved.mqh; do
+            cmp "$expected/$name" "data/research/calendar-freeze/$name"
+            sha256sum "data/research/calendar-freeze/$name"
+          done
+          echo "COMMITTED CALENDAR FREEZE OUTPUTS MATCH DETERMINISTIC REGENERATION"
 
       - name: Upload immutable freeze candidate
         if: success()
