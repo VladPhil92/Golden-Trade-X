@@ -1,0 +1,21 @@
+{
+  "approval_note": "Repository owner authorized the next controlled approval-freeze step after source capture, manifest verification, and green validation gates.",
+  "approved_at_utc": "2026-08-29T22:00:51Z",
+  "approved_by": "VladPhil92",
+  "approved_calendar_canonical_sha256": "8100a4a6b6bf9b8485c90c8336e1d7c49491438a4d1d26a13d8f152f56b78329",
+  "calendar_id": "GTX-ECONOMIC-CALENDAR-2021-2025-V1",
+  "coverage": {
+    "end_utc": "2025-12-31T23:59:59Z",
+    "start_utc": "2021-01-01T00:00:00Z"
+  },
+  "decision": "APPROVED_FOR_OFFICIAL_VALIDATION",
+  "event_count": 158,
+  "live_trading_authorized": false,
+  "methodology": "OFFICIAL_ECONOMIC_CALENDAR_APPROVAL_FREEZE_V1",
+  "real_capital_authorized": false,
+  "review_audit_file_sha256": "5d6c5ca876ce14dd5ad6ba00a60dedea0ef09c68cb40b248970924aa7613aa87",
+  "review_calendar_canonical_sha256": "6263fb75285b8aeb24c157e9fb8eeb09a15de30c682ceb69479177edf38954bd",
+  "review_calendar_file_sha256": "dae432c459ab74293f232081237b6210ae564f6d7ea072425762091cf9b97e53",
+  "schema_version": 1,
+  "source_manifest_sha256": "79d3392e8c7b38d700def0d0ca347279b74a5a6ab43a4e818de194d8de08591c"
+}
