@@ -5,6 +5,11 @@ An official lock is created only when the execution environment and the OOS
 promotion, robustness and forward policies were approved before evidence
 generation. Draft locks are allowed only through an explicit engineering flag
 and can never be promoted by the rc1 gate.
+
+The build SHA can be injected at freeze time (for example from GITHUB_SHA). This
+avoids the impossible requirement for a tracked JSON file to contain the SHA of
+the same commit that contains that file. The injected SHA is frozen before any
+evidence is generated and becomes part of the campaign fingerprint.
 """
 
 from __future__ import annotations
@@ -45,6 +50,7 @@ except ModuleNotFoundError:
 
 _BUILD_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 _CANDIDATE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+_ZERO_SHA = "0" * 40
 
 
 def _load(path: str | Path) -> dict[str, Any]:
@@ -129,6 +135,30 @@ def _candidate_universe(config_path: Path, raw: Any) -> tuple[list[dict[str, Any
     return ordered, candidate_universe_sha256(normalized)
 
 
+def _resolve_build_id(config: dict[str, Any], build_id_override: str | None) -> str:
+    configured = config.get("build_id")
+    if build_id_override is None:
+        if not isinstance(configured, str) or not _BUILD_RE.fullmatch(configured):
+            raise RegistryValidationError("build_id must be an exact 40-character Git SHA")
+        return configured.lower()
+
+    override = build_id_override.strip().lower()
+    if not _BUILD_RE.fullmatch(override):
+        raise RegistryValidationError("build_id override must be an exact 40-character Git SHA")
+
+    if configured is not None:
+        if not isinstance(configured, str) or not _BUILD_RE.fullmatch(configured):
+            raise RegistryValidationError(
+                "configured build_id must be a full Git SHA or be omitted when using a build override"
+            )
+        configured = configured.lower()
+        if configured not in {_ZERO_SHA, override}:
+            raise RegistryValidationError(
+                "configured build_id differs from the build SHA supplied at campaign freeze"
+            )
+    return override
+
+
 def _campaign_fingerprint(core: dict[str, Any]) -> str:
     payload = json.dumps(
         core,
@@ -144,6 +174,7 @@ def freeze_official_campaign(
     output_dir: str | Path,
     *,
     allow_draft: bool = False,
+    build_id_override: str | None = None,
 ) -> dict[str, Any]:
     config_path = Path(config_path).resolve()
     config = _load(config_path)
@@ -152,10 +183,7 @@ def freeze_official_campaign(
     campaign_id = config.get("campaign_id")
     if not isinstance(campaign_id, str) or not campaign_id.strip():
         raise RegistryValidationError("campaign_id is required")
-    build_id = config.get("build_id")
-    if not isinstance(build_id, str) or not _BUILD_RE.fullmatch(build_id):
-        raise RegistryValidationError("build_id must be an exact 40-character Git SHA")
-    build_id = build_id.lower()
+    build_id = _resolve_build_id(config, build_id_override)
 
     candidates, universe_sha = _candidate_universe(config_path, config.get("candidate_universe"))
 
@@ -290,9 +318,18 @@ def main() -> None:
         action="store_true",
         help="Generate an engineering-only lock when inputs are still unapproved.",
     )
+    parser.add_argument(
+        "--build-id",
+        help="Exact checked-out Git SHA to freeze before evidence generation.",
+    )
     args = parser.parse_args()
     try:
-        result = freeze_official_campaign(args.config, args.output_dir, allow_draft=args.allow_draft)
+        result = freeze_official_campaign(
+            args.config,
+            args.output_dir,
+            allow_draft=args.allow_draft,
+            build_id_override=args.build_id,
+        )
     except RegistryValidationError as exc:
         parser.error(str(exc))
         return
