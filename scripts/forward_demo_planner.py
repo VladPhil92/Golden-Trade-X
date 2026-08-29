@@ -27,6 +27,7 @@ _BUILD_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 
 SNAPSHOT_FIELDS: tuple[tuple[str, str], ...] = (
     ("InpMagicNumber", "int"),
+    ("InpAllowRealTrading", "bool"),
     ("InpEmaFast", "int"),
     ("InpEmaSlow", "int"),
     ("InpRsiPeriod", "int"),
@@ -319,6 +320,10 @@ def generate_forward_demo_plan(config_path: str | Path, output_path: str | Path)
         raise RegistryValidationError("planned observation window is shorter than policy minimum_calendar_days")
 
     snapshot, canonical = canonical_runtime_snapshot(preset_path)
+    if canonical["InpAllowRealTrading"] != "0":
+        raise RegistryValidationError(
+            "forward-demo frozen preset must keep InpAllowRealTrading=false"
+        )
     expected_config_sha = hashlib.sha256(snapshot.encode("utf-8")).hexdigest()
     magic = int(canonical["InpMagicNumber"])
     expected_tf = _TIMEFRAME_LABELS.get(int(canonical["InpTimeframe"]))
