@@ -3,7 +3,8 @@
 
 This module prepares deterministic Strategy Tester configuration files and can
 optionally execute MetaTrader on Windows. Preparation is not treated as an
-executed backtest: completion requires an observed report artifact.
+executed backtest. Since v2.90.1, completion additionally requires a Strategy
+Tester report that can be normalized into the minimum research metric contract.
 """
 
 from __future__ import annotations
@@ -27,6 +28,10 @@ try:
         set_status,
         sha256_file,
     )
+    from scripts.strategy_tester_results import (
+        StrategyTesterResultError,
+        write_normalized_results,
+    )
 except ModuleNotFoundError:
     from experiment_registry import (
         RegistryValidationError,
@@ -36,6 +41,10 @@ except ModuleNotFoundError:
         register_experiment,
         set_status,
         sha256_file,
+    )
+    from strategy_tester_results import (
+        StrategyTesterResultError,
+        write_normalized_results,
     )
 
 
@@ -51,6 +60,37 @@ def _portable_mode(spec: dict[str, Any]) -> bool:
     if not isinstance(value, bool):
         raise RegistryValidationError("portable_mode must be true/false")
     return value
+
+
+def _write_manifest(path: Path, payload: dict[str, Any]) -> None:
+    path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _update_execution_manifest(
+    manifest_path: Path,
+    *,
+    status: str,
+    exit_code: int | None = None,
+    report_path: Path | None = None,
+    normalized_path: Path | None = None,
+    error: str | None = None,
+) -> None:
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    payload["status"] = status
+    if exit_code is not None:
+        payload["terminal_exit_code"] = exit_code
+    if report_path is not None and report_path.is_file():
+        payload["report_sha256"] = sha256_file(report_path)
+        payload["report_size"] = report_path.stat().st_size
+    if normalized_path is not None and normalized_path.is_file():
+        payload["normalized_results_sha256"] = sha256_file(normalized_path)
+        payload["normalized_results_size"] = normalized_path.stat().st_size
+    if error:
+        payload["error"] = error
+    _write_manifest(manifest_path, payload)
 
 
 def build_tester_config(spec: dict[str, Any], output_dir: str | Path) -> tuple[Path, Path]:
@@ -103,10 +143,11 @@ def build_tester_config(spec: dict[str, Any], output_dir: str | Path) -> tuple[P
         config.write(handle, space_around_delimiters=False)
 
     execution_manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "tester_ini": ini_path.name,
         "tester_ini_sha256": sha256_file(ini_path),
         "expected_report": report_path.name,
+        "expected_normalized_results": "normalized_results.json",
         "git_sha": spec.get("git_sha"),
         "preset_path": spec.get("preset_path"),
         "symbol": symbol,
@@ -119,10 +160,7 @@ def build_tester_config(spec: dict[str, Any], output_dir: str | Path) -> tuple[P
         "modelling": spec.get("modelling"),
         "status": "PREPARED_NOT_EXECUTED",
     }
-    manifest_path.write_text(
-        json.dumps(execution_manifest, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+    _write_manifest(manifest_path, execution_manifest)
     return ini_path, manifest_path
 
 
@@ -189,12 +227,53 @@ def run_registered_experiment(
             portable_mode=portable_mode,
         )
         report_path = run_dir / "strategy_tester_report.htm"
+        normalized_path = run_dir / "normalized_results.json"
+
         if exit_code != 0 or not report_path.is_file() or report_path.stat().st_size == 0:
-            set_status(connection, experiment_id, "FAILED")
-            raise RegistryValidationError(
-                f"Strategy Tester did not produce valid evidence (exit_code={exit_code}, report={report_path})"
+            message = (
+                "Strategy Tester did not produce valid evidence "
+                f"(exit_code={exit_code}, report={report_path})"
             )
+            _update_execution_manifest(
+                manifest_path,
+                status="FAILED",
+                exit_code=exit_code,
+                report_path=report_path,
+                error=message,
+            )
+            attach_artifact(connection, experiment_id, "execution_manifest", manifest_path)
+            set_status(connection, experiment_id, "FAILED")
+            raise RegistryValidationError(message)
+
         attach_artifact(connection, experiment_id, "strategy_tester_report", report_path)
+        try:
+            write_normalized_results(
+                report_path,
+                normalized_path,
+                experiment_id=experiment_id,
+            )
+        except StrategyTesterResultError as exc:
+            message = f"Strategy Tester report failed normalization: {exc}"
+            _update_execution_manifest(
+                manifest_path,
+                status="FAILED",
+                exit_code=exit_code,
+                report_path=report_path,
+                error=message,
+            )
+            attach_artifact(connection, experiment_id, "execution_manifest", manifest_path)
+            set_status(connection, experiment_id, "FAILED")
+            raise RegistryValidationError(message) from exc
+
+        attach_artifact(connection, experiment_id, "normalized_results", normalized_path)
+        _update_execution_manifest(
+            manifest_path,
+            status="COMPLETED",
+            exit_code=exit_code,
+            report_path=report_path,
+            normalized_path=normalized_path,
+        )
+        attach_artifact(connection, experiment_id, "execution_manifest", manifest_path)
         return set_status(connection, experiment_id, "COMPLETED")
     finally:
         connection.close()
