@@ -5,6 +5,10 @@ This module measures participation; it never promotes a strategy and never infer
 The denominator is an explicit set of eligible trading dates. By default that is Monday
 through Friday in the requested half-open interval [start_date, end_date). A caller may
 provide a newline-delimited trading-day file to use an exact broker/session calendar.
+
+Input may be either realized/hypothetical trade CSV evidence or the v3.1 MQL5 shadow
+opportunity ledger. Shadow mode counts only rows with ``Selected=1``; rejected/scanned
+alternatives never inflate activity metrics.
 """
 
 from __future__ import annotations
@@ -46,6 +50,16 @@ def _parse_utc(raw: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
+def _parse_mql_utc(raw: str) -> datetime:
+    value = raw.strip()
+    if not value:
+        raise ActivityMetricsError("shadow UtcTime is empty")
+    try:
+        return datetime.strptime(value, "%Y.%m.%d %H:%M:%S").replace(tzinfo=timezone.utc)
+    except ValueError as exc:
+        raise ActivityMetricsError(f"invalid MQL shadow UtcTime: {raw!r}") from exc
+
+
 def load_trades_csv(
     path: str | Path,
     *,
@@ -70,6 +84,43 @@ def load_trades_csv(
             setup = (row.get(setup_column, "") or "UNCLASSIFIED").strip() or "UNCLASSIFIED"
             trades.append(TradeActivity(entry, symbol, setup))
     return trades
+
+
+def load_shadow_ledger(path: str | Path) -> list[TradeActivity]:
+    """Load only selected v3.1 shadow opportunities from the MQL5 CSV ledger."""
+    source = Path(path)
+    if not source.is_file():
+        raise ActivityMetricsError(f"shadow ledger not found: {source}")
+    required = {"UtcTime", "ScannedSymbol", "Setup", "Selected", "SourceValid"}
+    with source.open(newline="", encoding="utf-8-sig") as handle:
+        reader = csv.DictReader(handle)
+        fields = set(reader.fieldnames or [])
+        missing = sorted(required - fields)
+        if missing:
+            raise ActivityMetricsError(f"shadow ledger missing columns: {', '.join(missing)}")
+
+        selected: list[TradeActivity] = []
+        for row_no, row in enumerate(reader, start=2):
+            selected_flag = (row.get("Selected", "") or "").strip()
+            if selected_flag not in {"0", "1"}:
+                raise ActivityMetricsError(f"row {row_no}: Selected must be 0 or 1")
+            source_valid = (row.get("SourceValid", "") or "").strip()
+            if source_valid not in {"0", "1"}:
+                raise ActivityMetricsError(f"row {row_no}: SourceValid must be 0 or 1")
+            if selected_flag == "0":
+                continue
+            if source_valid != "1":
+                raise ActivityMetricsError(f"row {row_no}: selected shadow row is not source-valid")
+            try:
+                entry = _parse_mql_utc(row.get("UtcTime", ""))
+            except ActivityMetricsError as exc:
+                raise ActivityMetricsError(f"row {row_no}: {exc}") from exc
+            symbol = (row.get("ScannedSymbol", "") or "").strip()
+            setup = (row.get("Setup", "") or "").strip()
+            if not symbol or not setup or setup == "NONE":
+                raise ActivityMetricsError(f"row {row_no}: selected shadow row lacks symbol/setup identity")
+            selected.append(TradeActivity(entry, symbol, setup))
+    return selected
 
 
 def weekday_trading_days(start: date, end_exclusive: date) -> list[date]:
@@ -163,7 +214,9 @@ def compute_activity_metrics(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--trades", required=True)
+    evidence = parser.add_mutually_exclusive_group(required=True)
+    evidence.add_argument("--trades")
+    evidence.add_argument("--shadow-ledger")
     parser.add_argument("--start-date", required=True, help="YYYY-MM-DD inclusive")
     parser.add_argument("--end-date", required=True, help="YYYY-MM-DD exclusive")
     parser.add_argument("--trading-days-file")
@@ -176,12 +229,15 @@ def main() -> None:
     try:
         start = date.fromisoformat(args.start_date)
         end_exclusive = date.fromisoformat(args.end_date)
-        trades = load_trades_csv(
-            args.trades,
-            entry_column=args.entry_column,
-            symbol_column=args.symbol_column,
-            setup_column=args.setup_column,
-        )
+        if args.shadow_ledger:
+            trades = load_shadow_ledger(args.shadow_ledger)
+        else:
+            trades = load_trades_csv(
+                args.trades,
+                entry_column=args.entry_column,
+                symbol_column=args.symbol_column,
+                setup_column=args.setup_column,
+            )
         if args.trading_days_file:
             days = load_trading_days(args.trading_days_file)
             if not days or days[0] < start or days[-1] >= end_exclusive:
