@@ -73,6 +73,27 @@ Copy-Item (Join-Path $repoMql5 "Scripts\Tests\*") $testsDst -Recurse -Force
 $tests = @(Get-ChildItem $testsDst -Filter "Test*.mq5" -File | Sort-Object Name)
 if ($tests.Count -eq 0) { throw "No MQL5 tests found" }
 
+# Safety-critical lifecycle tests are mandatory, not optional discovery. This
+# prevents a deletion/rename from silently shrinking runtime verification while
+# leaving the generic Test*.mq5 loop green.
+$requiredTestNames = @(
+    "TestExecutionLifecycle.mq5",
+    "TestHealthMonitor.mq5",
+    "TestOrderManager.mq5",
+    "TestPositionState.mq5",
+    "TestPositionStateRestartStage1.mq5",
+    "TestPositionStateRestartStage2.mq5",
+    "TestRiskManager.mq5",
+    "TestIntegration.mq5"
+)
+$discoveredNames = @($tests | ForEach-Object { $_.Name })
+foreach ($required in $requiredTestNames) {
+    if ($discoveredNames -notcontains $required) {
+        throw "Required MQL5 lifecycle test is missing: $required"
+    }
+}
+Write-Host "Required lifecycle manifest PASS — $($requiredTestNames.Count) mandatory tests present"
+
 Stop-MT
 foreach ($source in $tests) {
     $base = [IO.Path]::GetFileNameWithoutExtension($source.Name)
