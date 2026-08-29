@@ -102,9 +102,9 @@ def _preset_allows_real_trading(path: Path) -> bool:
             "candidate preset must contain exactly one InpAllowRealTrading=false entry: "
             f"{path}"
         )
-    if values[0] in {"false", "0"}:
+    if values[0] == "false":
         return False
-    if values[0] in {"true", "1"}:
+    if values[0] == "true":
         return True
     raise RegistryValidationError(
         f"candidate preset has invalid InpAllowRealTrading value {values[0]!r}: {path}"
