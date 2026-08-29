@@ -40,6 +40,7 @@ jobs:
           scripts/campaign_contract.py
           scripts/economic_calendar_contract.py
           scripts/materialize_official_calendar.py
+          scripts/daily_opportunity_metrics.py
           scripts/official_policy_check.py
           scripts/pre_campaign_readiness.py
           scripts/execution_environment.py
@@ -73,6 +74,7 @@ jobs:
           tests/test_telemetry_db.py
           tests/test_economic_calendar_contract.py
           tests/test_materialize_official_calendar.py
+          tests/test_daily_opportunity_metrics.py
           tests/test_official_policy_check.py
           tests/test_pre_campaign_readiness.py
           tests/test_walk_forward_validation.py
@@ -108,6 +110,7 @@ jobs:
             tests/test_strategy_tester_matrix.py \
             tests/test_economic_calendar_contract.py \
             tests/test_materialize_official_calendar.py \
+            tests/test_daily_opportunity_metrics.py \
             tests/test_official_policy_check.py \
             tests/test_pre_campaign_readiness.py \
             tests/test_walk_forward_validation.py \
@@ -123,6 +126,7 @@ jobs:
             --cov=scripts.strategy_tester_matrix \
             --cov=scripts.economic_calendar_contract \
             --cov=scripts.materialize_official_calendar \
+            --cov=scripts.daily_opportunity_metrics \
             --cov=scripts.official_policy_check \
             --cov=scripts.pre_campaign_readiness \
             --cov=scripts.walk_forward_planner \
