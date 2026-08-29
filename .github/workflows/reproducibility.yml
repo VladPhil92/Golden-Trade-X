@@ -64,6 +64,24 @@ jobs:
           scripts/rc1_release_review_gate.py
       - name: Validate frozen official policy bundle
         run: python scripts/official_policy_check.py --config-root config
+      - name: Validate canonical approved economic calendar
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmp config/economic_calendar.v1.json data/research/calendar-freeze/economic_calendar.approved.json
+          cmp MQL5/Include/GoldenTradeX/EconomicCalendarData.mqh data/research/calendar-freeze/EconomicCalendarData.approved.mqh
+          python scripts/economic_calendar_contract.py \
+            --contract config/economic_calendar.v1.json \
+            --require-approved \
+            --verify-mql5 MQL5/Include/GoldenTradeX/EconomicCalendarData.mqh
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          campaign = json.loads(Path("config/official_validation_campaign.json").read_text(encoding="utf-8"))
+          if campaign.get("economic_calendar_path") != "economic_calendar.v1.json":
+              raise SystemExit("official campaign must reference economic_calendar.v1.json")
+          print("CANONICAL APPROVED ECONOMIC CALENDAR PASS")
+          PY
       - name: Run reproducibility contract tests
         env:
           PYTHONPATH: ${{ github.workspace }}/scripts:${{ github.workspace }}

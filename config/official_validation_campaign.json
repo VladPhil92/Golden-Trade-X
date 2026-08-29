@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "campaign_id": "GTX-V3-RC1-OFFICIAL-VALIDATION-V1",
-  "status_note": "Canonical campaign definition. Quantitative policies and walk-forward geometry are frozen ex-ante. Execution remains fail-closed until the DEMO execution environment, exact economic calendar and robustness broker template are independently materialized and approved.",
+  "status_note": "Canonical campaign definition. Quantitative policies, walk-forward geometry and the source-backed economic calendar are frozen and approved for official validation. Execution remains fail-closed until the DEMO execution environment and robustness broker template are independently materialized and approved.",
   "build_id": "0000000000000000000000000000000000000000",
   "candidate_universe": [
     {
@@ -10,7 +10,7 @@
     }
   ],
   "execution_environment_path": "execution_environment.example.json",
-  "economic_calendar_path": "economic_calendar.example.json",
+  "economic_calendar_path": "economic_calendar.v1.json",
   "python_runtime_lock_path": "campaign_requirements.lock",
   "walk_forward_config_path": "walk_forward_plan.v1.json",
   "robustness_template_path": "robustness_template.example.json",

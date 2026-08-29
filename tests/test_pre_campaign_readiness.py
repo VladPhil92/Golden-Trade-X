@@ -89,8 +89,9 @@ def _fixture(
     campaign_id: str = "TEST-OFFICIAL",
     broker_labels: list[str] | None = None,
 ) -> tuple[Path, Path]:
+    tmp_path.mkdir(parents=True, exist_ok=True)
     calendar_doc = _calendar(calendar_approved)
-    calendar = _write(tmp_path / "calendar.json", calendar_doc)
+    calendar = _write(tmp_path / "economic_calendar.v1.json", calendar_doc)
     include = generate_mql5_include(calendar_doc, tmp_path / "EconomicCalendarData.mqh")
 
     for name in ("promotion_policy.v1.json", "robustness_policy.v1.json", "forward_demo_policy.v1.json"):
@@ -181,7 +182,7 @@ def test_calendar_must_cover_complete_walk_forward_period(tmp_path: Path) -> Non
 
 def test_calendar_cannot_end_before_last_instant_of_exclusive_window(tmp_path: Path) -> None:
     campaign, _ = _fixture(tmp_path)
-    calendar = tmp_path / "calendar.json"
+    calendar = tmp_path / "economic_calendar.v1.json"
     payload = json.loads(calendar.read_text(encoding="utf-8"))
     payload["coverage"]["end_utc"] = "2025-12-31T23:59:58Z"
     _write(calendar, payload)
@@ -221,4 +222,13 @@ def test_campaign_must_reference_frozen_policy_files(tmp_path: Path) -> None:
     payload["forward_policy_path"] = "forward_demo_policy.example.json"
     _write(campaign, payload)
     with pytest.raises(CampaignReadinessError, match="must reference frozen"):
+        evaluate_campaign_readiness(campaign, include)
+
+
+def test_campaign_must_reference_canonical_approved_calendar(tmp_path: Path) -> None:
+    campaign, include = _fixture(tmp_path)
+    payload = json.loads(campaign.read_text(encoding="utf-8"))
+    payload["economic_calendar_path"] = "economic_calendar.example.json"
+    _write(campaign, payload)
+    with pytest.raises(CampaignReadinessError, match="economic_calendar.v1.json"):
         evaluate_campaign_readiness(campaign, include)
