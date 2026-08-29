@@ -99,7 +99,7 @@ def build_tester_config(spec: dict[str, Any], output_dir: str | Path) -> tuple[P
     MT5 numeric model semantics are supplied explicitly by the experiment spec
     rather than inferred here, avoiding hidden assumptions across terminal builds.
     """
-    out = Path(output_dir)
+    out = Path(output_dir).resolve()
     out.mkdir(parents=True, exist_ok=True)
 
     expert = str(_required(spec, "expert"))
@@ -210,7 +210,7 @@ def run_registered_experiment(
     try:
         record = register_experiment(connection, spec, base_dir=spec_path.parent, status="PLANNED")
         experiment_id = record["experiment_id"]
-        run_dir = Path(output_dir) / experiment_id
+        run_dir = (Path(output_dir) / experiment_id).resolve()
         ini_path, manifest_path = build_tester_config(spec, run_dir)
         attach_artifact(connection, experiment_id, "tester_ini", ini_path)
         attach_artifact(connection, experiment_id, "execution_manifest", manifest_path)
