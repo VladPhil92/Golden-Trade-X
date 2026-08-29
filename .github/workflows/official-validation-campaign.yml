@@ -21,7 +21,7 @@ jobs:
   official-campaign:
     name: Frozen DEMO IS to OOS campaign
     runs-on: windows-latest
-    timeout-minutes: 720
+    timeout-minutes: 360
     env:
       GTX_CAMPAIGN_CONFIG: ${{ inputs.campaign_config }}
       GTX_TIMEOUT_SECONDS: ${{ inputs.timeout_seconds }}
