@@ -1,0 +1,13 @@
+{
+  "campaign_lock_path": "../data/research/official_campaign/campaign_lock.json",
+  "selection_manifest_path": "../data/research/walk_forward/WF001/selection_manifest.json",
+  "oos_summary_path": "../data/research/walk_forward/oos_summary.json",
+  "promotion_decision_path": "../data/research/walk_forward/promotion_decision.json",
+  "robustness_plan_path": "../data/research/robustness/robustness_plan.json",
+  "robustness_summary_path": "../data/research/robustness/robustness_summary.json",
+  "robustness_decision_path": "../data/research/robustness/robustness_decision.json",
+  "readiness_path": "../data/research/forward_demo/readiness.json",
+  "forward_plan_path": "../data/research/forward_demo/forward_plan.json",
+  "forward_evaluation_path": "../data/research/forward_demo/evaluation.json",
+  "forward_gate_path": "../data/research/forward_demo/gate.json"
+}
