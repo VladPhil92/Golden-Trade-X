@@ -39,6 +39,7 @@ jobs:
           scripts/telemetry_db.py
           scripts/campaign_contract.py
           scripts/economic_calendar_contract.py
+          scripts/official_policy_check.py
           scripts/pre_campaign_readiness.py
           scripts/execution_environment.py
           scripts/mt5_environment_probe.py
@@ -56,6 +57,8 @@ jobs:
           scripts/official_campaign_freeze.py
           scripts/official_campaign_runner.py
           scripts/rc1_release_review_gate.py
+      - name: Validate frozen official policy bundle
+        run: python scripts/official_policy_check.py --config-root config
       - name: Run reproducibility contract tests
         env:
           PYTHONPATH: ${{ github.workspace }}/scripts:${{ github.workspace }}
@@ -68,6 +71,7 @@ jobs:
           tests/test_strategy_tester_matrix.py
           tests/test_telemetry_db.py
           tests/test_economic_calendar_contract.py
+          tests/test_official_policy_check.py
           tests/test_pre_campaign_readiness.py
           tests/test_walk_forward_validation.py
           tests/test_robustness_validation.py
@@ -101,6 +105,7 @@ jobs:
             tests/test_strategy_tester_harness.py \
             tests/test_strategy_tester_matrix.py \
             tests/test_economic_calendar_contract.py \
+            tests/test_official_policy_check.py \
             tests/test_pre_campaign_readiness.py \
             tests/test_walk_forward_validation.py \
             tests/test_robustness_validation.py \
@@ -114,6 +119,7 @@ jobs:
             --cov=scripts.strategy_tester_harness \
             --cov=scripts.strategy_tester_matrix \
             --cov=scripts.economic_calendar_contract \
+            --cov=scripts.official_policy_check \
             --cov=scripts.pre_campaign_readiness \
             --cov=scripts.walk_forward_planner \
             --cov=scripts.walk_forward_selector \
