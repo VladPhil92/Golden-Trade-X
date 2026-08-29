@@ -45,6 +45,7 @@ class CampaignReadinessError(ValueError):
 
 _PLACEHOLDER_MARKERS = ("REPLACE_WITH", "PLACEHOLDER", "TBD", "UNKNOWN")
 _OFFICIAL_REFERENCES = {
+    "economic_calendar_path": "economic_calendar.v1.json",
     "walk_forward_config_path": "walk_forward_plan.v1.json",
     "robustness_policy_path": "robustness_policy.v1.json",
     "forward_policy_path": "forward_demo_policy.v1.json",
