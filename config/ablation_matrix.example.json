@@ -1,0 +1,24 @@
+{
+  "variants": [
+    {
+      "name": "no_smc",
+      "parameter": "InpUseSmcFilter",
+      "value": false
+    },
+    {
+      "name": "no_regime_filter",
+      "parameter": "InpUseRegimeFilter",
+      "value": false
+    },
+    {
+      "name": "no_htf_filter",
+      "parameter": "InpUseHtfFilter",
+      "value": false
+    },
+    {
+      "name": "no_equity_curve_filter",
+      "parameter": "InpUseEqCurveFilter",
+      "value": false
+    }
+  ]
+}
