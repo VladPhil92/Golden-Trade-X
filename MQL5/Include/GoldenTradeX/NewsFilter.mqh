@@ -104,28 +104,50 @@ private:
       return nowServer >= start && nowServer <= finish;
      }
 
-   bool CalendarCoverageAvailable(int year)
+   int IsoDateKey(string isoUtc)
      {
-      // Exact approved calendars are admitted by the campaign preflight, which
-      // verifies their full UTC coverage against the walk-forward plan. This
-      // year guard only governs the legacy FOMC fallback used outside official
-      // campaign evidence.
-      if(GTX_ECONOMIC_CALENDAR_APPROVED) return true;
-      return year >= FOMC_FIRST_YEAR && year <= FOMC_LAST_YEAR;
+      if(StringLen(isoUtc) < 10) return 0;
+      int year = (int)StringToInteger(StringSubstr(isoUtc, 0, 4));
+      int mon = (int)StringToInteger(StringSubstr(isoUtc, 5, 2));
+      int day = (int)StringToInteger(StringSubstr(isoUtc, 8, 2));
+      if(year <= 0 || mon < 1 || mon > 12 || day < 1 || day > 31) return 0;
+      return year * 10000 + mon * 100 + day;
      }
 
-   bool HandleMissingCalendarCoverage(int year)
+   bool CalendarCoverageAvailableAt(datetime serverTime)
      {
-      if(CalendarCoverageAvailable(year)) return false;
+      datetime utcCivil = serverTime - (datetime)(m_serverOffset * 3600);
+      MqlDateTime dt;
+      TimeToStruct(utcCivil, dt);
+
+      if(GTX_ECONOMIC_CALENDAR_APPROVED)
+        {
+         int startKey = IsoDateKey(GTX_ECONOMIC_CALENDAR_START_UTC);
+         int endKey = IsoDateKey(GTX_ECONOMIC_CALENDAR_END_UTC);
+         int nowKey = dt.year * 10000 + dt.mon * 100 + dt.day;
+         if(startKey <= 0 || endKey <= 0 || endKey < startKey) return false;
+         return nowKey >= startKey && nowKey <= endKey;
+        }
+      return dt.year >= FOMC_FIRST_YEAR && dt.year <= FOMC_LAST_YEAR;
+     }
+
+   bool HandleMissingCalendarCoverage(datetime nowServer)
+     {
+      if(CalendarCoverageAvailableAt(nowServer)) return false;
       if(!m_calendarWarned)
         {
          m_calendarWarned = true;
-         Print("NewsFilter: CALENDAR_COVERAGE_MISSING año=", year,
-               " FOMC fallback exacto=", FOMC_FIRST_YEAR, "-", FOMC_LAST_YEAR,
+         datetime utcCivil = nowServer - (datetime)(m_serverOffset * 3600);
+         MqlDateTime dt;
+         TimeToStruct(utcCivil, dt);
+         Print("NewsFilter: CALENDAR_COVERAGE_MISSING año=", dt.year,
+               " exact_coverage=", GTX_ECONOMIC_CALENDAR_START_UTC,
+               "..", GTX_ECONOMIC_CALENDAR_END_UTC,
+               " fallback=", FOMC_FIRST_YEAR, "-", FOMC_LAST_YEAR,
                " calendar_id=", GTX_ECONOMIC_CALENDAR_ID,
                " approved=", (GTX_ECONOMIC_CALENDAR_APPROVED ? "true" : "false"),
                " policy=", (int)m_policy,
-               ". Evidencia oficial requiere EconomicCalendarData aprobado.");
+               ". Evidencia oficial requiere cobertura exacta para el timestamp evaluado.");
         }
       return m_policy == NEWS_CALENDAR_FAIL_CLOSED;
      }
@@ -209,7 +231,7 @@ private:
          datetime candidate = nowServer + (datetime)(offset * 86400);
          MqlDateTime dt;
          TimeToStruct(candidate, dt);
-         if(!CalendarCoverageAvailable(dt.year)) continue;
+         if(!CalendarCoverageAvailableAt(candidate)) continue;
          if(!IsFomcDecisionDate(dt.year, dt.mon, dt.day)) continue;
          int utcHour = EasternToUtcHour(dt.year, dt.mon, dt.day, 14);
          datetime ev = EventServerTime(dt.year, dt.mon, dt.day, utcHour, 0);
@@ -220,9 +242,7 @@ private:
 
    bool Evaluate(datetime nowServer)
      {
-      MqlDateTime dt;
-      TimeToStruct(nowServer, dt);
-      if(HandleMissingCalendarCoverage(dt.year)) return true;
+      if(HandleMissingCalendarCoverage(nowServer)) return true;
       if(IsNfpWindowAt(nowServer)) return true;
       if(IsCpiWindowAt(nowServer)) return true;
       if(IsFomcWindowAt(nowServer)) return true;

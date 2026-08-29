@@ -89,10 +89,11 @@ jobs:
           python-version: "3.12"
       - name: Validate presets and cross-preset invariants
         run: python scripts/validate_set.py config/GoldenTradeX.set config/GoldenTradeX_XAGUSD.set
-      - name: Validate generated economic calendar contract
+      - name: Validate canonical approved economic calendar contract
         run: |
           python scripts/economic_calendar_contract.py \
-            --contract config/economic_calendar.example.json \
+            --contract config/economic_calendar.v1.json \
+            --require-approved \
             --verify-mql5 MQL5/Include/GoldenTradeX/EconomicCalendarData.mqh
 
   structure-check:
@@ -167,6 +168,7 @@ jobs:
             "config/GoldenTradeX.set" \
             "config/GoldenTradeX_XAGUSD.set" \
             "config/economic_calendar.example.json" \
+            "config/economic_calendar.v1.json" \
             "config/campaign_requirements.lock" \
             "requirements.txt" \
             "CHANGELOG.md" \

@@ -48,6 +48,7 @@ jobs:
           scripts/pre_campaign_readiness.py
           scripts/execution_environment.py
           scripts/mt5_environment_probe.py
+          scripts/mt5_environment_discovery.py
           scripts/walk_forward_planner.py
           scripts/walk_forward_selector.py
           scripts/walk_forward_aggregate.py
@@ -101,6 +102,7 @@ jobs:
           tests/test_daily_opportunity_metrics.py
           tests/test_official_policy_check.py
           tests/test_pre_campaign_readiness.py
+          tests/test_mt5_environment_discovery.py
           tests/test_walk_forward_validation.py
           tests/test_robustness_validation.py
           tests/test_forward_demo_validation.py

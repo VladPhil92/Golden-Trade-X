@@ -106,20 +106,29 @@ jobs:
       - name: Discover fail-closed DEMO environment
         shell: pwsh
         run: |
-          $portableArg = if ($env:GTX_PORTABLE_MODE -eq "true") { "--portable-mode" } else { "--no-portable-mode" }
-          python scripts/mt5_environment_discovery.py `
-            --terminal "$env:GTX_MT5_TERMINAL" `
-            --symbol "$env:GTX_SYMBOL" `
-            --timeframe "$env:GTX_TIMEFRAME" `
-            --deposit "$env:GTX_DEPOSIT" `
-            $portableArg `
-            --output-contract "data/research/environment-discovery/execution_environment.candidate.json" `
-            --output-audit "data/research/environment-discovery/execution_environment.discovery.json"
+          $args = @(
+            "scripts/mt5_environment_discovery.py",
+            "--terminal", $env:GTX_MT5_TERMINAL,
+            "--symbol", $env:GTX_SYMBOL,
+            "--timeframe", $env:GTX_TIMEFRAME,
+            "--deposit", $env:GTX_DEPOSIT,
+            "--output-contract", "data/research/environment-discovery/execution_environment.candidate.json",
+            "--output-audit", "data/research/environment-discovery/execution_environment.discovery.json"
+          )
+          if ($env:GTX_PORTABLE_MODE -eq "true") {
+            $args += "--portable-mode"
+          } else {
+            $args += "--no-portable-mode"
+          }
+          & python @args
+          if ($LASTEXITCODE -ne 0) {
+            throw "MT5 environment discovery failed with exit code $LASTEXITCODE"
+          }
 
       - name: Enforce candidate remains unapproved and credential-free
         shell: pwsh
         run: |
-          python - <<'PY'
+          @'
           import json
           from pathlib import Path
           from scripts.execution_environment import validate_execution_environment
@@ -142,7 +151,10 @@ jobs:
           if any(token in payload for token in forbidden):
               raise SystemExit("discovery artifact contains a forbidden credential field")
           print("DEMO ENVIRONMENT DISCOVERY PASS — review candidate only")
-          PY
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) {
+            throw "DEMO candidate validation failed with exit code $LASTEXITCODE"
+          }
 
       - name: Upload DEMO environment review candidate
         if: always()
