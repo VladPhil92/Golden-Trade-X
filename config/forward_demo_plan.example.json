@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "campaign_id": "GTX-FORWARD-DEMO-DRAFT-001",
+  "readiness_path": "REPLACE_WITH_FORWARD_DEMO_READINESS.json",
+  "forward_policy_path": "forward_demo_policy.example.json",
+  "frozen_preset_path": "REPLACE_WITH_FROZEN_PRESET.set",
+  "build_id": "0000000000000000000000000000000000000000",
+  "observation_start_utc": "2026-09-01T00:00:00Z",
+  "observation_end_utc": "2026-10-01T00:00:00Z",
+  "demo_environment": {
+    "account": 123456789,
+    "broker": "REPLACE_WITH_DEMO_BROKER",
+    "symbol": "XAUUSD",
+    "timeframe": "PERIOD_M15"
+  }
+}
