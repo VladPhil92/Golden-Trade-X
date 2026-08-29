@@ -73,6 +73,49 @@ public:
       ZeroMemory(m_eval2);
      }
 
+   int ParseSymbolUniverse(const string symbolCsv, string &symbols[], string &reason) const
+     {
+      reason = "";
+      ArrayResize(symbols, 0);
+
+      string raw[];
+      const ushort separator = (ushort)StringGetCharacter(",", 0);
+      const int parts = StringSplit(symbolCsv, separator, raw);
+      if(parts <= 0)
+        {
+         reason = "SYMBOL_UNIVERSE_EMPTY";
+         return 0;
+        }
+      if(parts > GTX_MAX_OPPORTUNITY_SYMBOLS)
+        {
+         reason = "SYMBOL_UNIVERSE_TOO_LARGE";
+         return 0;
+        }
+
+      string parsed[];
+      ArrayResize(parsed, GTX_MAX_OPPORTUNITY_SYMBOLS);
+      int used = 0;
+      for(int i = 0; i < parts; i++)
+        {
+         string symbol = Trimmed(raw[i]);
+         if(StringLen(symbol) == 0)
+           {
+            reason = "SYMBOL_EMPTY";
+            return 0;
+           }
+         if(IsDuplicate(parsed, used, symbol))
+           {
+            reason = "SYMBOL_DUPLICATE";
+            return 0;
+           }
+         parsed[used++] = symbol;
+        }
+
+      ArrayResize(symbols, used);
+      for(int i = 0; i < used; i++) symbols[i] = parsed[i];
+      return used;
+     }
+
    bool Init(const string symbolCsv,
              const SSetupAConfig &cfg,
              const int minConfidence,
@@ -83,38 +126,9 @@ public:
       Release();
       reason = "";
 
-      string raw[];
-      const ushort separator = (ushort)StringGetCharacter(",", 0);
-      const int parts = StringSplit(symbolCsv, separator, raw);
-      if(parts <= 0)
-        {
-         reason = "SYMBOL_UNIVERSE_EMPTY";
-         return false;
-        }
-      if(parts > GTX_MAX_OPPORTUNITY_SYMBOLS)
-        {
-         reason = "SYMBOL_UNIVERSE_TOO_LARGE";
-         return false;
-        }
-
       string symbols[];
-      ArrayResize(symbols, GTX_MAX_OPPORTUNITY_SYMBOLS);
-      int used = 0;
-      for(int i = 0; i < parts; i++)
-        {
-         string symbol = Trimmed(raw[i]);
-         if(StringLen(symbol) == 0)
-           {
-            reason = "SYMBOL_EMPTY";
-            return false;
-           }
-         if(IsDuplicate(symbols, used, symbol))
-           {
-            reason = "SYMBOL_DUPLICATE";
-            return false;
-           }
-         symbols[used++] = symbol;
-        }
+      const int used = ParseSymbolUniverse(symbolCsv, symbols, reason);
+      if(used <= 0) return false;
 
       for(int i = 0; i < used; i++)
         {
