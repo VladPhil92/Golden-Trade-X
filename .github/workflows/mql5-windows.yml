@@ -25,6 +25,10 @@ jobs:
         shell: pwsh
         run: .github/scripts/compile-mql5.ps1
 
+      - name: Compile v3.1 opportunity shadow expert
+        shell: pwsh
+        run: .github/scripts/compile-opportunity-shadow.ps1
+
       - name: Compile and execute MQL5 test suite
         shell: pwsh
         run: .github/scripts/verify-mql5-tests.ps1
@@ -39,6 +43,8 @@ jobs:
           path: |
             ${{ env.GTX_COMPILE_LOG }}
             ${{ env.GTX_EX5 }}
+            ${{ env.GTX_SHADOW_COMPILE_LOG }}
+            ${{ env.GTX_SHADOW_EX5 }}
 
       - name: Upload MQL5 test evidence
         if: always()
