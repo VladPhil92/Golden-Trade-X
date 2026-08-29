@@ -23,7 +23,7 @@ The pre-campaign gate requires:
 - an approved DEMO execution-environment contract;
 - at least two distinct, non-placeholder broker labels in the robustness template;
 - an approved economic-calendar contract;
-- calendar coverage spanning the complete walk-forward period;
+- calendar coverage spanning the complete half-open walk-forward period `[start_date, end_date)`;
 - exact BLS provenance for NFP/CPI and Federal Reserve provenance for FOMC;
 - a generated `EconomicCalendarData.mqh` that matches the canonical calendar hash;
 - an exact campaign dependency lock including `MetaTrader5`.
@@ -84,9 +84,11 @@ pre-campaign coverage check
 official campaign freeze
 ```
 
-`.github/workflows/materialize-economic-calendar.yml` creates the review artifact from primary-source pages and deliberately leaves `approved=false`. It uses `America/New_York` timezone rules to convert BLS 08:30 ET and FOMC 14:00 ET release clocks to UTC, so DST is not represented by a fixed offset.
+`GTX-WF-V1` freezes `start_date=2021-01-01` and `end_date=2026-01-01`. The end date is an **exclusive boundary**, so the exact historical evidence interval is `[2021-01-01, 2026-01-01)`. Consequently, the completed release years required by this campaign are 2021 through 2025 inclusive; no 2026 economic event is part of the frozen historical window. The pre-campaign coverage check therefore accepts a calendar ending at `2025-12-31T23:59:59Z` and rejects any earlier endpoint.
 
-The materializer fails closed if a year produces fewer than ten NFP/CPI releases or does not contain exactly eight regular FOMC statement dates. Exceptional schedules therefore remain reviewable rather than silently synthesized.
+`.github/workflows/materialize-economic-calendar.yml` creates the review artifact from primary-source pages and deliberately leaves `approved=false`. Its dispatch range is bound to the frozen walk-forward window, so a request inconsistent with the current V1 plan fails before source materialization. It uses `America/New_York` timezone rules to convert BLS 08:30 ET and FOMC 14:00 ET release clocks to UTC, so DST is not represented by a fixed offset.
+
+The materializer fails closed if a year produces fewer than ten NFP/CPI releases or does not contain exactly eight regular FOMC statement dates. Exceptional completed schedules therefore remain reviewable rather than silently synthesized. Future meeting dates are not treated as completed statement evidence and are never manufactured to satisfy annual counts.
 
 `config/economic_calendar.example.json` remains deliberately `approved=false`. Exploratory/demo runs may retain the documented legacy NFP/CPI proxy fallback while this contract is draft. The official workflow cannot pass the preflight with the draft artifact.
 
