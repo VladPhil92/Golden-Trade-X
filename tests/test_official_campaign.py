@@ -28,6 +28,38 @@ def _policy(path: Path, policy_id: str, *, approved: bool = True) -> Path:
     )
 
 
+def _calendar() -> dict:
+    return {
+        "schema_version": 1,
+        "calendar_id": "TEST-RC1-CALENDAR",
+        "approved": True,
+        "coverage": {
+            "start_utc": "2021-01-01T00:00:00Z",
+            "end_utc": "2024-12-31T23:59:59Z",
+        },
+        "events": [
+            {
+                "event": "NFP",
+                "release_utc": "2022-02-04T13:30:00Z",
+                "source_authority": "BLS",
+                "source_url": "https://www.bls.gov/schedule/2022/",
+            },
+            {
+                "event": "CPI",
+                "release_utc": "2022-02-10T13:30:00Z",
+                "source_authority": "BLS",
+                "source_url": "https://www.bls.gov/schedule/2022/",
+            },
+            {
+                "event": "FOMC",
+                "release_utc": "2022-03-16T18:00:00Z",
+                "source_authority": "FEDERAL_RESERVE",
+                "source_url": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
+            },
+        ],
+    }
+
+
 def _environment() -> dict:
     return {
         "schema_version": 1,
@@ -59,7 +91,8 @@ def _environment() -> dict:
     }
 
 
-def _campaign_inputs(tmp_path: Path, *, promotion_approved: bool = True) -> tuple[Path, Path, Path]:
+def _campaign_inputs(tmp_path: Path, *, promotion_approved: bool = True) -> tuple[Path, Path, Path, Path]:
+    tmp_path.mkdir(parents=True, exist_ok=True)
     preset = tmp_path / "candidate.set"
     preset.write_text(Path("config/GoldenTradeX.set").read_text(encoding="utf-8"), encoding="utf-8")
 
@@ -67,6 +100,7 @@ def _campaign_inputs(tmp_path: Path, *, promotion_approved: bool = True) -> tupl
     robustness = _policy(tmp_path / "robustness.json", "TEST-ROBUSTNESS")
     forward = _policy(tmp_path / "forward.json", "TEST-FORWARD")
     environment = _write_json(tmp_path / "environment.json", _environment())
+    calendar = _write_json(tmp_path / "calendar.json", _calendar())
 
     walk = _write_json(
         tmp_path / "walk.json",
@@ -120,18 +154,19 @@ def _campaign_inputs(tmp_path: Path, *, promotion_approved: bool = True) -> tupl
                 {"name": "baseline", "preset_path": preset.name}
             ],
             "execution_environment_path": environment.name,
+            "economic_calendar_path": calendar.name,
             "walk_forward_config_path": walk.name,
             "robustness_template_path": template.name,
             "robustness_policy_path": robustness.name,
             "forward_policy_path": forward.name,
         },
     )
-    return config, preset, environment
+    return config, preset, environment, calendar
 
 
-def test_official_freeze_requires_all_policies_approved(tmp_path: Path) -> None:
-    config, _, _ = _campaign_inputs(tmp_path, promotion_approved=False)
-    with pytest.raises(RegistryValidationError, match="requires an approved execution environment"):
+def test_official_freeze_requires_all_inputs_approved(tmp_path: Path) -> None:
+    config, _, _, _ = _campaign_inputs(tmp_path, promotion_approved=False)
+    with pytest.raises(RegistryValidationError, match="approved execution environment, economic calendar"):
         freeze_official_campaign(config, tmp_path / "out")
 
     draft = freeze_official_campaign(config, tmp_path / "draft", allow_draft=True)
@@ -139,8 +174,8 @@ def test_official_freeze_requires_all_policies_approved(tmp_path: Path) -> None:
     assert draft["live_trading_authorized"] is False
 
 
-def test_official_freeze_hashes_environment_candidate_universe_and_walk_plan(tmp_path: Path) -> None:
-    config, preset, environment = _campaign_inputs(tmp_path)
+def test_official_freeze_hashes_environment_calendar_candidate_universe_and_walk_plan(tmp_path: Path) -> None:
+    config, preset, environment, calendar = _campaign_inputs(tmp_path)
     result = freeze_official_campaign(config, tmp_path / "out")
 
     assert result["status"] == "OFFICIAL_CAMPAIGN_FROZEN"
@@ -153,15 +188,18 @@ def test_official_freeze_hashes_environment_candidate_universe_and_walk_plan(tmp
     assert result["execution_environment"]["canonical_sha256"] == canonical_environment_sha256(
         json.loads(environment.read_text(encoding="utf-8"))
     )
+    assert result["economic_calendar"]["file_sha256"] == sha256_file(calendar)
+    assert len(result["economic_calendar"]["canonical_sha256"]) == 64
     assert (tmp_path / "out" / "walk_forward_plan.json").is_file()
     assert result["walk_forward"]["plan_sha256"] == sha256_file(
         tmp_path / "out" / "walk_forward_plan.json"
     )
     assert result["live_trading_authorized"] is False
+    assert result["real_capital_authorized"] is False
 
 
 def test_official_freeze_rejects_candidate_that_enables_real_trading(tmp_path: Path) -> None:
-    config, preset, _ = _campaign_inputs(tmp_path)
+    config, preset, _, _ = _campaign_inputs(tmp_path)
     text = preset.read_text(encoding="utf-8")
     assert "InpAllowRealTrading=false" in text
     preset.write_text(text.replace("InpAllowRealTrading=false", "InpAllowRealTrading=true"), encoding="utf-8")
@@ -171,7 +209,7 @@ def test_official_freeze_rejects_candidate_that_enables_real_trading(tmp_path: P
 
 
 def _build_release_bundle(tmp_path: Path) -> tuple[Path, dict]:
-    config, _, _ = _campaign_inputs(tmp_path)
+    config, _, _, _ = _campaign_inputs(tmp_path)
     out = tmp_path / "freeze"
     lock = freeze_official_campaign(config, out)
     lock_path = out / "campaign_lock.json"
