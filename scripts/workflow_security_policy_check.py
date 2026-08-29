@@ -33,14 +33,15 @@ def validate_workflow_security(workflow_root: str | Path = ".github/workflows") 
         run_indent = -1
         for line_no, raw in enumerate(lines, 1):
             stripped = raw.lstrip()
+            step_text = stripped[2:].lstrip() if stripped.startswith("- ") else stripped
             indent = len(raw) - len(stripped)
             if in_run_block and stripped and indent <= run_indent:
                 in_run_block = False
-            if re.match(r"run:\s*(\||>)?\s*$", stripped):
+            if re.match(r"run:\s*(\||>)?\s*$", step_text):
                 in_run_block = True
                 run_indent = indent
-            elif stripped.startswith("run:"):
-                if SECRET_RE.search(stripped):
+            elif step_text.startswith("run:"):
+                if SECRET_RE.search(step_text):
                     failures.append(f"{path}:{line_no}: secrets must be passed via env, not inline run")
             elif in_run_block and SECRET_RE.search(raw):
                 failures.append(f"{path}:{line_no}: secrets must be passed via env, not run block")
