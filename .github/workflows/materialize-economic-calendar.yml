@@ -4,14 +4,14 @@ on:
   workflow_dispatch:
     inputs:
       start_year:
-        description: First release year to materialize
+        description: First completed release year to materialize
         required: true
         default: "2021"
         type: string
       end_year:
-        description: Last release year to materialize
+        description: Last completed release year to materialize (GTX-WF-V1 ends 2026-01-01 exclusive)
         required: true
-        default: "2026"
+        default: "2025"
         type: string
 
 concurrency:
