@@ -11,7 +11,7 @@
   ],
   "execution_environment_path": "execution_environment.example.json",
   "economic_calendar_path": "economic_calendar.example.json",
-  "python_runtime_lock_path": "../requirements-campaign.txt",
+  "python_runtime_lock_path": "campaign_requirements.lock",
   "walk_forward_config_path": "walk_forward_plan.example.json",
   "robustness_template_path": "robustness_template.example.json",
   "robustness_policy_path": "robustness_policy.example.json",
