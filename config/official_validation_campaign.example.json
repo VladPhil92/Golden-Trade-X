@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "campaign_id": "GTX-V3-RC1-OFFICIAL-VALIDATION-DRAFT",
-  "status_note": "Engineering example only. Before an official freeze, replace build_id with the exact immutable candidate Git SHA, create an immutable approved DEMO execution-environment contract, approve all quantitative policies in separate immutable files, choose the complete candidate universe and replace placeholder broker labels in the robustness template.",
+  "status_note": "Engineering example only. Before an official freeze, replace build_id with the exact immutable candidate Git SHA, create an immutable approved DEMO execution-environment contract, approve all quantitative policies, approve a complete BLS/Fed economic-calendar contract covering the full walk-forward period, choose the complete candidate universe and replace placeholder broker labels in the robustness template.",
   "build_id": "0000000000000000000000000000000000000000",
   "candidate_universe": [
     {
@@ -10,6 +10,8 @@
     }
   ],
   "execution_environment_path": "execution_environment.example.json",
+  "economic_calendar_path": "economic_calendar.example.json",
+  "python_runtime_lock_path": "campaign_requirements.lock",
   "walk_forward_config_path": "walk_forward_plan.example.json",
   "robustness_template_path": "robustness_template.example.json",
   "robustness_policy_path": "robustness_policy.example.json",

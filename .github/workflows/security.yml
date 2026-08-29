@@ -8,10 +8,25 @@ on:
   schedule:
     - cron: "17 6 * * 1"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
+  workflow-supply-chain:
+    name: Workflow supply-chain pins
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - name: Reject mutable action references
+        run: python scripts/workflow_supply_chain_check.py
+
   codeql:
     name: CodeQL (Python)
     runs-on: ubuntu-latest
@@ -20,20 +35,20 @@ jobs:
       security-events: write
       actions: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v4
+        uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4
         with:
           languages: python
       - name: Analyze
-        uses: github/codeql-action/analyze@v4
+        uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4
 
   python-dependency-audit:
     name: Python dependency audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
           cache: pip
@@ -41,13 +56,15 @@ jobs:
         run: python -m pip install --disable-pip-version-check pip-audit
       - name: Audit complete declared dependency set
         run: python -m pip_audit -r requirements.txt --progress-spinner off
+      - name: Audit exact campaign dependency lock
+        run: python -m pip_audit -r config/campaign_requirements.lock --progress-spinner off
 
   dependency-manifest-review:
     name: Dependency manifest review
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
       - name: Record dependency manifest changes
@@ -58,17 +75,18 @@ jobs:
         run: |
           set -euo pipefail
           echo "Dependency manifest diff for ${GTX_BASE_SHA}...${GTX_HEAD_SHA}"
-          if git diff --quiet "$GTX_BASE_SHA" "$GTX_HEAD_SHA" -- requirements.txt; then
-            echo "No requirements.txt changes in this pull request."
+          if git diff --quiet "$GTX_BASE_SHA" "$GTX_HEAD_SHA" -- requirements.txt config/campaign_requirements.lock; then
+            echo "No dependency manifest changes in this pull request."
           else
-            git diff --unified=3 "$GTX_BASE_SHA" "$GTX_HEAD_SHA" -- requirements.txt
-            echo "requirements.txt changed; the blocking Python dependency audit validates the complete resulting set."
+            git diff --unified=3 "$GTX_BASE_SHA" "$GTX_HEAD_SHA" -- requirements.txt config/campaign_requirements.lock
+            echo "Dependency manifests changed; blocking dependency audits validate the resulting sets."
           fi
 
   security-required:
     name: Security required gate
     if: always()
     needs:
+      - workflow-supply-chain
       - codeql
       - python-dependency-audit
       - dependency-manifest-review
@@ -78,6 +96,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test "${{ needs.workflow-supply-chain.result }}" = "success"
           test "${{ needs.codeql.result }}" = "success"
           test "${{ needs.python-dependency-audit.result }}" = "success"
           if [ "${{ github.event_name }}" = "pull_request" ]; then

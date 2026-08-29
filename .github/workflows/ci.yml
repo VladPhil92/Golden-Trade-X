@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -15,8 +19,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
           cache: pip
@@ -36,15 +40,15 @@ jobs:
     name: Tracked secret scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
           cache: pip
       - name: Install scanner test dependency
-        run: pip install "pytest~=9.1"
+        run: pip install "pytest==9.1.1"
       - name: Scan tracked repository content
         run: python scripts/security_scan.py
       - name: Scanner regression tests
@@ -54,8 +58,8 @@ jobs:
     name: Python lint (ruff)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
           cache: pip
@@ -68,8 +72,8 @@ jobs:
     name: MQL5 static analysis
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
       - name: Lint MQL5 sources
@@ -79,18 +83,23 @@ jobs:
     name: Config validation
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
       - name: Validate presets and cross-preset invariants
         run: python scripts/validate_set.py config/GoldenTradeX.set config/GoldenTradeX_XAGUSD.set
+      - name: Validate generated economic calendar contract
+        run: |
+          python scripts/economic_calendar_contract.py \
+            --contract config/economic_calendar.example.json \
+            --verify-mql5 MQL5/Include/GoldenTradeX/EconomicCalendarData.mqh
 
   structure-check:
     name: Repository structure
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Verify required files exist
         run: |
           missing=0
@@ -100,6 +109,7 @@ jobs:
             "MQL5/Include/GoldenTradeX/RiskManager.mqh" \
             "MQL5/Include/GoldenTradeX/SessionFilter.mqh" \
             "MQL5/Include/GoldenTradeX/NewsFilter.mqh" \
+            "MQL5/Include/GoldenTradeX/EconomicCalendarData.mqh" \
             "MQL5/Include/GoldenTradeX/TradeLogger.mqh" \
             "MQL5/Include/GoldenTradeX/MarketRegimeEngine.mqh" \
             "MQL5/Include/GoldenTradeX/SmartMoneyEngine.mqh" \
@@ -126,6 +136,8 @@ jobs:
             "scripts/correlation_engine.py" \
             "scripts/optimize_confidence.py" \
             "scripts/fomc_calendar.py" \
+            "scripts/economic_calendar_contract.py" \
+            "scripts/pre_campaign_readiness.py" \
             "scripts/session_analyzer.py" \
             "scripts/walk_forward_optimizer.py" \
             "scripts/live_monitor.py" \
@@ -141,6 +153,8 @@ jobs:
             "tests/test_mql5_lint.py" \
             "tests/test_validate_set.py" \
             "tests/test_security_scan.py" \
+            "tests/test_economic_calendar_contract.py" \
+            "tests/test_pre_campaign_readiness.py" \
             ".github/scripts/compile-mql5.ps1" \
             ".github/scripts/verify-mql5-tests.ps1" \
             ".github/scripts/configure-governance.ps1" \
@@ -152,6 +166,8 @@ jobs:
             "dashboard/index.html" \
             "config/GoldenTradeX.set" \
             "config/GoldenTradeX_XAGUSD.set" \
+            "config/economic_calendar.example.json" \
+            "config/campaign_requirements.lock" \
             "requirements.txt" \
             "CHANGELOG.md" \
             "docs/CI.md" \
@@ -170,7 +186,7 @@ jobs:
     name: Version consistency
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: EA version matches CHANGELOG latest entry
         run: |
           ea_ver=$(grep -m1 '#property version' \
@@ -190,8 +206,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
           cache: pip
@@ -217,8 +233,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
           cache: pip
@@ -232,7 +248,7 @@ jobs:
     name: Dashboard HTML valid
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Check dashboard exists and references Chart.js
         run: |
           if ! grep -q "chart.js" dashboard/index.html; then

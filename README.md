@@ -6,34 +6,32 @@
 ![MQL5](https://img.shields.io/badge/MQL5-MetaTrader%205-orange)
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB)
 
-**Golden Trade X** es una plataforma experimental de trading sistemático para MetaTrader 5, orientada inicialmente a XAUUSD M15. Combina un EA modular en MQL5 con herramientas Python para validación estadística, research, monitoreo y futura operación controlada.
+**Golden Trade X** es una plataforma experimental de trading sistemático para MetaTrader 5, orientada inicialmente a XAUUSD M15. Combina un EA modular en MQL5 con herramientas Python para validación estadística, telemetría, Strategy Tester reproducible, rolling IS → frozen OOS, robustez y forward demo controlado.
 
 Desarrollado y mantenido por **CTG One Technology S.A.S.**
 
 ## Estado del proyecto
 
-> **Experimental / quantitative validation pending.** La ingeniería del sistema tiene un nivel de madurez avanzado, pero todavía **no existe evidencia empírica reproducible suficiente** para afirmar que la estrategia posee un edge rentable y estable fuera de muestra. No debe interpretarse un CI verde, una compilación correcta ni una métrica de backtest aislada como evidencia de rentabilidad futura.
+> **Experimental / official quantitative validation pending.** La ingeniería y el sistema de validación tienen un nivel de madurez avanzado, pero todavía **no existe una campaña oficial OOS + robustness + forward DEMO completada** que demuestre un edge rentable y estable. Un CI verde, una compilación correcta o un backtest aislado no constituyen evidencia de rentabilidad futura.
 
 El trading apalancado puede producir pérdida parcial o total del capital. Este repositorio no constituye asesoría financiera.
 
-## Objetivo técnico
-
-El programa de desarrollo prioriza, en este orden:
+La secuencia de desarrollo es deliberadamente fail-closed:
 
 ```text
 CORRECTNESS
 → DATA QUALITY
 → REPRODUCIBILITY
 → QUANTITATIVE VALIDATION
-→ OPTIMIZATION
-→ ML
-→ FORWARD VALIDATION
+→ ROBUSTNESS
+→ FORWARD DEMO
+→ MANUAL RELEASE REVIEW
 → CONTROLLED PRODUCTION
 ```
 
-No se añaden indicadores o modelos por complejidad nominal. Cada cambio de estrategia debe convertirse en una hipótesis falsable y validarse OOS.
+No se añaden indicadores o modelos por complejidad nominal. Cada modificación de estrategia debe convertirse en una hipótesis falsable y evaluarse sin contaminación OOS.
 
-## Arquitectura actual
+## Arquitectura del EA
 
 ```text
 Market / Broker
@@ -44,7 +42,7 @@ SignalEngine
       ├── MarketRegimeEngine
       ├── SmartMoneyEngine
       ├── FibonacciEngine
-      └── ConfidenceEngine (heuristic Confluence Score)
+      └── ConfidenceEngine
       │
       ▼
 RiskManager
@@ -59,7 +57,8 @@ Broker
       ├── PartialTakeProfit
       ├── Break-Even / ATR Trailing
       ├── HealthMonitor
-      └── TradeLogger
+      ├── TradeLogger
+      └── ResearchTelemetry
 ```
 
 ### Componentes MQL5 principales
@@ -76,24 +75,24 @@ Broker
 | `PositionStateManager.mqh` | Initial R inmutable, identidad y estado persistente |
 | `PartialTakeProfit.mqh` | cierre parcial basado en Initial R |
 | `EquityCurveFilter.mqh` | reducción de tamaño según curva de equity |
-| `NewsFilter.mqh` | ventanas FOMC verificadas + proxies NFP/CPI |
+| `NewsFilter.mqh` | ventanas macroeconómicas y política fail-closed |
+| `EconomicCalendarData.mqh` | calendario generado desde contrato económico versionado |
 | `SessionFilter.mqh` | sesión y protección de viernes |
 | `HealthMonitor.mqh` | conexión, margen, SL huérfano |
 | `TradeLogger.mqh` | ledger CSV por posición cerrada |
+| `ResearchTelemetry.mqh` | señales, ejecuciones, outcomes y procedencia de sesión |
 
-## Correctness v2.62
+## Trading correctness y capital real
 
-La versión 2.62 introduce una capa explícita de integridad de trading:
+La capa de integridad del EA exige evidencia server-side y distingue `order ticket`, `deal ticket`, `POSITION_IDENTIFIER` y position ticket. El estado durable se indexa por `POSITION_IDENTIFIER`; Initial R permanece inmutable; sizing usa `OrderCalcProfit()` y cuentas netting con ownership ambiguo fallan cerrado.
 
-- `CTrade::PositionOpen()/Close()/Modify()` no se consideran exitosos únicamente porque el wrapper retorne `true`; se exige evidencia server-side apropiada.
-- Se distinguen `order ticket`, `deal ticket`, `POSITION_IDENTIFIER` y `position ticket`.
-- El estado durable se indexa por `POSITION_IDENTIFIER`.
-- El riesgo inicial es inmutable durante la vida de la posición.
-- Partial TP y break-even dejan de depender del SL móvil.
-- `RMultiple` se define como `net P/L completo / initial monetary risk`.
-- sizing y riesgo monetario usan `OrderCalcProfit()` para respetar el contrato del símbolo.
-- cuentas netting con ownership ambiguo fallan cerrado.
-- `InpMinInitialRR` existe como guard, pero permanece en `0.0` por defecto hasta disponer de evidencia OOS para elegir un umbral.
+Además, el repositorio incorpora un interlock explícito:
+
+```text
+InpAllowRealTrading=false
+```
+
+Una cuenta REAL con el valor por defecto aborta `OnInit()`. Los presets versionados deben conservar ese valor en `false`, el validator rechaza overrides y el bit forma parte del fingerprint de runtime. La infraestructura de investigación **no autoriza capital real**.
 
 ## Gestión de riesgo por defecto
 
@@ -112,86 +111,167 @@ La versión 2.62 introduce una capa explícita de integridad de trading:
 | Kelly | OFF |
 | Minimum Initial RR | OFF (`0.0`) |
 
-Estos valores son configuración de referencia, **no parámetros demostrados como óptimos**.
+Estos valores son configuración de referencia, no parámetros demostrados como óptimos.
 
-## NewsFilter
+## Calendario económico
 
-FOMC 2025–2027 utiliza fechas de decisión publicadas por la Federal Reserve y convierte 14:00 US Eastern a UTC teniendo en cuenta DST. `InpNewsCalendarPolicy` permite:
+El repositorio diferencia dos niveles:
 
-- `0 = WARN`
-- `1 = FAIL_CLOSED`
-- `2 = FAIL_OPEN`
+1. **Exploración/demo no oficial:** mientras `EconomicCalendarData.mqh` indique `GTX_ECONOMIC_CALENDAR_APPROVED=false`, NFP/CPI pueden conservar el fallback heurístico documentado y FOMC conserva fechas verificadas de fallback.
+2. **Campaña oficial:** `scripts/pre_campaign_readiness.py` exige un contrato económico aprobado, con procedencia BLS/Federal Reserve, cobertura completa de toda la ventana walk-forward y un `EconomicCalendarData.mqh` generado exactamente desde ese contrato.
 
-NFP y CPI todavía usan **proxies de fecha**. Su hora sí se convierte desde 08:30 US Eastern con DST. Antes de usar backtests históricos como evidencia oficial debe incorporarse el calendar cache histórico exacto; no debe asumirse que el filtro actual reproduce perfectamente eventos 2020–2024.
+Por diseño, los archivos `config/economic_calendar.example.json` y `config/official_validation_campaign.example.json` son DRAFT. No pueden convertirse en evidencia oficial simplemente cambiando una etiqueta: el gate valida contenido, cobertura y consistencia del include generado.
 
-## CI y verificación
+## Testing real
 
 ### CI Linux
 
-En cada push/PR se ejecutan gates para:
+En cada push/PR se verifican, entre otros:
 
 - integridad de dependencias;
 - `pip check`;
 - compilación Python;
 - Ruff;
 - tests Python + coverage;
+- cobertura específica de módulos críticos de evidencia;
 - XGBoost/scikit-learn compatibility;
 - análisis estático MQL5;
-- presets y invariantes cruzadas;
+- presets e invariantes cruzadas;
+- contrato económico generado;
 - estructura del repositorio;
 - consistencia EA/CHANGELOG;
-- dashboard.
+- dashboard;
+- secret scanning;
+- supply-chain de GitHub Actions.
 
-### MetaEditor Windows
+### MetaEditor + MetaTrader Windows
 
-`.github/workflows/mql5-windows.yml` instala MetaTrader 5 oficial en `windows-latest` y compila realmente:
+`.github/workflows/mql5-windows.yml` instala MetaTrader 5, compila realmente `GoldenTradeX.mq5` y ejecuta la batería automatizada de scripts MQL5. El gate requiere compilación sin errores y ejecución satisfactoria; un linter no sustituye esta verificación.
+
+La estructura actual es:
 
 ```text
-GoldenTradeX.mq5
-→ MetaEditor
-→ 0 errors required
-→ GoldenTradeX.ex5
-→ SHA-256
-→ build artifact
+L1  Python/unit contracts
+L2  MQL5 module/integration scripts ejecutados en MetaTrader
+L3  Registered Strategy Tester experiments
+L4  Official rolling IS → frozen OOS campaign
+L5  Robustness + fixed-window forward DEMO
 ```
 
-Un linter MQL5 no sustituye este gate.
+## Research y reproducibilidad
 
-### Próximo nivel de testing
+`scripts/` incluye tooling para:
 
-La existencia de scripts en `MQL5/Scripts/Tests/` no significa todavía que todos se ejecuten automáticamente. El roadmap inmediato incluye un harness que diferencie:
+- análisis de backtests, Monte Carlo, PSR/DSR y performance;
+- telemetry SQLite;
+- experiment registry content-addressed;
+- parser normalizado de reportes MT5;
+- Strategy Tester harness y matrices de ablación;
+- walk-forward planner, selector IS, aggregate OOS y promotion gate;
+- robustness planner/aggregate/gate;
+- forward demo readiness/planner/evaluator/gate;
+- execution-environment attestation;
+- official campaign freeze y runner;
+- RC1 manual release-review gate;
+- calendario económico content-addressed y pre-campaign readiness.
 
-```text
-L1 MQL5 unit tests
-L2 EA integration tests
-L3 MetaTrader Strategy Tester
-```
-
-## Python / Quant tooling
-
-`scripts/` incluye actualmente:
-
-- `backtest_analysis.py` — métricas, retornos diarios, Monte Carlo, PSR/DSR;
-- `performance_report.py` — degradación y evaluación recurrente;
-- `walk_forward_optimizer.py` — análisis post-hoc por threshold;
-- `ml_pipeline.py` — scaffold XGBoost;
-- `regime_analysis.py`;
-- `session_analyzer.py`;
-- `correlation_engine.py`;
-- `fomc_calendar.py`;
-- `live_monitor.py` / `monitor.py`.
-
-### Advertencia importante sobre walk-forward
-
-El `walk_forward_optimizer.py` existente opera sobre trades ya generados y filtra retrospectivamente por confidence. Es útil como **diagnóstico**, pero **no constituye el verdadero walk-forward definitivo del EA**, porque eliminar un trade cambia equity, drawdown, rachas, sizing y estados futuros.
-
-El walk-forward oficial deberá ser:
+El antiguo `walk_forward_optimizer.py` sigue siendo una herramienta diagnóstica post-hoc; **no sustituye** al pipeline oficial. El walk-forward oficial vuelve a ejecutar Strategy Tester:
 
 ```text
-IS Strategy Tester optimization
-→ freeze parameters
+IS candidate runs
+→ IS-only selection
+→ exact preset freeze
 → independent OOS Strategy Tester run
 → roll window
+→ aggregate OOS
+→ promotion policy frozen before observation
+```
+
+## Campaña oficial v3.0-rc1
+
+La infraestructura ya puede congelar:
+
+```text
+Git SHA
+candidate universe + preset hashes
+DEMO execution environment
+MT5 build / broker / server / symbol / timeframe
+walk-forward plan
+OOS promotion policy
+robustness template + policy
+forward-demo policy
+economic-calendar contract
+exact campaign dependency lock
+```
+
+El workflow manual `Official Validation Campaign` ejecuta un preflight, congela la campaña, compila el build, realiza attestation de la cuenta DEMO y sólo entonces ejecuta rolling IS → frozen OOS.
+
+**Estado actual:** infraestructura disponible; campaña oficial todavía no materializada. Los templates siguen en DRAFT y no existen resultados OOS oficiales que permitan declarar `v3.0-rc1 OOS validated`.
+
+## Backtesting y evidencia
+
+Exploración rápida puede usar modelos menos costosos. La evidencia final debe usar:
+
+```text
+Every tick based on real ticks
+```
+
+Conservar siempre:
+
+- EA/Git SHA;
+- EX5/hash;
+- preset/hash;
+- candidate-universe hash;
+- broker/company/server;
+- símbolo exacto;
+- MT5 build;
+- período IS/OOS;
+- capital/leverage/currency;
+- spread, comisión, swap y slippage model;
+- economic-calendar hash;
+- policy hashes;
+- número de configuraciones probadas;
+- reportes MT5 raw + normalizados;
+- experiment registry.
+
+## Gates antes de capital real
+
+Una candidata no puede avanzar sólo porque un backtest sea positivo. La secuencia prevista requiere:
+
+- OOS aggregate positivo bajo policy pre-registrada;
+- tamaño muestral suficiente;
+- drawdown aceptable;
+- estabilidad entre folds y parámetros;
+- control de selección/multiple testing;
+- stress de costes;
+- replicación entre brokers cuando aplique;
+- forward DEMO de ventana fija;
+- continuidad de telemetría/fingerprint;
+- recovery operacional;
+- revisión manual RC1/RC2.
+
+Incluso un `FORWARD_DEMO_PASS` conserva `live_trading_authorized=false` hasta una decisión de producción separada.
+
+## Supply-chain y gobernanza
+
+Los workflows versionados usan referencias de GitHub Actions fijadas a commits completos. `scripts/workflow_supply_chain_check.py` rechaza refs mutables. Para campañas oficiales existe además `config/campaign_requirements.lock` con versiones directas exactas.
+
+`.github/scripts/configure-governance.ps1` declara la protección deseada de `main`: PR obligatorio, rama actualizada, resolución de conversaciones, bloqueo de force-push/deletion y los cuatro gates agregados (`CI`, `Security`, `MQL5`, `Reproducibility`). La aplicación efectiva de esa política depende de permisos administrativos de GitHub y debe verificarse en la configuración del repositorio.
+
+## Roadmap
+
+```text
+v2.62     Trading Correctness                         DONE
+v2.63     Automated MQL5 Verification                DONE
+v2.70     Research Telemetry / Event Ledger           DONE
+v2.80     Quant Research / Ablation tooling           DONE; evidence pending
+v2.90     Reproducible Validation                     DONE
+v2.90.2   Rolling IS → Frozen OOS contracts           DONE
+v2.90.3   Robustness framework                        DONE
+v2.90.4   Forward Demo observation contracts          DONE
+v3.0-rc1  Official OOS validation infrastructure      READY; evidence pending
+v3.0-rc2  Forward validated                           PENDING
+v3.0      Controlled production                       BLOCKED
 ```
 
 ## Instalación
@@ -201,65 +281,7 @@ IS Strategy Tester optimization
 3. Copiar `MQL5/Include/GoldenTradeX/` a `MQL5/Include/`.
 4. Compilar `GoldenTradeX.mq5` en MetaEditor.
 5. Cargar `config/GoldenTradeX.set` sobre XAUUSD M15.
-6. Operar únicamente en demo mientras no se hayan superado los gates cuantitativos y forward.
-
-## Backtesting
-
-Exploración:
-
-```text
-1 minute OHLC
-```
-
-Evidencia final:
-
-```text
-Every tick based on real ticks
-```
-
-Conservar siempre:
-
-- EA/Git SHA;
-- preset y hash;
-- broker;
-- símbolo exacto;
-- MT5 build;
-- periodo;
-- capital/leverage;
-- spread;
-- comisión;
-- swap;
-- slippage assumption;
-- número de configuraciones probadas.
-
-## Gates antes de capital real
-
-Los umbrales son criterios internos de investigación, no garantías. Como referencia, una candidata no debería promoverse sin:
-
-- expectancy OOS > 0;
-- PF OOS aproximadamente > 1.25–1.30;
-- Max DD < 15 %;
-- PSR ≥ 95 %;
-- DSR > 0;
-- parameter stability;
-- walk-forward robusto;
-- stress de costes;
-- robustez entre brokers;
-- forward demo suficiente;
-- observabilidad y recovery operacional.
-
-## Roadmap
-
-```text
-v2.62  Trading Correctness
-v2.63  Automated MQL5 Verification
-v2.70  Research Telemetry / Event Ledger
-v2.80  Quant Research / Ablation
-v2.90  Reproducible Validation
-v3.0-rc1  OOS validated
-v3.0-rc2  Forward validated
-v3.0      Controlled production
-```
+6. Operar únicamente en DEMO mientras no se hayan superado los gates cuantitativos y forward.
 
 ## Licencia
 

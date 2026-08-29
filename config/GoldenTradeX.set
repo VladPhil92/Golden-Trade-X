@@ -44,7 +44,8 @@ InpMaxPositions=1
 InpAtrSlMultiplier=2.0
 InpAtrTpMultiplier=3.0
 InpMaxSpreadPoints=350
-InpCpThresholdPct=8.0
+; Capital Preservation debe activarse antes del hard stop diario.
+InpCpThresholdPct=3.0
 ; 0.0 = guard RR desactivado hasta disponer de evidencia OOS para fijar umbral.
 InpMinInitialRR=0.0
 

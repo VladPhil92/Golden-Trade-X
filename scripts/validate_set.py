@@ -194,6 +194,12 @@ def validate_params(params: dict[str, str], label: str) -> list[str]:
     if None not in (dd_daily, dd_weekly, dd_monthly) and not (dd_daily <= dd_weekly <= dd_monthly):
         errors.append(f"{label}: drawdown limits must satisfy daily <= weekly <= monthly")
 
+    cp_threshold = _number(params, "InpCpThresholdPct")
+    if dd_daily is not None and cp_threshold is not None and cp_threshold >= dd_daily:
+        errors.append(
+            f"{label}: InpCpThresholdPct must be < InpMaxDailyDD so Capital Preservation activates before the daily hard stop"
+        )
+
     # v2.62: BreakEvenR is expressed in immutable Initial R, while
     # AtrSlMultiplier is an ATR distance. They are intentionally not compared.
 
