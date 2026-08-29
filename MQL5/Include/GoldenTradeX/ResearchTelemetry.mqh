@@ -89,7 +89,7 @@ private:
 
       if(!exists)
          FileWriteString(handle, header + "\n");
-      else if(FileSeek(handle, 0, SEEK_END) != 0)
+      else if(!FileSeek(handle, 0, SEEK_END))
         {
          Print("ResearchTelemetry: FileSeek falló en '", filename,
                "' | Error: ", GetLastError());
