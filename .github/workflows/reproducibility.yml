@@ -62,6 +62,7 @@ jobs:
           tests/test_robustness_validation.py
           tests/test_forward_demo_validation.py
           tests/test_official_campaign.py
+          tests/test_real_money_interlock.py
           -v --tb=short
 
   reproducibility-required:
