@@ -3,6 +3,7 @@
 
 InpMagicNumber=920260
 InpTradeComment=GoldenTradeX
+InpAllowRealTrading=false
 
 ; --- Senales ---
 InpEmaFast=21
