@@ -1,0 +1,149 @@
+name: Freeze Economic Calendar Approval
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_dir:
+        description: Repository-relative verified BLS/Fed snapshot bundle
+        required: true
+        default: data/research/calendar-sources/v1
+        type: string
+      review_calendar:
+        description: Repository-relative unapproved review calendar JSON
+        required: true
+        default: data/research/calendar-review/economic_calendar.generated.json
+        type: string
+      review_audit:
+        description: Repository-relative verified review audit JSON
+        required: true
+        default: data/research/calendar-review/economic_calendar.audit.json
+        type: string
+      confirmation:
+        description: Type APPROVE_OFFICIAL_ECONOMIC_CALENDAR to freeze approval
+        required: true
+        type: string
+      approval_note:
+        description: Human review rationale (minimum 8 characters)
+        required: true
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  freeze-calendar:
+    name: Explicit validation-only calendar approval freeze
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GTX_SOURCE_DIR: ${{ inputs.source_dir }}
+      GTX_REVIEW_CALENDAR: ${{ inputs.review_calendar }}
+      GTX_REVIEW_AUDIT: ${{ inputs.review_audit }}
+      GTX_CONFIRMATION: ${{ inputs.confirmation }}
+      GTX_APPROVAL_NOTE: ${{ inputs.approval_note }}
+      GTX_APPROVED_BY: ${{ github.actor }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+
+      - name: Validate explicit approval inputs and repository paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GTX_CONFIRMATION" = "APPROVE_OFFICIAL_ECONOMIC_CALENDAR"
+          test "${#GTX_APPROVAL_NOTE}" -ge 8
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          repo = Path.cwd().resolve()
+          checks = {
+              "source_dir": (os.environ["GTX_SOURCE_DIR"], True),
+              "review_calendar": (os.environ["GTX_REVIEW_CALENDAR"], False),
+              "review_audit": (os.environ["GTX_REVIEW_AUDIT"], False),
+          }
+          for label, (raw, is_dir) in checks.items():
+              target = (repo / raw).resolve()
+              try:
+                  target.relative_to(repo)
+              except ValueError as exc:
+                  raise SystemExit(f"{label} must remain inside repository checkout") from exc
+              if is_dir and not target.is_dir():
+                  raise SystemExit(f"{label} directory is missing: {target}")
+              if not is_dir and not target.is_file():
+                  raise SystemExit(f"{label} file is missing: {target}")
+          PY
+
+      - name: Install exact parser dependency
+        run: python -m pip install --disable-pip-version-check "requests==2.34.2"
+
+      - name: Resolve approval timestamp
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY' >> "$GITHUB_ENV"
+          from datetime import datetime, timezone
+          print("GTX_APPROVED_AT_UTC=" + datetime.now(timezone.utc).replace(microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ"))
+          PY
+
+      - name: Freeze approved contract from exact reviewed snapshots
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/freeze_approved_economic_calendar.py \
+            --start-year 2021 \
+            --end-year 2025 \
+            --source-dir "$GTX_SOURCE_DIR" \
+            --review-calendar "$GTX_REVIEW_CALENDAR" \
+            --review-audit "$GTX_REVIEW_AUDIT" \
+            --approved-by "$GTX_APPROVED_BY" \
+            --approval-note "$GTX_APPROVAL_NOTE" \
+            --approved-at-utc "$GTX_APPROVED_AT_UTC" \
+            --confirmation "$GTX_CONFIRMATION" \
+            --output data/research/calendar-freeze/economic_calendar.approved.json \
+            --approval-record data/research/calendar-freeze/economic_calendar.approval.json
+
+      - name: Generate and verify exact MQL5 calendar include
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/economic_calendar_contract.py \
+            --contract data/research/calendar-freeze/economic_calendar.approved.json \
+            --require-approved \
+            --generate-mql5 data/research/calendar-freeze/EconomicCalendarData.approved.mqh
+          python scripts/economic_calendar_contract.py \
+            --contract data/research/calendar-freeze/economic_calendar.approved.json \
+            --require-approved \
+            --verify-mql5 data/research/calendar-freeze/EconomicCalendarData.approved.mqh
+
+      - name: Enforce approval remains validation-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          record = json.loads(Path("data/research/calendar-freeze/economic_calendar.approval.json").read_text())
+          if record.get("decision") != "APPROVED_FOR_OFFICIAL_VALIDATION":
+              raise SystemExit("calendar freeze decision is invalid")
+          if record.get("live_trading_authorized") is not False:
+              raise SystemExit("calendar approval must not authorize live trading")
+          if record.get("real_capital_authorized") is not False:
+              raise SystemExit("calendar approval must not authorize real capital")
+          print("CALENDAR APPROVAL FREEZE PASS — validation only; live/real capital remain denied")
+          PY
+
+      - name: Upload immutable calendar freeze artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: economic-calendar-approval-freeze-${{ github.run_id }}
+          retention-days: 90
+          if-no-files-found: error
+          path: data/research/calendar-freeze/
