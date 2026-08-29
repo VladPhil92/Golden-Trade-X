@@ -6,8 +6,8 @@ import sys
 from pathlib import Path
 
 REQUIRED = {
-    # Identity
-    "InpMagicNumber", "InpTradeComment",
+    # Identity / safety
+    "InpMagicNumber", "InpTradeComment", "InpAllowRealTrading",
     # Signals
     "InpEmaFast", "InpEmaSlow", "InpRsiPeriod", "InpRsiUpper", "InpRsiLower",
     "InpRsiLongMin", "InpRsiShortMax", "InpTimeframe",
@@ -52,6 +52,7 @@ REQUIRED = {
 }
 
 BOOLEAN_KEYS = {
+    "InpAllowRealTrading",
     "InpUseHtfFilter", "InpUseTrailing", "InpUseBreakEven", "InpUseSessionFilter",
     "InpCloseOnFriday", "InpUseNewsFilter", "InpPauseForNews", "InpEnableTradeLog",
     "InpUseRegimeFilter", "InpUseSmcFilter", "InpUseKelly", "InpUsePortfolioCap",
@@ -160,6 +161,11 @@ def validate_params(params: dict[str, str], label: str) -> list[str]:
     for key in sorted(BOOLEAN_KEYS):
         if key in params and params[key].lower() not in {"true", "false"}:
             errors.append(f"{label}: BAD BOOLEAN {key}={params[key]!r} (expected true/false)")
+
+    if params.get("InpAllowRealTrading", "").lower() == "true":
+        errors.append(
+            f"{label}: InpAllowRealTrading must remain false before an explicit controlled-production review"
+        )
 
     ema_fast = _number(params, "InpEmaFast")
     ema_slow = _number(params, "InpEmaSlow")

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 try:
+    from scripts.campaign_contract import candidate_universe_sha256
     from scripts.experiment_registry import (
         RegistryValidationError,
         identity_for,
@@ -19,6 +20,7 @@ try:
         sha256_file,
     )
 except ModuleNotFoundError:
+    from campaign_contract import candidate_universe_sha256
     from experiment_registry import (
         RegistryValidationError,
         identity_for,
@@ -121,6 +123,7 @@ def aggregate_oos_evidence(
 
     base = evidence_manifest_path.parent
     fold_results: list[dict[str, Any]] = []
+    frozen_universe_sha: str | None = None
 
     for fold_id in sorted(folds):
         fold = folds[fold_id]
@@ -136,6 +139,14 @@ def aggregate_oos_evidence(
             raise RegistryValidationError(f"{fold_id}: selection manifest was produced from a different plan")
         if selection.get("promotion_policy_sha256") != plan.get("promotion_policy", {}).get("sha256"):
             raise RegistryValidationError(f"{fold_id}: promotion policy hash mismatch")
+
+        current_universe_sha = candidate_universe_sha256(selection.get("candidates"))
+        if frozen_universe_sha is None:
+            frozen_universe_sha = current_universe_sha
+        elif current_universe_sha != frozen_universe_sha:
+            raise RegistryValidationError(
+                f"{fold_id}: candidate universe differs from earlier walk-forward folds"
+            )
 
         oos_spec = load_spec(oos_spec_path)
         normalized_oos, _ = normalize_spec(oos_spec, base_dir=oos_spec_path.parent)
@@ -165,8 +176,8 @@ def aggregate_oos_evidence(
         metrics = {metric: _numeric_summary(result, metric) for metric in REQUIRED_METRICS}
         optional: dict[str, float] = {}
         for metric in ("win_rate", "recovery_factor", "sharpe_ratio"):
-            summary = result.get("summary")
-            if isinstance(summary, dict) and metric in summary:
+            result_summary = result.get("summary")
+            if isinstance(result_summary, dict) and metric in result_summary:
                 optional[metric] = _numeric_summary(result, metric)
 
         fold_results.append(
@@ -174,10 +185,15 @@ def aggregate_oos_evidence(
                 "fold_id": fold_id,
                 "is_experiment_id": selected.get("is_experiment_id"),
                 "oos_experiment_id": oos_identity.experiment_id,
+                "selection_manifest_sha256": sha256_file(selection_path),
+                "candidate_universe_sha256": current_universe_sha,
                 "oos_results_sha256": sha256_file(results_path),
                 "metrics": {**metrics, **optional},
             }
         )
+
+    if frozen_universe_sha is None:
+        raise RegistryValidationError("OOS evidence produced no candidate universe fingerprint")
 
     total_trades = int(round(sum(item["metrics"]["total_trades"] for item in fold_results)))
     total_net_profit = sum(item["metrics"]["total_net_profit"] for item in fold_results)
@@ -223,6 +239,7 @@ def aggregate_oos_evidence(
         "plan_id": plan.get("plan_id"),
         "plan_sha256": sha256_file(plan_path),
         "promotion_policy_sha256": plan.get("promotion_policy", {}).get("sha256"),
+        "candidate_universe_sha256": frozen_universe_sha,
         "summary": summary,
         "folds": fold_results,
     }

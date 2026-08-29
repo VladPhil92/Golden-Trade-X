@@ -29,6 +29,7 @@
 input group "=== Identidad ==="
 input ulong   InpMagicNumber      = 920260;
 input string  InpTradeComment     = "GoldenTradeX";
+input bool    InpAllowRealTrading = false;
 
 input group "=== Señales ==="
 input int     InpEmaFast          = 21;
@@ -156,6 +157,7 @@ string BuildResearchConfigSnapshot()
    // and logging toggles are deliberately excluded.
    string s = "";
    s += "InpMagicNumber=" + IntegerToString((long)InpMagicNumber);
+   s += "|InpAllowRealTrading=" + B(InpAllowRealTrading);
    s += "|InpEmaFast=" + IntegerToString(InpEmaFast);
    s += "|InpEmaSlow=" + IntegerToString(InpEmaSlow);
    s += "|InpRsiPeriod=" + IntegerToString(InpRsiPeriod);
@@ -281,6 +283,13 @@ int OnInit()
          " broker=", AccountInfoString(ACCOUNT_COMPANY),
          " divisa=", AccountInfoString(ACCOUNT_CURRENCY),
          " login=", AccountInfoInteger(ACCOUNT_LOGIN));
+
+   if(mode == ACCOUNT_TRADE_MODE_REAL && !InpAllowRealTrading)
+     {
+      Print("GoldenTradeX: FAIL-CLOSED — cuenta REAL bloqueada. ",
+            "InpAllowRealTrading=false; use DEMO para validación.");
+      return INIT_FAILED;
+     }
 
    if(!TerminalInfoInteger(TERMINAL_TRADE_ALLOWED))
      { Print("GoldenTradeX: Trading NO permitido en el terminal."); return INIT_FAILED; }
