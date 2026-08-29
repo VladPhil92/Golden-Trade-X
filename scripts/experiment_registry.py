@@ -3,8 +3,9 @@
 
 The registry is intentionally fail-closed: an experiment cannot be accepted as
 research evidence unless its provenance is complete and internally consistent.
-Configuration identity is derived from canonical experiment metadata plus the
-exact preset SHA-256, making repeated registration idempotent.
+Configuration identity is derived only from execution-relevant metadata plus the
+exact preset SHA-256. Human notes and research annotations never create a fake
+new execution identity.
 """
 
 from __future__ import annotations
@@ -24,6 +25,38 @@ SCHEMA_VERSION = 1
 STATUS_VALUES = {"PLANNED", "PREPARED", "RUNNING", "COMPLETED", "FAILED", "INVALID"}
 SOURCE_TYPES = {"strategy_tester", "demo", "forward_demo", "live", "other"}
 SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
+
+# Only fields capable of changing the actual execution or its market/tester
+# provenance belong to the experiment fingerprint. Notes and ablation labels do
+# not, otherwise relabelling the same run could manufacture a new observation.
+IDENTITY_FIELDS = (
+    "schema_version",
+    "git_sha",
+    "preset_sha256",
+    "broker",
+    "symbol",
+    "timeframe",
+    "period_start",
+    "period_end",
+    "source_type",
+    "mt5_build",
+    "modelling",
+    "tester_model",
+    "expert",
+    "expert_parameters",
+    "execution_mode",
+    "portable_mode",
+    "deposit",
+    "currency",
+    "leverage",
+    "spread_mode",
+    "commission",
+    "swap_mode",
+    "slippage_points",
+    "optimization",
+    "forward_mode",
+    "forward_mode_code",
+)
 
 
 class RegistryValidationError(ValueError):
@@ -71,6 +104,25 @@ def _positive_number(spec: dict[str, Any], key: str) -> float:
     return float(value)
 
 
+def _nonnegative_int(spec: dict[str, Any], key: str, *, required: bool = True, default: int = 0) -> int:
+    if key not in spec:
+        if required:
+            raise RegistryValidationError(f"missing required field: {key}")
+        return default
+    value = spec[key]
+    if isinstance(value, bool):
+        raise RegistryValidationError(f"{key} must be an integer >= 0")
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise RegistryValidationError(f"{key} must be an integer >= 0") from exc
+    if str(value).strip() not in {str(parsed), f"+{parsed}"} and not isinstance(value, int):
+        raise RegistryValidationError(f"{key} must be an integer >= 0")
+    if parsed < 0:
+        raise RegistryValidationError(f"{key} must be an integer >= 0")
+    return parsed
+
+
 def normalize_spec(spec: dict[str, Any], base_dir: str | Path | None = None) -> tuple[dict[str, Any], str]:
     base = Path(base_dir or ".").resolve()
     required_text = (
@@ -92,7 +144,7 @@ def normalize_spec(spec: dict[str, Any], base_dir: str | Path | None = None) -> 
 
     git_sha = spec["git_sha"].strip().lower()
     if not SHA40_RE.fullmatch(git_sha):
-        raise RegistryValidationError("git_sha must be a full 40-character lowercase/uppercase hexadecimal SHA")
+        raise RegistryValidationError("git_sha must be a full 40-character hexadecimal SHA")
 
     source_type = spec["source_type"].strip().lower()
     if source_type not in SOURCE_TYPES:
@@ -112,6 +164,27 @@ def normalize_spec(spec: dict[str, Any], base_dir: str | Path | None = None) -> 
     leverage = _positive_number(spec, "leverage")
     if not float(leverage).is_integer():
         raise RegistryValidationError("leverage must be an integer ratio denominator")
+
+    tester_model: int | None = None
+    expert: str | None = None
+    expert_parameters: str | None = None
+    execution_mode: int | None = None
+    forward_mode_code: int | None = None
+    portable_mode: bool | None = None
+    if source_type == "strategy_tester":
+        for key in ("expert", "expert_parameters"):
+            value = spec.get(key)
+            if not isinstance(value, str) or not value.strip():
+                raise RegistryValidationError(f"missing required field: {key}")
+        tester_model = _nonnegative_int(spec, "tester_model")
+        execution_mode = _nonnegative_int(spec, "execution_mode", required=False, default=0)
+        forward_mode_code = _nonnegative_int(spec, "forward_mode_code", required=False, default=0)
+        expert = spec["expert"].strip()
+        expert_parameters = spec["expert_parameters"].strip()
+        portable_value = spec.get("portable_mode", True)
+        if not isinstance(portable_value, bool):
+            raise RegistryValidationError("portable_mode must be true/false")
+        portable_mode = portable_value
 
     changed_parameter = spec.get("changed_parameter")
     changed_from = spec.get("changed_from")
@@ -137,6 +210,11 @@ def normalize_spec(spec: dict[str, Any], base_dir: str | Path | None = None) -> 
         "source_type": source_type,
         "mt5_build": spec["mt5_build"].strip(),
         "modelling": spec["modelling"].strip(),
+        "tester_model": tester_model,
+        "expert": expert,
+        "expert_parameters": expert_parameters,
+        "execution_mode": execution_mode,
+        "portable_mode": portable_mode,
         "deposit": deposit,
         "currency": str(spec.get("currency", "USD")).strip().upper(),
         "leverage": int(leverage),
@@ -146,6 +224,7 @@ def normalize_spec(spec: dict[str, Any], base_dir: str | Path | None = None) -> 
         "slippage_points": float(spec.get("slippage_points", 0.0)),
         "optimization": bool(spec.get("optimization", False)),
         "forward_mode": str(spec.get("forward_mode", "disabled")).strip(),
+        "forward_mode_code": forward_mode_code,
         "parent_experiment_id": spec.get("parent_experiment_id"),
         "changed_parameter": changed_parameter.strip() if isinstance(changed_parameter, str) else None,
         "changed_from": changed_from,
@@ -161,7 +240,11 @@ def normalize_spec(spec: dict[str, Any], base_dir: str | Path | None = None) -> 
 
 
 def identity_for(normalized: dict[str, Any]) -> ExperimentIdentity:
-    fingerprint = hashlib.sha256(_canonical_json(normalized).encode("utf-8")).hexdigest()
+    missing = [key for key in IDENTITY_FIELDS if key not in normalized]
+    if missing:
+        raise RegistryValidationError(f"normalized spec missing identity fields: {', '.join(missing)}")
+    identity_payload = {key: normalized[key] for key in IDENTITY_FIELDS}
+    fingerprint = hashlib.sha256(_canonical_json(identity_payload).encode("utf-8")).hexdigest()
     return ExperimentIdentity(
         experiment_id=f"gtx-{fingerprint[:16]}",
         fingerprint=fingerprint,
