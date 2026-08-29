@@ -4,7 +4,7 @@
 
 v2.90 converts Strategy Tester work into registered, reproducible experiments. A backtest is evidence only when the exact code, preset, tester provenance, execution mode, period and produced artifacts can be identified later.
 
-The workflow is:
+Since v2.90.1, a non-empty MetaTrader report is no longer sufficient to mark an experiment complete. The report must also satisfy the normalized result contract.
 
 ```text
 experiment JSON
@@ -19,18 +19,20 @@ deterministic Strategy Tester INI
     ↓
 MetaTrader 5 Strategy Tester
     ↓
-observed report artifact
+raw HTML report
     ↓
-artifact SHA-256
+normalized result parser
+    ↓
+raw + normalized SHA-256 evidence
     ↓
 COMPLETED experiment
 ```
 
-A green CI run is not a profitable trading result. A `COMPLETED` experiment means only that the configured run produced registered evidence; statistical promotion remains a separate gate.
+A green CI run is not a profitable trading result. A `COMPLETED` experiment means only that the configured run produced parseable, registered evidence; statistical promotion remains a separate gate.
 
 ## Experiment identity
 
-`scripts/experiment_registry.py` fails closed unless the required provenance is complete. Strategy Tester experiments identify, among other fields:
+`scripts/experiment_registry.py` fails closed unless required provenance is complete. Strategy Tester experiments identify, among other fields:
 
 - full Git commit SHA;
 - exact preset SHA-256;
@@ -45,17 +47,9 @@ A green CI run is not a profitable trading result. A `COMPLETED` experiment mean
 - spread/commission/swap/slippage assumptions;
 - optimization/forward settings.
 
-The fingerprint intentionally excludes human notes and ablation labels. Relabelling the same execution must not manufacture a second independent observation. Conversely, changing an execution-critical field such as the preset contents or tester model creates a different identity.
+The fingerprint intentionally excludes human notes and ablation labels. Relabelling the same execution must not manufacture a second independent observation. Conversely, changing an execution-critical field creates a different identity.
 
-The resulting id is:
-
-```text
-gtx-<first 16 chars of SHA-256 fingerprint>
-```
-
-Registering the same execution configuration twice returns the same experiment.
-
-## Status model
+## Status and evidence model
 
 ```text
 PLANNED
@@ -64,24 +58,54 @@ PREPARED
   ↓
 RUNNING
   ├──→ FAILED
-  └──→ COMPLETED
+  └──→ raw report
+          ↓
+      normalize
+      ├──→ FAILED
+      └──→ COMPLETED
 ```
 
-`PREPARED` explicitly means that configuration artifacts exist but no completed Strategy Tester evidence has been observed. The harness marks a run `COMPLETED` only when MetaTrader returns successfully and a non-empty Strategy Tester report exists. Preparation alone never becomes completion.
+`PREPARED` means configuration artifacts exist but no completed Strategy Tester evidence has been observed. `COMPLETED` requires all of the following:
+
+1. terminal execution returned successfully;
+2. a non-empty Strategy Tester report exists;
+3. the report can be decoded and parsed;
+4. all minimum research metrics are present;
+5. `normalized_results.json` is produced and hashed;
+6. the execution manifest is finalized with raw and normalized evidence hashes.
+
+## Normalized Strategy Tester results
+
+`scripts/strategy_tester_results.py` parses MT5 HTML reports without adding a third-party HTML dependency. UTF-8 and UTF-16 reports are supported, together with canonical English labels and the principal Spanish equivalents.
+
+The minimum fail-closed metric contract is:
+
+- `total_net_profit`;
+- `profit_factor`;
+- `expected_payoff`;
+- `max_drawdown_pct`;
+- `total_trades`.
+
+When available, the parser also normalizes win rate, recovery factor, Sharpe ratio, gross profit/loss, trade averages, history quality, ticks and related report fields.
+
+Every metric retains:
+
+```json
+{
+  "value": 1.42,
+  "unit": "ratio",
+  "source_label": "Sharpe Ratio",
+  "raw_value": "1.42"
+}
+```
+
+Derived metrics also record their source. For example, `max_drawdown_pct` prefers `Equity Drawdown Relative`; if that field is absent, `Balance Drawdown Relative` is used explicitly as a documented fallback.
+
+A parser warning never fabricates a value. If one of the minimum metrics cannot be established, the experiment fails normalization.
 
 ## Single experiment
 
 Start from `config/experiment.example.json`. It is a template, not evidence. Replace placeholders with observed provenance.
-
-Register without running:
-
-```bash
-python scripts/experiment_registry.py \
-  --db data/research/experiments.sqlite \
-  register --spec config/experiment.json
-```
-
-Prepare a deterministic Strategy Tester configuration:
 
 ```bash
 python scripts/strategy_tester_harness.py \
@@ -90,72 +114,98 @@ python scripts/strategy_tester_harness.py \
   --output-dir data/research/runs
 ```
 
-On Windows, execution can be enabled by supplying the terminal path:
-
-```powershell
-python scripts/strategy_tester_harness.py `
-  --spec config/experiment.json `
-  --registry data/research/experiments.sqlite `
-  --output-dir data/research/runs `
-  --terminal "C:\Program Files\MetaTrader 5\terminal64.exe"
-```
-
-`portable_mode` is recorded explicitly. The harness only adds `/portable` when the registered experiment says the terminal is using that data topology.
+On Windows, execution is enabled by supplying the terminal path. `portable_mode` is recorded explicitly; the harness only adds `/portable` when the registered experiment declares that topology.
 
 ## Ablation matrix
 
-Ablations must be one-change-at-a-time. `scripts/experiment_matrix.py` generates a frozen baseline plus variant presets/specs from `config/ablation_matrix.example.json`.
+Ablations are one-change-at-a-time. `scripts/experiment_matrix.py` produces a frozen baseline plus variant presets/specs.
 
-```bash
-python scripts/experiment_matrix.py \
-  --base-spec config/experiment.json \
-  --matrix config/ablation_matrix.example.json \
-  --output-dir data/research/ablation
+The first official component-removal design is `config/ablation_matrix.v1.json` (`GTX-ABLATION-V1`) and contains:
+
+1. SMC filter off;
+2. market regime filter off;
+3. HTF filter off;
+4. equity curve filter off;
+5. session filter off;
+6. news filter off;
+7. trailing stop off;
+8. break-even off;
+9. partial take profit off.
+
+Fibonacci is intentionally not included in this matrix because the current implementation has no isolated boolean switch. Changing its confidence weight would alter score normalization semantics and would therefore not be a clean one-variable component-removal experiment.
+
+The matrix generator records baseline identity and, for every variant, `parent_experiment_id`, `changed_parameter`, `changed_from`, `changed_to`, preset hash and experiment fingerprint.
+
+## Matrix execution
+
+`scripts/strategy_tester_matrix.py` executes the generated matrix sequentially:
+
+```text
+baseline
+  ↓
+variant 1
+  ↓
+variant 2
+  ↓
+...
+  ↓
+variant N
 ```
 
-The matrix manifest records the baseline experiment id plus each variant's exact preset hash and change metadata. The generator refuses missing parameters, duplicate variant names, duplicate parameter definitions and variants that do not actually change the baseline value.
+The runner verifies that the experiment identity produced at execution matches the identity frozen in the matrix manifest. `--continue-on-failure` allows all variants to be attempted while still returning an overall failure if any experiment fails. This is useful for preserving diagnostic evidence without declaring an incomplete matrix promotable.
 
-A generated variant records:
+A dry run with no terminal only prepares and registers every experiment. It does not create completed evidence.
 
-```json
-{
-  "parent_experiment_id": "gtx-...",
-  "changed_parameter": "InpUseSmcFilter",
-  "changed_from": "true",
-  "changed_to": "false"
-}
-```
+## Descriptive ablation report
 
-These labels document the controlled relationship; execution identity itself is still determined by actual executable inputs.
+`scripts/ablation_report.py` compares completed normalized variants against the completed baseline and reports absolute/relative deltas for metrics such as:
 
-## GitHub Actions research execution
+- total net profit;
+- profit factor;
+- expected payoff;
+- maximum drawdown percentage;
+- trade count;
+- win rate;
+- recovery factor;
+- Sharpe ratio.
 
-`.github/workflows/strategy-tester-research.yml` is a manual `workflow_dispatch` research workflow. It:
+The output is explicitly marked `DESCRIPTIVE_ONLY`. A single baseline/variant comparison does **not** establish causal or statistically significant contribution. Component promotion/removal decisions require repeated OOS/walk-forward evidence.
 
-1. installs official MetaTrader 5 using the same project compile path;
+## GitHub Actions research workflows
+
+`.github/workflows/strategy-tester-research.yml` runs one registered Strategy Tester experiment.
+
+`.github/workflows/strategy-tester-ablation.yml` runs the full `GTX-ABLATION-V1` research chain on a Windows runner:
+
+1. installs official MetaTrader 5;
 2. compiles the exact checked-out GoldenTradeX EA;
-3. stages the selected preset in the actual Tester profile directory;
-4. records the current Git SHA, MT5 file/build version and actual portable/non-portable data mode;
-5. executes the registered Strategy Tester experiment;
-6. fails if no non-empty report is produced;
-7. uploads the experiment registry, report/run evidence, runtime spec, compile log and EX5 artifact.
+3. records runtime Git/MT5/tester provenance;
+4. generates frozen baseline and nine one-change-at-a-time presets;
+5. stages them in the actual Tester profile directory;
+6. executes baseline and all variants;
+7. normalizes every raw report;
+8. builds the descriptive ablation report if the full matrix completes;
+9. uploads the registry, manifests, raw reports, normalized JSON, generated presets, EX5 and compile logs;
+10. fails the workflow if any registered experiment fails.
 
-A hosted GitHub runner is not automatically equivalent to a specific production broker. If the requested symbol/history/broker environment is unavailable, the run must fail rather than silently substitute another source. Broker-robustness work should therefore use explicitly provisioned environments or self-hosted runners where appropriate.
+A GitHub-hosted runner is not automatically equivalent to a production broker. If the requested symbol/history/tester environment is unavailable, the workflow must fail instead of substituting a different source. Broker robustness should ultimately use explicitly provisioned or self-hosted environments.
 
 ## Evidence boundary
 
-The registry does not claim that a completed backtest proves edge. Promotion requires subsequent v2.90 gates:
+The current tooling can now answer **what a completed Strategy Tester run reported** and can compare controlled component-removal variants. It still cannot claim stable edge.
 
-1. execute baseline and one-change-at-a-time ablation matrix;
-2. normalize Strategy Tester reports into a comparison dataset;
+Promotion still requires:
+
+1. execute the first official baseline + `GTX-ABLATION-V1` matrix on valid XAUUSD M15 data;
+2. inspect component deltas without selecting parameters on OOS data;
 3. true IS optimization → freeze parameters → independent OOS run;
 4. rolling walk-forward aggregation;
 5. spread/commission/slippage stress;
 6. parameter stability;
 7. broker robustness;
 8. OOS promotion criteria;
-9. forward demo before any controlled production candidate.
+9. prolonged forward demo before controlled production.
 
 ## Next implementation increment
 
-The next increment is the normalized Strategy Tester result parser plus the rolling IS→frozen OOS experiment planner. No parameter should be promoted from the current research tooling without counterfactual Strategy Tester confirmation.
+After the first valid ablation evidence set exists, the next software increment is the **rolling IS → frozen OOS experiment planner and promotion gate**. Until then, no component should be declared useful or useless solely from one historical matrix.
