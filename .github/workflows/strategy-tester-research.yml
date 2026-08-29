@@ -1,0 +1,188 @@
+name: Strategy Tester Research
+
+on:
+  workflow_dispatch:
+    inputs:
+      broker_source:
+        description: Exact broker/tester data source label
+        required: true
+        type: string
+      symbol:
+        description: Exact MT5 symbol
+        required: true
+        default: XAUUSD
+        type: string
+      timeframe:
+        description: MT5 timeframe
+        required: true
+        default: M15
+        type: string
+      from_date:
+        description: Test start date YYYY-MM-DD
+        required: true
+        default: "2024-01-01"
+        type: string
+      to_date:
+        description: Test end date YYYY-MM-DD
+        required: true
+        default: "2024-12-31"
+        type: string
+      tester_model:
+        description: Explicit MT5 numeric tester model for this terminal build
+        required: true
+        default: "4"
+        type: string
+      modelling:
+        description: Human-readable modelling semantics
+        required: true
+        default: Every tick based on real ticks
+        type: string
+      preset_name:
+        description: Preset filename under config/ (no path separators)
+        required: true
+        default: GoldenTradeX.set
+        type: string
+      deposit:
+        description: Initial tester deposit
+        required: true
+        default: "10000"
+        type: string
+      leverage:
+        description: Leverage denominator, e.g. 100 for 1:100
+        required: true
+        default: "100"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  strategy-tester:
+    name: Registered MetaTrader Strategy Tester run
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      GTX_BROKER_SOURCE: ${{ inputs.broker_source }}
+      GTX_SYMBOL: ${{ inputs.symbol }}
+      GTX_TIMEFRAME: ${{ inputs.timeframe }}
+      GTX_FROM_DATE: ${{ inputs.from_date }}
+      GTX_TO_DATE: ${{ inputs.to_date }}
+      GTX_TESTER_MODEL: ${{ inputs.tester_model }}
+      GTX_MODELLING: ${{ inputs.modelling }}
+      GTX_PRESET_NAME: ${{ inputs.preset_name }}
+      GTX_DEPOSIT: ${{ inputs.deposit }}
+      GTX_LEVERAGE: ${{ inputs.leverage }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install MetaTrader 5 and compile GoldenTradeX
+        shell: pwsh
+        run: .github/scripts/compile-mql5.ps1
+
+      - name: Build runtime experiment provenance
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+
+          if ($env:GTX_PRESET_NAME -match "[\\/]") {
+            throw "preset_name must be a filename under config/, not a path"
+          }
+          if ($env:GTX_FROM_DATE -notmatch '^\d{4}-\d{2}-\d{2}$' -or
+              $env:GTX_TO_DATE -notmatch '^\d{4}-\d{2}-\d{2}$') {
+            throw "from_date/to_date must use YYYY-MM-DD"
+          }
+
+          $presetPath = Join-Path $env:GITHUB_WORKSPACE "config\$env:GTX_PRESET_NAME"
+          if (-not (Test-Path $presetPath)) {
+            throw "Preset not found: $presetPath"
+          }
+          if (-not $env:GTX_EX5 -or -not (Test-Path $env:GTX_EX5)) {
+            throw "GTX_EX5 is unavailable after the compile gate"
+          }
+
+          $expertDir = Split-Path $env:GTX_EX5 -Parent
+          $expertsDir = Split-Path $expertDir -Parent
+          $mql5Root = Split-Path $expertsDir -Parent
+          $profilesTester = Join-Path $mql5Root "Profiles\Tester"
+          New-Item -ItemType Directory -Force -Path $profilesTester | Out-Null
+          Copy-Item $presetPath (Join-Path $profilesTester $env:GTX_PRESET_NAME) -Force
+
+          $installDir = Join-Path $env:RUNNER_TEMP "MetaTrader5"
+          $terminal = @(
+            (Join-Path $installDir "terminal64.exe"),
+            (Join-Path $installDir "terminal.exe")
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $terminal) {
+            throw "MetaTrader terminal executable not found under $installDir"
+          }
+
+          $build = (Get-Item $terminal).VersionInfo.FileVersion
+          if (-not $build) { $build = "UNKNOWN_FILE_VERSION" }
+
+          $specPath = Join-Path $env:GITHUB_WORKSPACE "config\runtime-experiment.json"
+          $spec = [ordered]@{
+            git_sha = $env:GITHUB_SHA
+            preset_path = $env:GTX_PRESET_NAME
+            broker = $env:GTX_BROKER_SOURCE
+            symbol = $env:GTX_SYMBOL
+            timeframe = $env:GTX_TIMEFRAME
+            period_start = "$env:GTX_FROM_DATE`T00:00:00Z"
+            period_end = "$env:GTX_TO_DATE`T23:59:59Z"
+            source_type = "strategy_tester"
+            mt5_build = $build
+            modelling = $env:GTX_MODELLING
+            tester_model = [int]$env:GTX_TESTER_MODEL
+            expert = "GoldenTradeX\GoldenTradeX.ex5"
+            expert_parameters = $env:GTX_PRESET_NAME
+            deposit = [double]$env:GTX_DEPOSIT
+            currency = "USD"
+            leverage = [int]$env:GTX_LEVERAGE
+            spread_mode = "tester/broker observed"
+            commission = $null
+            swap_mode = "tester/broker observed"
+            slippage_points = 0.0
+            execution_mode = 0
+            optimization = $false
+            forward_mode = "disabled"
+            forward_mode_code = 0
+            parent_experiment_id = $null
+            changed_parameter = $null
+            changed_from = $null
+            changed_to = $null
+            notes = "workflow_dispatch Strategy Tester research run"
+          }
+          $spec | ConvertTo-Json -Depth 6 | Set-Content -Path $specPath -Encoding utf8
+
+          "GTX_MT5_TERMINAL=$terminal" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "GTX_EXPERIMENT_SPEC=$specPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "GTX_MQL5_ROOT=$mql5Root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Terminal: $terminal"
+          Write-Host "MT5 build/file version: $build"
+          Write-Host "MQL5 root: $mql5Root"
+          Write-Host "Experiment spec: $specPath"
+
+      - name: Execute registered Strategy Tester experiment
+        shell: pwsh
+        run: |
+          python scripts/strategy_tester_harness.py `
+            --spec "$env:GTX_EXPERIMENT_SPEC" `
+            --registry "data/research/runtime/experiments.sqlite" `
+            --output-dir "data/research/runtime/runs" `
+            --terminal "$env:GTX_MT5_TERMINAL"
+
+      - name: Upload Strategy Tester research evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: strategy-tester-research-${{ github.run_id }}
+          if-no-files-found: warn
+          path: |
+            config/runtime-experiment.json
+            data/research/runtime/
+            ${{ env.GTX_COMPILE_LOG }}
+            ${{ env.GTX_EX5 }}
