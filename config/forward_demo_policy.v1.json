@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "policy_id": "GTX-FORWARD-DEMO-V1",
+  "approved": true,
+  "status_note": "Frozen ex-ante before any official forward-demo observation. The fixed observation window may not be extended or shortened based on interim performance. A pass authorizes manual release review only, never live trading.",
+  "observation": {
+    "minimum_calendar_days": 30,
+    "minimum_closed_trades": 100,
+    "maximum_heartbeat_gap_seconds": 7200,
+    "require_trade_mode": "DEMO",
+    "require_stable_terminal_build": true
+  },
+  "criteria": [
+    {
+      "metric": "total_realized_r",
+      "operator": ">",
+      "value": 0
+    },
+    {
+      "metric": "expectancy_r",
+      "operator": ">",
+      "value": 0
+    },
+    {
+      "metric": "closed_trade_max_drawdown_r",
+      "operator": "<=",
+      "value": 8
+    }
+  ]
+}

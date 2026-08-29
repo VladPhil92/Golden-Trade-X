@@ -1,0 +1,90 @@
+name: Materialize Official Economic Calendar
+
+on:
+  workflow_dispatch:
+    inputs:
+      start_year:
+        description: First release year to materialize
+        required: true
+        default: "2021"
+        type: string
+      end_year:
+        description: Last release year to materialize
+        required: true
+        default: "2026"
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  materialize-calendar:
+    name: BLS + Federal Reserve calendar artifact
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+
+      - name: Validate year inputs
+        shell: bash
+        env:
+          GTX_START_YEAR: ${{ inputs.start_year }}
+          GTX_END_YEAR: ${{ inputs.end_year }}
+        run: |
+          set -euo pipefail
+          [[ "$GTX_START_YEAR" =~ ^20[0-9]{2}$ ]]
+          [[ "$GTX_END_YEAR" =~ ^20[0-9]{2}$ ]]
+          test "$GTX_START_YEAR" -le "$GTX_END_YEAR"
+          test "$GTX_START_YEAR" -ge 2000
+          test "$GTX_END_YEAR" -le 2100
+
+      - name: Install exact source-fetch dependency
+        run: python -m pip install --disable-pip-version-check "requests==2.34.2"
+
+      - name: Materialize source-backed calendar as unapproved review artifact
+        env:
+          GTX_START_YEAR: ${{ inputs.start_year }}
+          GTX_END_YEAR: ${{ inputs.end_year }}
+        run: |
+          python scripts/materialize_official_calendar.py \
+            --start-year "$GTX_START_YEAR" \
+            --end-year "$GTX_END_YEAR" \
+            --output data/research/calendar-review/economic_calendar.generated.json \
+            --audit-output data/research/calendar-review/economic_calendar.audit.json
+
+      - name: Validate generated contract and render MQL5 include
+        run: |
+          python scripts/economic_calendar_contract.py \
+            --contract data/research/calendar-review/economic_calendar.generated.json \
+            --generate-mql5 data/research/calendar-review/EconomicCalendarData.generated.mqh
+          python scripts/economic_calendar_contract.py \
+            --contract data/research/calendar-review/economic_calendar.generated.json \
+            --verify-mql5 data/research/calendar-review/EconomicCalendarData.generated.mqh
+
+      - name: Confirm artifact remains unapproved before human review
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path('data/research/calendar-review/economic_calendar.generated.json')
+          doc = json.loads(p.read_text(encoding='utf-8'))
+          if doc.get('approved') is not False:
+              raise SystemExit('Generated calendar must remain approved=false until reviewed')
+          print('CALENDAR REVIEW ARTIFACT READY; APPROVAL NOT GRANTED')
+          PY
+
+      - name: Upload reviewable calendar evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: official-economic-calendar-review-${{ github.run_id }}
+          retention-days: 90
+          if-no-files-found: error
+          path: data/research/calendar-review/

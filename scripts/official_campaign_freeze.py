@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 """Freeze all pre-observation inputs for a Golden Trade X v3.0-rc1 campaign.
 
-An official lock is created only when the execution environment and the OOS
-promotion, robustness and forward policies were approved before evidence
-generation. Draft locks are allowed only through an explicit engineering flag
-and can never be promoted by the rc1 gate.
+An official lock is created only when the execution environment, economic calendar and
+OOS/robustness/forward policies were approved before evidence generation. Draft locks are
+allowed only through an explicit engineering flag and can never be promoted by the rc1 gate.
 
-The build SHA can be injected at freeze time (for example from GITHUB_SHA). This
-avoids the impossible requirement for a tracked JSON file to contain the SHA of
-the same commit that contains that file. The injected SHA is frozen before any
-evidence is generated and becomes part of the campaign fingerprint.
+The build SHA can be injected at freeze time (for example from GITHUB_SHA). This avoids the
+impossible requirement for a tracked JSON file to contain the SHA of the same commit that
+contains that file. The injected SHA is frozen before any evidence is generated and becomes
+part of the campaign fingerprint.
 """
 
 from __future__ import annotations
@@ -28,6 +27,10 @@ try:
         robustness_template_sha256,
         robustness_template_snapshot,
     )
+    from scripts.economic_calendar_contract import (
+        EconomicCalendarValidationError,
+        load_calendar_contract,
+    )
     from scripts.execution_environment import (
         canonical_environment_sha256,
         load_execution_environment_contract,
@@ -41,6 +44,7 @@ except ModuleNotFoundError:
         robustness_template_sha256,
         robustness_template_snapshot,
     )
+    from economic_calendar_contract import EconomicCalendarValidationError, load_calendar_contract
     from execution_environment import (
         canonical_environment_sha256,
         load_execution_environment_contract,
@@ -206,6 +210,12 @@ def freeze_official_campaign(
     )
     environment_canonical_sha = canonical_environment_sha256(execution_environment)
 
+    calendar_path = _resolve(base, config.get("economic_calendar_path"), "economic_calendar_path")
+    try:
+        economic_calendar, calendar_file_sha, calendar_canonical_sha = load_calendar_contract(calendar_path)
+    except EconomicCalendarValidationError as exc:
+        raise RegistryValidationError(str(exc)) from exc
+
     walk_config = _resolve(base, config.get("walk_forward_config_path"), "walk_forward_config_path")
     robustness_template_path = _resolve(
         base, config.get("robustness_template_path"), "robustness_template_path"
@@ -230,6 +240,7 @@ def freeze_official_campaign(
 
     all_inputs_approved = (
         execution_environment["approved"] is True
+        and economic_calendar["approved"] is True
         and walk_plan.get("status") == "READY_FOR_REGISTERED_EXECUTION"
         and promotion_policy.get("approved") is True
         and robustness_policy["approved"] is True
@@ -237,7 +248,7 @@ def freeze_official_campaign(
     )
     if not all_inputs_approved and not allow_draft:
         raise RegistryValidationError(
-            "official campaign freeze requires an approved execution environment and approved "
+            "official campaign freeze requires approved execution environment, economic calendar, "
             "OOS promotion, robustness and forward-demo policies"
         )
 
@@ -247,6 +258,8 @@ def freeze_official_campaign(
         "candidate_universe_sha256": universe_sha,
         "execution_environment_file_sha256": environment_file_sha,
         "execution_environment_sha256": environment_canonical_sha,
+        "economic_calendar_file_sha256": calendar_file_sha,
+        "economic_calendar_sha256": calendar_canonical_sha,
         "walk_forward_plan_sha256": sha256_file(walk_plan_path),
         "promotion_policy_sha256": promotion_policy.get("sha256"),
         "robustness_template_sha256": robustness_template_sha256(robustness_template),
@@ -265,6 +278,7 @@ def freeze_official_campaign(
         ),
         "decision_scope": "EVIDENCE_GENERATION_ONLY",
         "live_trading_authorized": False,
+        "real_capital_authorized": False,
         "build_id": build_id,
         "candidate_universe": {
             "sha256": universe_sha,
@@ -276,6 +290,15 @@ def freeze_official_campaign(
             "file_sha256": environment_file_sha,
             "canonical_sha256": environment_canonical_sha,
             "contract": execution_environment,
+        },
+        "economic_calendar": {
+            "path": Path(str(config.get("economic_calendar_path"))).as_posix(),
+            "file_sha256": calendar_file_sha,
+            "canonical_sha256": calendar_canonical_sha,
+            "calendar_id": economic_calendar["calendar_id"],
+            "approved": economic_calendar["approved"],
+            "coverage": economic_calendar["coverage"],
+            "event_count": len(economic_calendar["events"]),
         },
         "walk_forward": {
             "config_path": Path(str(config.get("walk_forward_config_path"))).as_posix(),
@@ -298,6 +321,8 @@ def freeze_official_campaign(
             "policy": forward_policy,
         },
         "required_sequence": [
+            "PRE_CAMPAIGN_READINESS_V2",
+            "ECONOMIC_CALENDAR_LOCK_V1",
             "MT5_EXECUTION_ENVIRONMENT_ATTESTATION_V1",
             "ROLLING_IS_FROZEN_OOS",
             "OOS_PROMOTION_GATE",

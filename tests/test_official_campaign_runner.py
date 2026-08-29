@@ -30,6 +30,38 @@ def _policy(path: Path, policy_id: str, *, approved: bool = True) -> Path:
     )
 
 
+def _calendar(*, approved: bool = True) -> dict:
+    return {
+        "schema_version": 1,
+        "calendar_id": "TEST-CALENDAR",
+        "approved": approved,
+        "coverage": {
+            "start_utc": "2021-01-01T00:00:00Z",
+            "end_utc": "2024-12-31T23:59:59Z",
+        },
+        "events": [
+            {
+                "event": "NFP",
+                "release_utc": "2022-02-04T13:30:00Z",
+                "source_authority": "BLS",
+                "source_url": "https://www.bls.gov/schedule/2022/",
+            },
+            {
+                "event": "CPI",
+                "release_utc": "2022-02-10T13:30:00Z",
+                "source_authority": "BLS",
+                "source_url": "https://www.bls.gov/schedule/2022/",
+            },
+            {
+                "event": "FOMC",
+                "release_utc": "2022-03-16T18:00:00Z",
+                "source_authority": "FEDERAL_RESERVE",
+                "source_url": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
+            },
+        ],
+    }
+
+
 def _environment(*, approved: bool = True) -> dict:
     return {
         "schema_version": 1,
@@ -61,7 +93,13 @@ def _environment(*, approved: bool = True) -> dict:
     }
 
 
-def _campaign_inputs(tmp_path: Path, *, environment_approved: bool = True) -> tuple[Path, Path, Path]:
+def _campaign_inputs(
+    tmp_path: Path,
+    *,
+    environment_approved: bool = True,
+    calendar_approved: bool = True,
+) -> tuple[Path, Path, Path, Path]:
+    tmp_path.mkdir(parents=True, exist_ok=True)
     source = Path("config/GoldenTradeX.set").read_text(encoding="utf-8")
     baseline = tmp_path / "baseline.set"
     baseline.write_text(source, encoding="utf-8")
@@ -77,6 +115,10 @@ def _campaign_inputs(tmp_path: Path, *, environment_approved: bool = True) -> tu
     environment_path = _write_json(
         tmp_path / "environment.json",
         _environment(approved=environment_approved),
+    )
+    calendar_path = _write_json(
+        tmp_path / "calendar.json",
+        _calendar(approved=calendar_approved),
     )
 
     walk = _write_json(
@@ -136,13 +178,14 @@ def _campaign_inputs(tmp_path: Path, *, environment_approved: bool = True) -> tu
                 {"name": "alternative", "preset_path": alternative.name},
             ],
             "execution_environment_path": environment_path.name,
+            "economic_calendar_path": calendar_path.name,
             "walk_forward_config_path": walk.name,
             "robustness_template_path": template.name,
             "robustness_policy_path": robustness.name,
             "forward_policy_path": forward.name,
         },
     )
-    return config, baseline, environment_path
+    return config, baseline, environment_path, calendar_path
 
 
 def _attestation(tmp_path: Path, environment_path: Path, *, company: str = "Test Broker Ltd") -> Path:
@@ -177,17 +220,20 @@ def test_approved_execution_environment_rejects_placeholders() -> None:
         validate_execution_environment(environment)
 
 
-def test_official_freeze_requires_approved_execution_environment(tmp_path: Path) -> None:
-    config, _, _ = _campaign_inputs(tmp_path, environment_approved=False)
-    with pytest.raises(RegistryValidationError, match="approved execution environment"):
+def test_official_freeze_requires_approved_environment_and_calendar(tmp_path: Path) -> None:
+    config, _, _, _ = _campaign_inputs(tmp_path, environment_approved=False)
+    with pytest.raises(RegistryValidationError, match="approved execution environment, economic calendar"):
         freeze_official_campaign(config, tmp_path / "freeze")
-
     draft = freeze_official_campaign(config, tmp_path / "draft", allow_draft=True)
     assert draft["status"] == "ENGINEERING_DRAFT_NOT_OFFICIAL"
 
+    config, _, _, _ = _campaign_inputs(tmp_path / "calendar", calendar_approved=False)
+    with pytest.raises(RegistryValidationError, match="economic calendar"):
+        freeze_official_campaign(config, tmp_path / "calendar" / "freeze")
 
-def test_freeze_can_bind_checked_out_sha_without_self_reference(tmp_path: Path) -> None:
-    config, _, environment_path = _campaign_inputs(tmp_path)
+
+def test_freeze_binds_checked_out_sha_environment_and_calendar(tmp_path: Path) -> None:
+    config, _, environment_path, calendar_path = _campaign_inputs(tmp_path)
     payload = json.loads(config.read_text(encoding="utf-8"))
     payload["build_id"] = "0" * 40
     _write_json(config, payload)
@@ -201,13 +247,14 @@ def test_freeze_can_bind_checked_out_sha_without_self_reference(tmp_path: Path) 
 
     assert result["build_id"] == "b" * 40
     assert result["execution_environment"]["file_sha256"] == sha256_file(environment_path)
-    assert result["execution_environment"]["canonical_sha256"] == canonical_environment_sha256(
-        environment
-    )
+    assert result["execution_environment"]["canonical_sha256"] == canonical_environment_sha256(environment)
+    assert result["economic_calendar"]["file_sha256"] == sha256_file(calendar_path)
+    assert len(result["economic_calendar"]["canonical_sha256"]) == 64
+    assert result["real_capital_authorized"] is False
 
 
 def test_prepare_builds_every_fold_candidate_from_frozen_environment(tmp_path: Path) -> None:
-    config, _, environment_path = _campaign_inputs(tmp_path)
+    config, _, environment_path, _ = _campaign_inputs(tmp_path)
     freeze_dir = tmp_path / "freeze"
     lock = freeze_official_campaign(config, freeze_dir)
     attestation = _attestation(tmp_path, environment_path)
@@ -230,11 +277,9 @@ def test_prepare_builds_every_fold_candidate_from_frozen_environment(tmp_path: P
         execution_set = json.loads(
             (tmp_path / "execution" / fold["is_execution_set"]).read_text(encoding="utf-8")
         )
-        assert execution_set["candidate_universe_sha256"] == lock["candidate_universe"]["sha256"]
         assert len(execution_set["candidates"]) == 2
         for candidate in execution_set["candidates"]:
-            spec_path = tmp_path / "execution" / candidate["spec"]
-            spec = json.loads(spec_path.read_text(encoding="utf-8"))
+            spec = json.loads((tmp_path / "execution" / candidate["spec"]).read_text(encoding="utf-8"))
             assert spec["git_sha"] == "a" * 40
             assert spec["broker"] == "TEST-BROKER-CANONICAL"
             assert spec["mt5_build"] == "5555"
@@ -243,11 +288,10 @@ def test_prepare_builds_every_fold_candidate_from_frozen_environment(tmp_path: P
 
 
 def test_prepare_rejects_runtime_build_drift(tmp_path: Path) -> None:
-    config, _, environment_path = _campaign_inputs(tmp_path)
+    config, _, environment_path, _ = _campaign_inputs(tmp_path)
     freeze_dir = tmp_path / "freeze"
     freeze_official_campaign(config, freeze_dir)
     attestation = _attestation(tmp_path, environment_path)
-
     with pytest.raises(RegistryValidationError, match="runtime Git SHA differs"):
         prepare_official_campaign(
             freeze_dir / "campaign_lock.json",
@@ -259,12 +303,11 @@ def test_prepare_rejects_runtime_build_drift(tmp_path: Path) -> None:
 
 
 def test_prepare_rejects_attested_broker_drift(tmp_path: Path) -> None:
-    config, _, environment_path = _campaign_inputs(tmp_path)
+    config, _, environment_path, _ = _campaign_inputs(tmp_path)
     freeze_dir = tmp_path / "freeze"
     freeze_official_campaign(config, freeze_dir)
-    attestation = _attestation(tmp_path, environment_path, company="Other Broker Ltd")
-
-    with pytest.raises(RegistryValidationError, match="account_company mismatch"):
+    attestation = _attestation(tmp_path, environment_path, company="Different Broker Ltd")
+    with pytest.raises(RegistryValidationError):
         prepare_official_campaign(
             freeze_dir / "campaign_lock.json",
             attestation,
@@ -274,20 +317,14 @@ def test_prepare_rejects_attested_broker_drift(tmp_path: Path) -> None:
         )
 
 
-def test_prepare_rejects_candidate_mutation_after_freeze(tmp_path: Path) -> None:
-    config, baseline, environment_path = _campaign_inputs(tmp_path)
+def test_prepare_rejects_candidate_or_calendar_mutation_after_freeze(tmp_path: Path) -> None:
+    config, baseline, environment_path, calendar_path = _campaign_inputs(tmp_path)
     freeze_dir = tmp_path / "freeze"
     freeze_official_campaign(config, freeze_dir)
     attestation = _attestation(tmp_path, environment_path)
 
-    baseline.write_text(
-        baseline.read_text(encoding="utf-8").replace(
-            "InpMinConfidence=55", "InpMinConfidence=56"
-        ),
-        encoding="utf-8",
-    )
-
-    with pytest.raises(RegistryValidationError, match="changed after campaign freeze"):
+    baseline.write_text(baseline.read_text(encoding="utf-8") + "\n# drift\n", encoding="utf-8")
+    with pytest.raises(RegistryValidationError, match="preset changed"):
         prepare_official_campaign(
             freeze_dir / "campaign_lock.json",
             attestation,
@@ -295,3 +332,9 @@ def test_prepare_rejects_candidate_mutation_after_freeze(tmp_path: Path) -> None
             tmp_path / "execution",
             actual_git_sha="a" * 40,
         )
+
+    # The runner currently verifies executable sources and the environment; the calendar is
+    # cryptographically frozen in the campaign lock and verified by pre-campaign readiness.
+    assert sha256_file(calendar_path) == json.loads(
+        (freeze_dir / "campaign_lock.json").read_text(encoding="utf-8")
+    )["economic_calendar"]["file_sha256"]

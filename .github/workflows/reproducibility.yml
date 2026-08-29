@@ -26,7 +26,7 @@ jobs:
           cache: pip
           cache-dependency-path: requirements.txt
       - name: Install test dependencies
-        run: pip install "pytest==9.1.1" "pytest-cov==7.1.0"
+        run: pip install "pytest==9.1.1" "pytest-cov==7.1.0" "requests==2.34.2"
       - name: Compile reproducibility tooling
         run: >-
           python -m compileall -q
@@ -39,6 +39,8 @@ jobs:
           scripts/telemetry_db.py
           scripts/campaign_contract.py
           scripts/economic_calendar_contract.py
+          scripts/materialize_official_calendar.py
+          scripts/official_policy_check.py
           scripts/pre_campaign_readiness.py
           scripts/execution_environment.py
           scripts/mt5_environment_probe.py
@@ -56,6 +58,8 @@ jobs:
           scripts/official_campaign_freeze.py
           scripts/official_campaign_runner.py
           scripts/rc1_release_review_gate.py
+      - name: Validate frozen official policy bundle
+        run: python scripts/official_policy_check.py --config-root config
       - name: Run reproducibility contract tests
         env:
           PYTHONPATH: ${{ github.workspace }}/scripts:${{ github.workspace }}
@@ -68,6 +72,8 @@ jobs:
           tests/test_strategy_tester_matrix.py
           tests/test_telemetry_db.py
           tests/test_economic_calendar_contract.py
+          tests/test_materialize_official_calendar.py
+          tests/test_official_policy_check.py
           tests/test_pre_campaign_readiness.py
           tests/test_walk_forward_validation.py
           tests/test_robustness_validation.py
@@ -90,7 +96,7 @@ jobs:
           cache: pip
           cache-dependency-path: requirements.txt
       - name: Install coverage dependencies
-        run: pip install "pytest==9.1.1" "pytest-cov==7.1.0"
+        run: pip install "pytest==9.1.1" "pytest-cov==7.1.0" "requests==2.34.2"
       - name: Measure evidence-orchestration modules
         env:
           PYTHONPATH: ${{ github.workspace }}/scripts:${{ github.workspace }}
@@ -101,6 +107,8 @@ jobs:
             tests/test_strategy_tester_harness.py \
             tests/test_strategy_tester_matrix.py \
             tests/test_economic_calendar_contract.py \
+            tests/test_materialize_official_calendar.py \
+            tests/test_official_policy_check.py \
             tests/test_pre_campaign_readiness.py \
             tests/test_walk_forward_validation.py \
             tests/test_robustness_validation.py \
@@ -114,6 +122,8 @@ jobs:
             --cov=scripts.strategy_tester_harness \
             --cov=scripts.strategy_tester_matrix \
             --cov=scripts.economic_calendar_contract \
+            --cov=scripts.materialize_official_calendar \
+            --cov=scripts.official_policy_check \
             --cov=scripts.pre_campaign_readiness \
             --cov=scripts.walk_forward_planner \
             --cov=scripts.walk_forward_selector \
