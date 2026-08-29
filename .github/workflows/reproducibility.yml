@@ -36,6 +36,9 @@ jobs:
           scripts/walk_forward_selector.py
           scripts/walk_forward_aggregate.py
           scripts/promotion_gate.py
+          scripts/robustness_planner.py
+          scripts/robustness_aggregate.py
+          scripts/robustness_gate.py
       - name: Run reproducibility contract tests
         env:
           PYTHONPATH: ${{ github.workspace }}/scripts:${{ github.workspace }}
@@ -47,6 +50,7 @@ jobs:
           tests/test_strategy_tester_harness.py
           tests/test_strategy_tester_matrix.py
           tests/test_walk_forward_validation.py
+          tests/test_robustness_validation.py
           -v --tb=short
 
   reproducibility-required:
