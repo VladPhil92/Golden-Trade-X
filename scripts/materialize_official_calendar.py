@@ -68,7 +68,6 @@ class _TableParser(HTMLParser):
         self._cell_parts: list[str] = []
         self._row: list[str] = []
         self.rows: list[list[str]] = []
-        self.links: list[str] = []
 
     def handle_starttag(self, tag: str, attrs) -> None:
         tag = tag.lower()
@@ -78,10 +77,6 @@ class _TableParser(HTMLParser):
         elif self._in_row and tag in {"td", "th"}:
             self._in_cell = True
             self._cell_parts = []
-        elif tag == "a":
-            href = dict(attrs).get("href")
-            if isinstance(href, str):
-                self.links.append(href)
 
     def handle_data(self, data: str) -> None:
         if self._in_cell:
@@ -99,6 +94,59 @@ class _TableParser(HTMLParser):
                 self.rows.append(self._row)
             self._in_row = False
             self._row = []
+
+
+class _FedCalendarLinkParser(HTMLParser):
+    """Capture Fed links together with anchor text and nearby visible context.
+
+    The current FOMC meeting calendar can contain other ``monetaryYYYYMMDDa.htm``
+    releases, including notation-vote statements. Regular meeting decisions are
+    represented by an ``HTML`` anchor inside a visible ``Statement:`` block. Binding
+    the URL match to that semantic context prevents unrelated monetary releases from
+    being counted as regular meetings while retaining legacy URL compatibility.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.links: list[tuple[str, str, str]] = []
+        self._recent_text: list[str] = []
+        self._active_href: str | None = None
+        self._active_parts: list[str] = []
+        self._active_context = ""
+
+    def _remember(self, text: str) -> None:
+        normalized = " ".join(text.split())
+        if not normalized:
+            return
+        self._recent_text.append(normalized)
+        if len(self._recent_text) > 16:
+            self._recent_text = self._recent_text[-16:]
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        if tag.lower() != "a":
+            return
+        href = dict(attrs).get("href")
+        if not isinstance(href, str):
+            return
+        self._active_href = href
+        self._active_parts = []
+        self._active_context = " ".join(self._recent_text[-8:])
+
+    def handle_data(self, data: str) -> None:
+        if self._active_href is not None:
+            self._active_parts.append(data)
+        else:
+            self._remember(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.lower() != "a" or self._active_href is None:
+            return
+        anchor_text = " ".join("".join(self._active_parts).split())
+        self.links.append((self._active_href, anchor_text, self._active_context))
+        self._remember(anchor_text)
+        self._active_href = None
+        self._active_parts = []
+        self._active_context = ""
 
 
 @dataclass(frozen=True)
@@ -214,14 +262,21 @@ def parse_bls_year(html: str, year: int, source_url: str) -> list[Event]:
 
 
 def parse_fomc_statement_links(html: str, *, start_year: int, end_year: int) -> list[Event]:
-    parser = _TableParser()
+    parser = _FedCalendarLinkParser()
     parser.feed(html)
     by_date: dict[str, str] = {}
-    for href in parser.links:
+    for href, anchor_text, context in parser.links:
         match = _FOMC_HREF_RE.search(href)
         if not match:
             continue
-        raw_date = match.group("legacy_date") or match.group("press_date")
+        legacy_date = match.group("legacy_date")
+        press_date = match.group("press_date")
+        if press_date is not None:
+            if anchor_text.strip().lower() != "html" or "statement:" not in context.lower():
+                continue
+        raw_date = legacy_date or press_date
+        if raw_date is None:  # pragma: no cover - regex contract guarantees one branch
+            continue
         stamp = datetime.strptime(raw_date, "%Y%m%d")
         if not (start_year <= stamp.year <= end_year):
             continue
