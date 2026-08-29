@@ -52,12 +52,39 @@ void OnStart()
    datetime now = TimeCurrent();
    if(now <= 0) now = StringToTime("2026.08.28 12:00:00");
 
+   string sessionFile = telemetry.SessionFileName(now);
    string signalFile = telemetry.SignalFileName(now);
    string executionFile = telemetry.ExecutionFileName(now);
    string outcomeFile = telemetry.OutcomeFileName(now);
+   DeleteIfExists(sessionFile);
    DeleteIfExists(signalFile);
    DeleteIfExists(executionFile);
    DeleteIfExists(outcomeFile);
+
+   bool sessionWrote = telemetry.StartSession(
+      "gtx-test-candidate",
+      "build-test-123",
+      "InpMagicNumber=992700|InpEmaFast=21|InpRiskPercent=1.00000000"
+   );
+   AssertTrue(sessionWrote, "Synthetic session START writes successfully");
+   AssertTrue(FileIsExist(sessionFile, FILE_COMMON), "Session ledger file exists in Common Files");
+
+   string header = "", row = "";
+   bool readSession = ReadTwoLines(sessionFile, header, row);
+   AssertTrue(readSession, "Session ledger can be reopened for verification");
+   if(readSession)
+     {
+      AssertTrue(StringFind(header, "EventID,ServerTime,UtcTime") == 0,
+                 "Session ledger carries server and UTC time");
+      AssertTrue(StringFind(row, "gtx-test-candidate") >= 0,
+                 "Session row contains candidate identity");
+      AssertTrue(StringFind(row, "build-test-123") >= 0,
+                 "Session row contains build identity");
+      AssertTrue(StringFind(row, "InpEmaFast=21") >= 0,
+                 "Session row contains canonical runtime config snapshot");
+      AssertTrue(CsvFieldCount(header) == 15 && CsvFieldCount(row) == 15,
+                 "Session header and row both contain 15 fields");
+     }
 
    bool signalWrote = telemetry.LogSignal(
       now,
@@ -83,7 +110,8 @@ void OnStart()
    AssertTrue(signalWrote, "Synthetic signal row writes successfully");
    AssertTrue(FileIsExist(signalFile, FILE_COMMON), "Signal ledger file exists in Common Files");
 
-   string header = "", row = "";
+   header = "";
+   row = "";
    bool readSignal = ReadTwoLines(signalFile, header, row);
    AssertTrue(readSignal, "Signal ledger can be reopened for verification");
    if(readSignal)
@@ -160,6 +188,7 @@ void OnStart()
                  "Outcome header and row both contain 25 fields");
      }
 
+   DeleteIfExists(sessionFile);
    DeleteIfExists(signalFile);
    DeleteIfExists(executionFile);
    DeleteIfExists(outcomeFile);

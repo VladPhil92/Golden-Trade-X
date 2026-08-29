@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Golden Trade X v2.70 — idempotent research telemetry importer.
+"""Golden Trade X v2.90.4 — idempotent research telemetry importer.
 
 Ingests append-only CSV ledgers emitted by ``ResearchTelemetry.mqh`` into a
 local SQLite research database. The importer is deliberately offline and does
@@ -12,6 +12,10 @@ Usage::
 The command can be run repeatedly: rows are deduplicated by a stable hash of
 ledger family + canonical row contents. No trading statistics are fabricated;
 missing fields remain NULL/empty and malformed source files fail fast.
+
+Since v2.90.4, the importer also stores session START/HEARTBEAT/END provenance.
+The raw runtime configuration snapshot is SHA-256 hashed offline so forward-demo
+validation can detect configuration drift across terminal restarts.
 """
 
 from __future__ import annotations
@@ -26,12 +30,18 @@ from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
 LEDGER_PATTERNS = {
+    "sessions": "GoldenTradeX_sessions_*.csv",
     "signals": "GoldenTradeX_signals_*.csv",
     "executions": "GoldenTradeX_executions_*.csv",
     "outcomes": "GoldenTradeX_outcomes_*.csv",
 }
 
 REQUIRED_HEADERS = {
+    "sessions": {
+        "EventID", "ServerTime", "UtcTime", "Account", "Magic", "Symbol", "Timeframe", "Kind",
+        "CandidateID", "BuildID", "Broker", "TerminalBuild", "TradeMode", "ServerUtcOffsetSeconds",
+        "ConfigSnapshot",
+    },
     "signals": {"EventID", "EventTime", "BarTime", "Symbol", "Stage", "Decision", "Direction"},
     "executions": {"EventID", "EventTime", "Symbol", "Action", "Status", "DealTicket", "PositionID"},
     "outcomes": {"EventID", "CloseTime", "Symbol", "PositionID", "InitialRiskMoney", "MFE_R", "MAE_R", "RealizedR"},
@@ -40,6 +50,28 @@ REQUIRED_HEADERS = {
 SCHEMA = """
 PRAGMA foreign_keys = ON;
 PRAGMA journal_mode = WAL;
+
+CREATE TABLE IF NOT EXISTS research_sessions (
+    row_hash TEXT PRIMARY KEY,
+    event_id TEXT NOT NULL,
+    server_time TEXT,
+    utc_time TEXT,
+    account INTEGER,
+    magic INTEGER,
+    symbol TEXT,
+    timeframe TEXT,
+    kind TEXT,
+    candidate_id TEXT,
+    build_id TEXT,
+    broker TEXT,
+    terminal_build INTEGER,
+    trade_mode TEXT,
+    server_utc_offset_seconds INTEGER,
+    config_snapshot TEXT,
+    config_sha256 TEXT,
+    source_file TEXT NOT NULL,
+    raw_json TEXT NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS signal_events (
     row_hash TEXT PRIMARY KEY,
@@ -140,6 +172,9 @@ CREATE TABLE IF NOT EXISTS position_outcomes (
     raw_json TEXT NOT NULL
 );
 
+CREATE INDEX IF NOT EXISTS idx_session_candidate_time ON research_sessions(candidate_id, utc_time);
+CREATE INDEX IF NOT EXISTS idx_session_account_magic ON research_sessions(account, magic, symbol);
+CREATE INDEX IF NOT EXISTS idx_session_config ON research_sessions(config_sha256);
 CREATE INDEX IF NOT EXISTS idx_signal_symbol_time ON signal_events(symbol, event_time);
 CREATE INDEX IF NOT EXISTS idx_signal_stage_decision ON signal_events(stage, decision);
 CREATE INDEX IF NOT EXISTS idx_execution_position ON execution_events(position_id, event_time);
@@ -195,6 +230,12 @@ def _canonical_hash(family: str, row: Mapping[str, str]) -> str:
     return hashlib.sha256(f"{family}\n{payload}".encode("utf-8")).hexdigest()
 
 
+def _config_hash(value: str | None) -> str | None:
+    if value is None or value == "":
+        return None
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
 def connect(db_path: Path) -> sqlite3.Connection:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
@@ -221,6 +262,17 @@ def _read_rows(path: Path, family: str) -> Iterable[dict[str, str]]:
             if not any((value or "").strip() for value in row.values()):
                 continue
             yield {key: (value or "").strip() for key, value in row.items()}
+
+
+def _session_values(row: Mapping[str, str], source: str) -> tuple:
+    snapshot = _text(row, "ConfigSnapshot")
+    return (
+        _canonical_hash("sessions", row), row["EventID"], _text(row, "ServerTime"), _text(row, "UtcTime"),
+        _int(row.get("Account")), _int(row.get("Magic")), _text(row, "Symbol"), _text(row, "Timeframe"),
+        _text(row, "Kind"), _text(row, "CandidateID"), _text(row, "BuildID"), _text(row, "Broker"),
+        _int(row.get("TerminalBuild")), _text(row, "TradeMode"), _int(row.get("ServerUtcOffsetSeconds")),
+        snapshot, _config_hash(snapshot), source, json.dumps(row, ensure_ascii=False, sort_keys=True),
+    )
 
 
 def _signal_values(row: Mapping[str, str], source: str) -> tuple:
@@ -268,6 +320,13 @@ def _outcome_values(row: Mapping[str, str], source: str) -> tuple:
 
 
 INSERTS = {
+    "sessions": (
+        "research_sessions",
+        """INSERT OR IGNORE INTO research_sessions VALUES (
+            ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+        )""",
+        _session_values,
+    ),
     "signals": (
         "signal_events",
         """INSERT OR IGNORE INTO signal_events VALUES (
@@ -314,6 +373,7 @@ def ingest_root(conn: sqlite3.Connection, root: Path) -> list[IngestResult]:
 
 def counts(conn: sqlite3.Connection) -> dict[str, int]:
     return {
+        "sessions": conn.execute("SELECT COUNT(*) FROM research_sessions").fetchone()[0],
         "signals": conn.execute("SELECT COUNT(*) FROM signal_events").fetchone()[0],
         "executions": conn.execute("SELECT COUNT(*) FROM execution_events").fetchone()[0],
         "outcomes": conn.execute("SELECT COUNT(*) FROM position_outcomes").fetchone()[0],

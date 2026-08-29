@@ -120,6 +120,10 @@ input group "=== Registro ==="
 input bool    InpEnableTradeLog          = true;
 input bool    InpEnableResearchTelemetry = true;
 
+input group "=== Research Provenance (no altera trading) ==="
+input string  InpResearchCandidateId     = "";
+input string  InpResearchBuildId         = "";
+
 CTrade                trade;
 CRiskManager          riskManager;
 CSignalEngine         signalEngine;
@@ -141,6 +145,81 @@ datetime g_lastBarTime = 0;
 string   g_gvLastBarKey = "";
 int      g_lastConfidence = 0;
 ENUM_MARKET_REGIME g_lastRegime = REGIME_UNKNOWN;
+
+string B(bool value)
+  { return value ? "1" : "0"; }
+
+string BuildResearchConfigSnapshot()
+  {
+   // Canonical snapshot of every user input that can affect trading decisions,
+   // sizing, execution guards or position management. Provenance-only labels
+   // and logging toggles are deliberately excluded.
+   string s = "";
+   s += "InpMagicNumber=" + IntegerToString((long)InpMagicNumber);
+   s += "|InpEmaFast=" + IntegerToString(InpEmaFast);
+   s += "|InpEmaSlow=" + IntegerToString(InpEmaSlow);
+   s += "|InpRsiPeriod=" + IntegerToString(InpRsiPeriod);
+   s += "|InpRsiUpper=" + DoubleToString(InpRsiUpper, 8);
+   s += "|InpRsiLower=" + DoubleToString(InpRsiLower, 8);
+   s += "|InpRsiLongMin=" + DoubleToString(InpRsiLongMin, 8);
+   s += "|InpRsiShortMax=" + DoubleToString(InpRsiShortMax, 8);
+   s += "|InpTimeframe=" + IntegerToString((int)InpTimeframe);
+   s += "|InpAtrPeriod=" + IntegerToString(InpAtrPeriod);
+   s += "|InpAtrMinRatio=" + DoubleToString(InpAtrMinRatio, 8);
+   s += "|InpAtrMaxRatio=" + DoubleToString(InpAtrMaxRatio, 8);
+   s += "|InpAdxPeriod=" + IntegerToString(InpAdxPeriod);
+   s += "|InpAdxMinLevel=" + DoubleToString(InpAdxMinLevel, 8);
+   s += "|InpMinTickVolume=" + IntegerToString(InpMinTickVolume);
+   s += "|InpUseHtfFilter=" + B(InpUseHtfFilter);
+   s += "|InpHtfEmaPeriod=" + IntegerToString(InpHtfEmaPeriod);
+   s += "|InpUseRegimeFilter=" + B(InpUseRegimeFilter);
+   s += "|InpUseSmcFilter=" + B(InpUseSmcFilter);
+   s += "|InpMinConfidence=" + IntegerToString(InpMinConfidence);
+   s += "|InpConfWeightBase=" + IntegerToString(InpConfWeightBase);
+   s += "|InpConfWeightRegime=" + IntegerToString(InpConfWeightRegime);
+   s += "|InpConfWeightSmc=" + IntegerToString(InpConfWeightSmc);
+   s += "|InpConfWeightHtf=" + IntegerToString(InpConfWeightHtf);
+   s += "|InpConfWeightFib=" + IntegerToString(InpConfWeightFib);
+   s += "|InpRiskPercent=" + DoubleToString(InpRiskPercent, 8);
+   s += "|InpMaxDailyDD=" + DoubleToString(InpMaxDailyDD, 8);
+   s += "|InpMaxWeeklyDD=" + DoubleToString(InpMaxWeeklyDD, 8);
+   s += "|InpMaxMonthlyDD=" + DoubleToString(InpMaxMonthlyDD, 8);
+   s += "|InpMaxConsecLosses=" + IntegerToString(InpMaxConsecLosses);
+   s += "|InpMaxPositions=" + IntegerToString(InpMaxPositions);
+   s += "|InpAtrSlMultiplier=" + DoubleToString(InpAtrSlMultiplier, 8);
+   s += "|InpAtrTpMultiplier=" + DoubleToString(InpAtrTpMultiplier, 8);
+   s += "|InpMaxSpreadPoints=" + DoubleToString(InpMaxSpreadPoints, 8);
+   s += "|InpCpThresholdPct=" + DoubleToString(InpCpThresholdPct, 8);
+   s += "|InpMinInitialRR=" + DoubleToString(InpMinInitialRR, 8);
+   s += "|InpUseTrailing=" + B(InpUseTrailing);
+   s += "|InpTrailAtrMult=" + DoubleToString(InpTrailAtrMult, 8);
+   s += "|InpUseBreakEven=" + B(InpUseBreakEven);
+   s += "|InpBreakEvenR=" + DoubleToString(InpBreakEvenR, 8);
+   s += "|InpUsePartialTP=" + B(InpUsePartialTP);
+   s += "|InpPartialTPR=" + DoubleToString(InpPartialTPR, 8);
+   s += "|InpPartialTPPct=" + DoubleToString(InpPartialTPPct, 8);
+   s += "|InpUseEqCurveFilter=" + B(InpUseEqCurveFilter);
+   s += "|InpEqCurvePeriod=" + IntegerToString(InpEqCurvePeriod);
+   s += "|InpUseKelly=" + B(InpUseKelly);
+   s += "|InpKellyFraction=" + DoubleToString(InpKellyFraction, 8);
+   s += "|InpKellyMinTrades=" + IntegerToString(InpKellyMinTrades);
+   s += "|InpUsePortfolioCap=" + B(InpUsePortfolioCap);
+   s += "|InpMaxPortfolioRiskPct=" + DoubleToString(InpMaxPortfolioRiskPct, 8);
+   s += "|InpOrderMaxRetries=" + IntegerToString(InpOrderMaxRetries);
+   s += "|InpOrderRetryDelay=" + IntegerToString(InpOrderRetryDelay);
+   s += "|InpMinMarginLevel=" + DoubleToString(InpMinMarginLevel, 8);
+   s += "|InpUseSessionFilter=" + B(InpUseSessionFilter);
+   s += "|InpStartHour=" + IntegerToString(InpStartHour);
+   s += "|InpEndHour=" + IntegerToString(InpEndHour);
+   s += "|InpCloseOnFriday=" + B(InpCloseOnFriday);
+   s += "|InpFridayCloseHour=" + IntegerToString(InpFridayCloseHour);
+   s += "|InpUseNewsFilter=" + B(InpUseNewsFilter);
+   s += "|InpNewsBufferBefore=" + IntegerToString(InpNewsBufferBefore);
+   s += "|InpNewsBufferAfter=" + IntegerToString(InpNewsBufferAfter);
+   s += "|InpNewsCalendarPolicy=" + IntegerToString((int)InpNewsCalendarPolicy);
+   s += "|InpPauseForNews=" + B(InpPauseForNews);
+   return s;
+  }
 
 void LogResearchGuard(string reason)
   {
@@ -234,6 +313,10 @@ int OnInit()
    tradeLogger.Init(InpEnableTradeLog, InpMagicNumber);
    researchTelemetry.Init(InpEnableResearchTelemetry, InpMagicNumber,
                           _Symbol, InpTimeframe);
+   if(!researchTelemetry.StartSession(InpResearchCandidateId,
+                                      InpResearchBuildId,
+                                      BuildResearchConfigSnapshot()))
+      Print("GoldenTradeX: warning — no se pudo registrar START de research session.");
 
    if(InpUseRegimeFilter)
      {
@@ -291,6 +374,7 @@ int OnInit()
 
 void OnDeinit(const int reason)
   {
+   researchTelemetry.EndSession(reason);
    EventKillTimer();
    signalEngine.Release();
    regimeEngine.Release();
@@ -304,6 +388,7 @@ void OnDeinit(const int reason)
 
 void OnTimer()
   {
+   researchTelemetry.Heartbeat();
    healthMonitor.Check(trade);
    for(int i = PositionsTotal() - 1; i >= 0; i--)
      {
