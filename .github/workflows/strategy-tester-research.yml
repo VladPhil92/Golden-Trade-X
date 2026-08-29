@@ -121,6 +121,12 @@ jobs:
             throw "MetaTrader terminal executable not found under $installDir"
           }
 
+          $portableRoot = Join-Path $installDir "MQL5"
+          $portableMode = $mql5Root.StartsWith(
+            $portableRoot,
+            [System.StringComparison]::OrdinalIgnoreCase
+          )
+
           $build = (Get-Item $terminal).VersionInfo.FileVersion
           if (-not $build) { $build = "UNKNOWN_FILE_VERSION" }
 
@@ -139,6 +145,8 @@ jobs:
             tester_model = [int]$env:GTX_TESTER_MODEL
             expert = "GoldenTradeX\GoldenTradeX.ex5"
             expert_parameters = $env:GTX_PRESET_NAME
+            execution_mode = 0
+            portable_mode = [bool]$portableMode
             deposit = [double]$env:GTX_DEPOSIT
             currency = "USD"
             leverage = [int]$env:GTX_LEVERAGE
@@ -146,7 +154,6 @@ jobs:
             commission = $null
             swap_mode = "tester/broker observed"
             slippage_points = 0.0
-            execution_mode = 0
             optimization = $false
             forward_mode = "disabled"
             forward_mode_code = 0
@@ -164,6 +171,7 @@ jobs:
           Write-Host "Terminal: $terminal"
           Write-Host "MT5 build/file version: $build"
           Write-Host "MQL5 root: $mql5Root"
+          Write-Host "Portable mode: $portableMode"
           Write-Host "Experiment spec: $specPath"
 
       - name: Execute registered Strategy Tester experiment
