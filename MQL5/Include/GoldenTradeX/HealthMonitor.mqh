@@ -20,15 +20,15 @@ class CHealthMonitor
   {
 private:
    string          m_symbol;
-   ENUM_TIMEFRAMES m_tf;               // v2.50: timeframe del EA (antes: M15 fijo)
+   ENUM_TIMEFRAMES m_tf;
    ulong           m_magic;
    string          m_statusFile;
-   double          m_minMarginLevel;   // % mínimo de nivel de margen (default 200%)
-   double          m_emergencyAtrMult; // multiplicador ATR para SL de emergencia
+   double          m_minMarginLevel;
+   double          m_emergencyAtrMult;
    datetime        m_lastCheck;
    int             m_checkIntervalSec;
    int             m_orphanFixCount;
-   int             m_hAtr;             // v2.50: handle ATR cacheado (creado en Init)
+   int             m_hAtr;
 
    void WriteStatusFile(bool connected, double equityPct, int openPos, string alert)
      {
@@ -47,9 +47,6 @@ private:
       FileClose(fh);
      }
 
-   // ATR desde el handle cacheado en Init(). Crear y destruir el handle en
-   // cada llamada (patrón anterior) puede devolver 0 si el indicador aún no
-   // calculó, cayendo al fallback sin avisar.
    double GetCurrentATR()
      {
       double atr = 0.0;
@@ -97,7 +94,19 @@ private:
      }
 
 public:
-                     CHealthMonitor() { m_hAtr = INVALID_HANDLE; }
+   CHealthMonitor()
+     {
+      m_symbol = "";
+      m_tf = PERIOD_CURRENT;
+      m_magic = 0;
+      m_statusFile = "";
+      m_minMarginLevel = 200.0;
+      m_emergencyAtrMult = 3.0;
+      m_lastCheck = 0;
+      m_checkIntervalSec = 60;
+      m_orphanFixCount = 0;
+      m_hAtr = INVALID_HANDLE;
+     }
 
    bool Init(string symbol, ENUM_TIMEFRAMES tf, ulong magic,
              double minMarginLevel = 200.0,
@@ -110,11 +119,11 @@ public:
       m_magic            = magic;
       m_minMarginLevel   = minMarginLevel;
       m_emergencyAtrMult = emergencyAtrMult;
-      m_checkIntervalSec = checkIntervalSec;
+      m_checkIntervalSec = MathMax(1, checkIntervalSec);
       m_lastCheck        = 0;
       m_orphanFixCount   = 0;
       m_statusFile       = StringFormat("GTX_%d_status.csv", (int)magic);
-      m_hAtr             = iATR(symbol, tf, atrPeriod);   // v2.61: período propagado
+      m_hAtr             = iATR(symbol, tf, atrPeriod);
       return (m_hAtr != INVALID_HANDLE);
      }
 
@@ -123,41 +132,48 @@ public:
       if(m_hAtr != INVALID_HANDLE) { IndicatorRelease(m_hAtr); m_hAtr = INVALID_HANDLE; }
      }
 
-   // Llamar desde OnTimer(). Retorna true si se ejecutó el check.
+   // Pure deterministic seam used by Check() and lifecycle tests. It makes
+   // disconnection/margin policy testable without requiring a broker outage.
+   string BuildAlert(bool connected, double marginLevel) const
+     {
+      string alert = "";
+      if(marginLevel > 0 && marginLevel < m_minMarginLevel)
+         alert = StringFormat("MARGIN_LOW:%.0f%%", marginLevel);
+      if(!connected)
+         alert = (alert == "") ? "DISCONNECTED" : alert + "|DISCONNECTED";
+      return alert;
+     }
+
+   bool IsCheckDueAt(datetime now) const
+     {
+      if(now < m_lastCheck) return true;
+      return (now - m_lastCheck) >= m_checkIntervalSec;
+     }
+
    bool Check(CTrade &tradeObj)
      {
       datetime now = TimeCurrent();
-      if(now - m_lastCheck < m_checkIntervalSec) return false;
+      if(!IsCheckDueAt(now)) return false;
       m_lastCheck = now;
 
-      bool   connected = (bool)TerminalInfoInteger(TERMINAL_CONNECTED);
-      string alert     = "";
-
-      // ── 1. Margen ────────────────────────────────────────────────────
+      bool connected = (bool)TerminalInfoInteger(TERMINAL_CONNECTED);
       double marginLevel = AccountInfoDouble(ACCOUNT_MARGIN_LEVEL);
+      string alert = BuildAlert(connected, marginLevel);
+
       if(marginLevel > 0 && marginLevel < m_minMarginLevel)
         {
-         alert = StringFormat("MARGIN_LOW:%.0f%%", marginLevel);
          Print("HealthMonitor: WARNING — Margin level=", marginLevel,
                "% < ", m_minMarginLevel, "% threshold");
         }
-
-      // ── 2. Conexión ─────────────────────────────────────────────────
       if(!connected)
-        {
-         alert = (alert == "") ? "DISCONNECTED" : alert + "|DISCONNECTED";
          Print("HealthMonitor: WARNING — Terminal disconnected from broker.");
-        }
 
-      // ── 3. Orphan SL ─────────────────────────────────────────────────
       FixOrphanSL(tradeObj);
 
-      // ── 4. Equity hoy ────────────────────────────────────────────────
       double equity    = AccountInfoDouble(ACCOUNT_EQUITY);
       double balance   = AccountInfoDouble(ACCOUNT_BALANCE);
       double equityPct = (balance > 0) ? equity / balance * 100.0 : 100.0;
 
-      // ── 5. Posiciones abiertas del EA ─────────────────────────────────
       int openPos = 0;
       for(int i = PositionsTotal() - 1; i >= 0; i--)
         {
