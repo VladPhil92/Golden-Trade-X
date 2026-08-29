@@ -1,3 +1,6 @@
+import hashlib
+from datetime import datetime
+
 import pytest
 
 from scripts.materialize_official_calendar import (
@@ -6,6 +9,7 @@ from scripts.materialize_official_calendar import (
     CalendarMaterializationError,
     _audit_counts,
     _validate_counts,
+    materialize_calendar,
     parse_bls_year,
     parse_fomc_statement_links,
 )
@@ -36,6 +40,30 @@ FED_HTML = """
 <a href="/monetarypolicy/fomcstatement20210127a.htm">duplicate statement link</a>
 </body></html>
 """
+
+
+def _complete_bls_html(year: int) -> str:
+    rows = ["<table><tr><th>Date</th><th>Time</th><th>Release</th></tr>"]
+    for month in range(1, 13):
+        nfp = datetime(year, month, 1)
+        cpi = datetime(year, month, 2)
+        rows.append(
+            "<tr><td>"
+            + nfp.strftime("%A, %B %d, %Y")
+            + "</td><td>08:30 AM</td><td>Employment Situation for prior month</td></tr>"
+        )
+        rows.append(
+            "<tr><td>"
+            + cpi.strftime("%A, %B %d, %Y")
+            + "</td><td>08:30 AM</td><td>Consumer Price Index for prior month</td></tr>"
+        )
+    rows.append("</table>")
+    return "\n".join(rows)
+
+
+class _NoNetworkSession:
+    def get(self, *args, **kwargs):  # pragma: no cover - must never execute
+        raise AssertionError("snapshot mode attempted network access")
 
 
 def test_v1_defaults_use_only_completed_historical_release_years() -> None:
@@ -83,3 +111,38 @@ def test_count_audit_rejects_partial_future_fomc_year() -> None:
     counts = {"2026": {"NFP": 12, "CPI": 12, "FOMC": 5}}
     with pytest.raises(CalendarMaterializationError, match="expected exactly 8 regular FOMC"):
         _validate_counts(counts)
+
+
+def test_snapshot_mode_is_offline_and_hashes_every_source(tmp_path) -> None:
+    bls = _complete_bls_html(2021).encode("utf-8")
+    fed = FED_HTML.encode("utf-8")
+    (tmp_path / "bls-2021.html").write_bytes(bls)
+    (tmp_path / "fomccalendars.html").write_bytes(fed)
+
+    document, audit = materialize_calendar(
+        2021,
+        2021,
+        source_dir=tmp_path,
+        session=_NoNetworkSession(),
+    )
+
+    assert document["approved"] is False
+    assert audit["schema_version"] == 2
+    assert audit["source_mode"] == "IMMUTABLE_OFFICIAL_SNAPSHOTS"
+    assert audit["counts_by_year"]["2021"] == {"NFP": 12, "CPI": 12, "FOMC": 8}
+    assert audit["event_count"] == 32
+    assert audit["sources"]["bls"][0]["snapshot_sha256"] == hashlib.sha256(bls).hexdigest()
+    assert audit["sources"]["federal_reserve"]["snapshot_sha256"] == hashlib.sha256(fed).hexdigest()
+    assert audit["live_trading_authorized"] is False
+    assert audit["real_capital_authorized"] is False
+
+
+def test_snapshot_mode_never_falls_back_to_network_when_source_is_missing(tmp_path) -> None:
+    (tmp_path / "bls-2021.html").write_text(_complete_bls_html(2021), encoding="utf-8")
+    with pytest.raises(CalendarMaterializationError, match="required source snapshot not found"):
+        materialize_calendar(
+            2021,
+            2021,
+            source_dir=tmp_path,
+            session=_NoNetworkSession(),
+        )
