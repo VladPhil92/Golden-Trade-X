@@ -29,9 +29,9 @@ jobs:
       GTX_MT5_PASSWORD: ${{ secrets.GTX_MT5_PASSWORD }}
       GTX_MT5_SERVER: ${{ secrets.GTX_MT5_SERVER }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
 
@@ -90,6 +90,14 @@ jobs:
           "GTX_ENVIRONMENT_PATH=$environmentPath" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "GTX_TIMEOUT=$timeout" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
 
+      - name: Enforce pre-campaign repository readiness
+        shell: pwsh
+        run: |
+          python scripts/pre_campaign_readiness.py `
+            --campaign "$env:GTX_CAMPAIGN_PATH" `
+            --calendar-include "MQL5/Include/GoldenTradeX/EconomicCalendarData.mqh" `
+            --output "data/research/official_campaign/pre_campaign_readiness.json"
+
       - name: Freeze campaign before evidence
         shell: pwsh
         run: |
@@ -102,9 +110,11 @@ jobs:
         shell: pwsh
         run: .github/scripts/compile-mql5.ps1
 
-      - name: Install MT5 Python attestation client
+      - name: Install pinned MT5 Python attestation client
         shell: pwsh
-        run: python -m pip install "MetaTrader5>=5,<6"
+        run: |
+          python -m pip install --disable-pip-version-check "MetaTrader5==5.0.6147"
+          python -c "import importlib.metadata as m; print('MetaTrader5=' + m.version('MetaTrader5'))"
 
       - name: Resolve actual MetaTrader data root
         shell: pwsh
@@ -172,10 +182,10 @@ jobs:
 
       - name: Upload official campaign evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: official-validation-campaign-${{ github.run_id }}
-          retention-days: 30
+          retention-days: 90
           if-no-files-found: warn
           path: |
             data/research/official_campaign/
