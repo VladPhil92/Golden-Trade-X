@@ -25,7 +25,7 @@ def _calendar(approved: bool = True) -> dict:
         "approved": approved,
         "coverage": {
             "start_utc": "2021-01-01T00:00:00Z",
-            "end_utc": "2026-12-31T23:59:59Z",
+            "end_utc": "2025-12-31T23:59:59Z",
         },
         "events": [
             {
@@ -140,6 +140,7 @@ def test_ready_to_freeze_requires_complete_approved_repository_inputs(tmp_path: 
     assert result["decision"] == "READY_TO_FREEZE"
     assert result["ready"] is True
     assert result["execution_environment"]["trade_mode"] == "DEMO"
+    assert result["economic_calendar"]["coverage"]["end_utc"] == "2025-12-31T23:59:59Z"
     assert result["robustness_brokers"] == ["BROKER-A-DEMO", "BROKER-B-DEMO"]
     assert result["python_runtime_pin_count"] == 2
     assert len(result["policy_bundle_sha256"]) == 64
@@ -175,6 +176,17 @@ def test_calendar_must_cover_complete_walk_forward_period(tmp_path: Path) -> Non
     payload["start_date"] = "2020-01-01"
     _write(walk, payload)
     with pytest.raises(CampaignReadinessError, match="does not cover"):
+        evaluate_campaign_readiness(campaign, include)
+
+
+def test_calendar_cannot_end_before_last_instant_of_exclusive_window(tmp_path: Path) -> None:
+    campaign, _ = _fixture(tmp_path)
+    calendar = tmp_path / "calendar.json"
+    payload = json.loads(calendar.read_text(encoding="utf-8"))
+    payload["coverage"]["end_utc"] = "2025-12-31T23:59:58Z"
+    _write(calendar, payload)
+    include = generate_mql5_include(payload, tmp_path / "EconomicCalendarData.mqh")
+    with pytest.raises(CampaignReadinessError, match="half-open walk-forward period"):
         evaluate_campaign_readiness(campaign, include)
 
 
