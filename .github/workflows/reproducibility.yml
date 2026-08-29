@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -15,14 +19,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: requirements.txt
       - name: Install test dependencies
-        run: pip install "pytest~=9.1"
+        run: pip install "pytest==9.1.1" "pytest-cov==7.1.0"
       - name: Compile reproducibility tooling
         run: >-
           python -m compileall -q
@@ -34,6 +38,8 @@ jobs:
           scripts/ablation_report.py
           scripts/telemetry_db.py
           scripts/campaign_contract.py
+          scripts/economic_calendar_contract.py
+          scripts/pre_campaign_readiness.py
           scripts/execution_environment.py
           scripts/mt5_environment_probe.py
           scripts/walk_forward_planner.py
@@ -61,6 +67,8 @@ jobs:
           tests/test_strategy_tester_harness.py
           tests/test_strategy_tester_matrix.py
           tests/test_telemetry_db.py
+          tests/test_economic_calendar_contract.py
+          tests/test_pre_campaign_readiness.py
           tests/test_walk_forward_validation.py
           tests/test_robustness_validation.py
           tests/test_forward_demo_validation.py
@@ -69,10 +77,65 @@ jobs:
           tests/test_real_money_interlock.py
           -v --tb=short
 
+  critical-orchestration-coverage:
+    name: Critical orchestration coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install coverage dependencies
+        run: pip install "pytest==9.1.1" "pytest-cov==7.1.0"
+      - name: Measure evidence-orchestration modules
+        env:
+          PYTHONPATH: ${{ github.workspace }}/scripts:${{ github.workspace }}
+        run: |
+          pytest \
+            tests/test_experiment_registry.py \
+            tests/test_strategy_tester_results.py \
+            tests/test_strategy_tester_harness.py \
+            tests/test_strategy_tester_matrix.py \
+            tests/test_economic_calendar_contract.py \
+            tests/test_pre_campaign_readiness.py \
+            tests/test_walk_forward_validation.py \
+            tests/test_robustness_validation.py \
+            tests/test_forward_demo_validation.py \
+            tests/test_official_campaign.py \
+            tests/test_official_campaign_runner.py \
+            --tb=short \
+            --cov=scripts.experiment_registry \
+            --cov=scripts.strategy_tester_results \
+            --cov=scripts.strategy_tester_harness \
+            --cov=scripts.strategy_tester_matrix \
+            --cov=scripts.economic_calendar_contract \
+            --cov=scripts.pre_campaign_readiness \
+            --cov=scripts.walk_forward_planner \
+            --cov=scripts.walk_forward_selector \
+            --cov=scripts.walk_forward_aggregate \
+            --cov=scripts.promotion_gate \
+            --cov=scripts.robustness_planner \
+            --cov=scripts.robustness_aggregate \
+            --cov=scripts.robustness_gate \
+            --cov=scripts.forward_demo_readiness \
+            --cov=scripts.forward_demo_planner \
+            --cov=scripts.forward_demo_evaluator \
+            --cov=scripts.forward_demo_gate \
+            --cov=scripts.campaign_contract \
+            --cov=scripts.execution_environment \
+            --cov=scripts.official_campaign_freeze \
+            --cov=scripts.official_campaign_runner \
+            --cov=scripts.rc1_release_review_gate \
+            --cov-report=term-missing \
+            --cov-fail-under=65
+
   reproducibility-required:
     name: Reproducibility required gate
     if: always()
-    needs: [experiment-contracts]
+    needs: [experiment-contracts, critical-orchestration-coverage]
     runs-on: ubuntu-latest
     steps:
       - name: Enforce reproducibility contract result
@@ -80,4 +143,5 @@ jobs:
         run: |
           set -euo pipefail
           test "${{ needs.experiment-contracts.result }}" = "success"
+          test "${{ needs.critical-orchestration-coverage.result }}" = "success"
           echo "REPRODUCIBILITY REQUIRED GATE PASS"
