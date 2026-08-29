@@ -2,17 +2,21 @@
 //|                                                 NewsFilter.mqh   |
 //|   Golden Trade X v2.62 — Filtro de noticias fail-safe           |
 //+------------------------------------------------------------------+
-//  FOMC 2025-2027: fechas de decisión verificadas contra la Federal
-//  Reserve. Statement modelado a 14:00 US Eastern con DST.
+//  Official-campaign data path:
+//  EconomicCalendarData.mqh is generated from an immutable JSON contract.
+//  When GTX_ECONOMIC_CALENDAR_APPROVED=true, exact BLS/Fed release dates are
+//  used. While the checked-in contract remains DRAFT, exploratory/demo runs
+//  retain the documented NFP/CPI proxy fallback and cannot become official
+//  campaign evidence because the pre-campaign gate fails closed.
 //
-//  NFP/CPI: la HORA se modela a 08:30 US Eastern con DST, pero la FECHA
-//  sigue siendo proxy hasta que la fase calendar-cache integre fuentes
-//  oficiales históricas/futuras. Esta limitación es deliberadamente visible.
+//  FOMC fallback 2025-2027: fechas de decisión verificadas contra la Federal
+//  Reserve. Statement modelado a 14:00 US Eastern con DST.
 //
 //  Las ventanas se evalúan con timestamps absolutos, no minutos-del-día:
 //  esto conserva correctamente buffers que cruzan medianoche.
 //+------------------------------------------------------------------+
 #property strict
+#include <GoldenTradeX/EconomicCalendarData.mqh>
 
 enum ENUM_NEWS_CALENDAR_POLICY
   {
@@ -84,8 +88,6 @@ private:
 
    datetime EventServerTime(int year, int mon, int day, int utcHour, int minute)
      {
-      // StructToTime se usa como calendario civil base; luego se desplaza por
-      // offset servidor-UTC. El resultado es comparable con TimeCurrent().
       MqlDateTime x;
       ZeroMemory(x);
       x.year = year; x.mon = mon; x.day = day;
@@ -103,7 +105,14 @@ private:
      }
 
    bool CalendarCoverageAvailable(int year)
-     { return year >= FOMC_FIRST_YEAR && year <= FOMC_LAST_YEAR; }
+     {
+      // Exact approved calendars are admitted by the campaign preflight, which
+      // verifies their full UTC coverage against the walk-forward plan. This
+      // year guard only governs the legacy FOMC fallback used outside official
+      // campaign evidence.
+      if(GTX_ECONOMIC_CALENDAR_APPROVED) return true;
+      return year >= FOMC_FIRST_YEAR && year <= FOMC_LAST_YEAR;
+     }
 
    bool HandleMissingCalendarCoverage(int year)
      {
@@ -112,9 +121,11 @@ private:
         {
          m_calendarWarned = true;
          Print("NewsFilter: CALENDAR_COVERAGE_MISSING año=", year,
-               " FOMC exacto=", FOMC_FIRST_YEAR, "-", FOMC_LAST_YEAR,
+               " FOMC fallback exacto=", FOMC_FIRST_YEAR, "-", FOMC_LAST_YEAR,
+               " calendar_id=", GTX_ECONOMIC_CALENDAR_ID,
+               " approved=", (GTX_ECONOMIC_CALENDAR_APPROVED ? "true" : "false"),
                " policy=", (int)m_policy,
-               ". Evidencia histórica/futura requiere calendar cache oficial.");
+               ". Evidencia oficial requiere EconomicCalendarData aprobado.");
         }
       return m_policy == NEWS_CALENDAR_FAIL_CLOSED;
      }
@@ -128,8 +139,24 @@ private:
              (dt.day_of_week == 2 || dt.day_of_week == 3);
      }
 
+   bool IsNfpReleaseDate(const MqlDateTime &dt)
+     {
+      if(GTX_ECONOMIC_CALENDAR_APPROVED)
+         return GTX_IsExactNfpReleaseDate(dt.year, dt.mon, dt.day);
+      return IsNfpProxyDate(dt);
+     }
+
+   bool IsCpiReleaseDate(const MqlDateTime &dt)
+     {
+      if(GTX_ECONOMIC_CALENDAR_APPROVED)
+         return GTX_IsExactCpiReleaseDate(dt.year, dt.mon, dt.day);
+      return IsCpiProxyDate(dt);
+     }
+
    bool IsFomcDecisionDate(int year, int mon, int day)
      {
+      if(GTX_ECONOMIC_CALENDAR_APPROVED)
+         return GTX_IsExactFomcDecisionDate(year, mon, day);
       if(year == 2025)
          return((mon==1&&day==29)||(mon==3&&day==19)||(mon==5&&day==7)||
                 (mon==6&&day==18)||(mon==7&&day==30)||(mon==9&&day==17)||
@@ -145,8 +172,6 @@ private:
       return false;
      }
 
-   // Evalúa candidatos de fecha -1/0/+1 para que un buffer pueda cruzar
-   // medianoche del servidor sin perder la asociación con la fecha del evento.
    bool IsNfpWindowAt(datetime nowServer)
      {
       for(int offset = -1; offset <= 1; offset++)
@@ -154,7 +179,7 @@ private:
          datetime candidate = nowServer + (datetime)(offset * 86400);
          MqlDateTime dt;
          TimeToStruct(candidate, dt);
-         if(!IsNfpProxyDate(dt)) continue;
+         if(!IsNfpReleaseDate(dt)) continue;
          int utcHour = EasternToUtcHour(dt.year, dt.mon, dt.day, 8);
          datetime ev = EventServerTime(dt.year, dt.mon, dt.day, utcHour, 30);
          if(InAbsoluteWindow(nowServer, ev)) return true;
@@ -162,14 +187,14 @@ private:
       return false;
      }
 
-   bool IsCpiProxyWindowAt(datetime nowServer)
+   bool IsCpiWindowAt(datetime nowServer)
      {
       for(int offset = -1; offset <= 1; offset++)
         {
          datetime candidate = nowServer + (datetime)(offset * 86400);
          MqlDateTime dt;
          TimeToStruct(candidate, dt);
-         if(!IsCpiProxyDate(dt)) continue;
+         if(!IsCpiReleaseDate(dt)) continue;
          int utcHour = EasternToUtcHour(dt.year, dt.mon, dt.day, 8);
          datetime ev = EventServerTime(dt.year, dt.mon, dt.day, utcHour, 30);
          if(InAbsoluteWindow(nowServer, ev)) return true;
@@ -199,7 +224,7 @@ private:
       TimeToStruct(nowServer, dt);
       if(HandleMissingCalendarCoverage(dt.year)) return true;
       if(IsNfpWindowAt(nowServer)) return true;
-      if(IsCpiProxyWindowAt(nowServer)) return true;
+      if(IsCpiWindowAt(nowServer)) return true;
       if(IsFomcWindowAt(nowServer)) return true;
       return false;
      }
@@ -220,7 +245,7 @@ public:
    void SetServerOffset(int offset)
      {
       m_serverOffset = offset;
-      m_offsetDateKey = -1; // test hook: IsNewsBlockedAt no auto-refresca
+      m_offsetDateKey = -1;
      }
 
    bool IsNewsBlocked()
@@ -242,11 +267,12 @@ public:
       Print("NewsFilter | ServerOffset=UTC", (m_serverOffset >= 0 ? "+" : ""),
             m_serverOffset,
             " | Policy=", (int)m_policy,
-            " | FOMCcoverage=", FOMC_FIRST_YEAR, "-", FOMC_LAST_YEAR,
+            " | CalendarID=", GTX_ECONOMIC_CALENDAR_ID,
+            " | CalendarApproved=", (GTX_ECONOMIC_CALENDAR_APPROVED ? "SI" : "NO"),
             " | Bloqueado=", (IsNewsBlocked() ? "SI" : "NO"),
-            " | NFP_proxy=", (IsNfpWindowAt(now) ? "SI" : "NO"),
+            " | NFP=", (IsNfpWindowAt(now) ? "SI" : "NO"),
             " | FOMC=", (IsFomcWindowAt(now) ? "SI" : "NO"),
-            " | CPI_proxy=", (IsCpiProxyWindowAt(now) ? "SI" : "NO"));
+            " | CPI=", (IsCpiWindowAt(now) ? "SI" : "NO"));
      }
   };
 
