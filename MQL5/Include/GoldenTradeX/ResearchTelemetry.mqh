@@ -186,11 +186,9 @@ public:
 
    bool EndSession(int reason)
      {
-      string previous = m_buildId;
-      m_buildId = previous + "|deinit=" + IntegerToString(reason);
-      bool ok = LogSessionEvent("END");
-      m_buildId = previous;
-      return ok;
+      // The deinit reason belongs to the terminal journal, not the immutable
+      // build identity. OnDeinit already logs it in GoldenTradeX.mq5.
+      return LogSessionEvent("END");
      }
 
    bool LogSignal(datetime barTime,
