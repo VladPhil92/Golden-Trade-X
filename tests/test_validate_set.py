@@ -31,6 +31,23 @@ def test_relational_invariants_are_enforced() -> None:
     assert any("weights must sum to 100" in error for error in errors)
 
 
+def test_capital_preservation_must_precede_daily_hard_stop() -> None:
+    params = parse_set(XAU)
+    params["InpCpThresholdPct"] = params["InpMaxDailyDD"]
+    errors = validate_params(params, "synthetic")
+    assert any(
+        "InpCpThresholdPct must be < InpMaxDailyDD" in error
+        for error in errors
+    )
+
+    params["InpCpThresholdPct"] = "8.0"
+    errors = validate_params(params, "synthetic")
+    assert any(
+        "Capital Preservation activates before the daily hard stop" in error
+        for error in errors
+    )
+
+
 def test_cross_preset_magic_numbers_must_be_unique(tmp_path: Path) -> None:
     first = tmp_path / "first.set"
     second = tmp_path / "second.set"
