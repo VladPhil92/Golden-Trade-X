@@ -1,24 +1,19 @@
 #!/usr/bin/env python3
 """
-Golden Trade X v2.00 — FOMC Calendar Updater.
+Golden Trade X — FOMC Calendar Updater.
 
-Fetches the next 12 months of FOMC meeting dates from the Federal Reserve
-website (or falls back to a manually maintained hardcoded list) and outputs:
-  1. A console listing of upcoming FOMC dates with countdown
-  2. A ready-to-paste MQL5 IsFomcDay() code block for NewsFilter.mqh
+Fetches FOMC meeting dates from the Federal Reserve website (or falls back to
+a manually maintained verified list) and outputs a console listing plus a
+ready-to-paste MQL5 IsFomcDecisionDate() block.
 
 The Fed publishes meeting calendars at:
   https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm
-This script parses the HTML table as a fallback.
 
 Usage:
-    python scripts/fomc_calendar.py               # fetch + print
-    python scripts/fomc_calendar.py --no-fetch    # use hardcoded list only
+    python scripts/fomc_calendar.py
+    python scripts/fomc_calendar.py --no-fetch
     python scripts/fomc_calendar.py --mql5 output/fomc_block.txt
-    python scripts/fomc_calendar.py --year 2027   # show specific year
-
-Requires (optional, for live fetch):
-    pip install requests beautifulsoup4
+    python scripts/fomc_calendar.py --year 2027
 """
 
 import argparse
@@ -35,36 +30,17 @@ except ImportError:
 
 FED_URL = "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
 
-# ── Hardcoded FOMC dates (announcement day = Wednesday of meeting end) ──────────
-# Format: (year, month, day) — the day the rate decision is released (19:00 UTC)
+# Decision/statement dates verified against the Federal Reserve calendar.
 FOMC_HARDCODED: List[Tuple[int, int, int]] = [
     # 2025
-    (2025, 1, 29),
-    (2025, 3, 19),
-    (2025, 5, 7),
-    (2025, 6, 18),
-    (2025, 7, 30),
-    (2025, 9, 17),
-    (2025, 10, 29),
-    (2025, 12, 10),
+    (2025, 1, 29), (2025, 3, 19), (2025, 5, 7), (2025, 6, 18),
+    (2025, 7, 30), (2025, 9, 17), (2025, 10, 29), (2025, 12, 10),
     # 2026
-    (2026, 1, 28),
-    (2026, 3, 18),
-    (2026, 4, 29),
-    (2026, 6, 17),
-    (2026, 7, 29),
-    (2026, 9, 16),
-    (2026, 10, 28),
-    (2026, 12, 9),
-    # 2027 (projected — verify against Fed calendar)
-    (2027, 1, 27),
-    (2027, 3, 17),
-    (2027, 4, 28),
-    (2027, 6, 16),
-    (2027, 7, 28),
-    (2027, 9, 15),
-    (2027, 10, 27),
-    (2027, 12, 8),
+    (2026, 1, 28), (2026, 3, 18), (2026, 4, 29), (2026, 6, 17),
+    (2026, 7, 29), (2026, 9, 16), (2026, 10, 28), (2026, 12, 9),
+    # 2027 published calendar
+    (2027, 1, 27), (2027, 3, 17), (2027, 4, 28), (2027, 6, 9),
+    (2027, 7, 28), (2027, 9, 15), (2027, 10, 27), (2027, 12, 8),
 ]
 
 MONTH_NAMES = [
@@ -73,108 +49,73 @@ MONTH_NAMES = [
 ]
 
 
-# ── Live fetch ──────────────────────────────────────────────────────────────────
-
 def fetch_fomc_dates() -> List[Tuple[int, int, int]]:
     """Scrape FOMC announcement dates from federalreserve.gov."""
     if not _FETCH_OK:
         return []
-
     try:
-        r = requests.get(FED_URL, timeout=15,
-                         headers={"User-Agent": "GoldenTradeX-FomcCalendar/2.0"})
+        r = requests.get(
+            FED_URL,
+            timeout=15,
+            headers={"User-Agent": "GoldenTradeX-FomcCalendar/3.0"},
+        )
         r.raise_for_status()
-    except Exception as e:
-        print(f"  WARNING: fetch failed: {e}")
+    except Exception as exc:
+        print(f"  WARNING: fetch failed: {exc}")
         return []
 
     soup = BeautifulSoup(r.text, "html.parser")
     dates: List[Tuple[int, int, int]] = []
-
-    # Fed page uses <div class="fomc-meeting"> or similar; try multiple selectors
-    # Pattern: look for text like "January 28-29, 2025" or "January 29, 2025"
     text_blocks = soup.get_text(separator="\n")
     pattern = re.compile(
         r"(January|February|March|April|May|June|July|August|September|October|November|December)"
         r"\s+(\d{1,2})(?:-\d{1,2})?,?\s+(\d{4})"
     )
-    for m in pattern.finditer(text_blocks):
-        month_name = m.group(1)
-        day_str    = m.group(2)
-        year_str   = m.group(3)
-        month_num  = MONTH_NAMES.index(month_name)
+    for match in pattern.finditer(text_blocks):
+        month_name = match.group(1)
+        day_str = match.group(2)
+        year_str = match.group(3)
+        month_num = MONTH_NAMES.index(month_name)
         try:
-            d = (int(year_str), month_num, int(day_str))
-            if d not in dates and 2024 <= d[0] <= 2030:
-                dates.append(d)
+            value = (int(year_str), month_num, int(day_str))
+            if value not in dates and 2024 <= value[0] <= 2030:
+                dates.append(value)
         except (ValueError, IndexError):
             continue
-
     return sorted(set(dates))
 
 
 def merge_dates(fetched: List[Tuple[int, int, int]]) -> List[Tuple[int, int, int]]:
-    """Merge fetched dates with hardcoded, prefer fetched for any year covered."""
+    """Merge fetched dates with hardcoded values, preferring fetched years."""
     if not fetched:
         return sorted(set(FOMC_HARDCODED))
-
-    fetched_years = set(d[0] for d in fetched)
+    fetched_years = {row[0] for row in fetched}
     merged = list(fetched)
-    for d in FOMC_HARDCODED:
-        if d[0] not in fetched_years:
-            merged.append(d)
-
+    for row in FOMC_HARDCODED:
+        if row[0] not in fetched_years:
+            merged.append(row)
     return sorted(set(merged))
 
 
-# ── MQL5 code generation ────────────────────────────────────────────────────────
-
 def generate_mql5_block(dates: List[Tuple[int, int, int]]) -> str:
-    """Generate a ready-to-paste MQL5 IsFomcDay() method.
-
-    v2.61: la firma generada coincide EXACTAMENTE con el método real de
-    NewsFilter.mqh — `bool IsFomcDay(int year, int mon, int day)` — antes
-    generaba `IsFomcDay(datetime t)`, que no compilaba al pegarlo.
-    Recordar también actualizar `CNewsFilter::FOMC_LAST_YEAR` al último
-    año incluido (controla el aviso de cobertura agotada en el Journal).
-    """
-    last_year = max(d[0] for d in dates) if dates else 0
+    """Generate a block matching NewsFilter.mqh IsFomcDecisionDate()."""
     lines = [
-        "//--- FOMC Meeting Dates (auto-generated by fomc_calendar.py)",
-        "//--- Reemplaza el cuerpo de NewsFilter.mqh > IsFomcDay(int, int, int)",
-        f"//--- y actualiza: const int CNewsFilter::FOMC_LAST_YEAR = {last_year};",
-        "bool IsFomcDay(int year, int mon, int day)",
+        "//--- FOMC decision dates (auto-generated by fomc_calendar.py)",
+        "bool IsFomcDecisionDate(int year, int mon, int day)",
         "  {",
-        "   if(year > FOMC_LAST_YEAR && !m_fomcWarned)",
-        "     {",
-        "      m_fomcWarned = true;",
-        '      Print("NewsFilter: ATENCION — sin fechas FOMC cargadas para ", year,',
-        '            ". El filtro FOMC esta INACTIVO. Actualizar IsFomcDay() desde ",',
-        '            "federalreserve.gov/monetarypolicy/fomccalendars.htm");',
-        "     }",
     ]
-
-    # Group by year
-    by_year: dict = {}
-    for y, mo, day in dates:
-        by_year.setdefault(y, []).append((mo, day))
-
+    by_year: dict[int, list[tuple[int, int]]] = {}
+    for year, month, day in dates:
+        by_year.setdefault(year, []).append((month, day))
     for year in sorted(by_year):
-        entries = by_year[year]
         conditions = " ||\n             ".join(
-            f"(mon=={mo} && day=={day})" for mo, day in sorted(entries)
+            f"(mon=={month} && day=={day})" for month, day in sorted(by_year[year])
         )
         lines.append(f"   if(year == {year})")
         lines.append(f"      return({conditions});")
-
-    lines += [
-        "   return(false);",
-        "  }",
-    ]
+    lines += ["   return(false);", "  }"]
     return "\n".join(lines)
 
-
-# ── Console output ──────────────────────────────────────────────────────────────
 
 def sep(title: str = "") -> None:
     print(f"\n{'─' * 60}")
@@ -184,96 +125,42 @@ def sep(title: str = "") -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Golden Trade X — FOMC Calendar Updater"
-    )
-    parser.add_argument("--no-fetch",  action="store_true",
-                        help="Skip live fetch, use hardcoded dates only")
-    parser.add_argument("--year",      type=int, default=0,
-                        help="Filter output to a specific year")
-    parser.add_argument("--mql5",      default="",
-                        help="Path to save MQL5 IsFomcDay() code block")
+    parser = argparse.ArgumentParser(description="Golden Trade X — FOMC Calendar Updater")
+    parser.add_argument("--no-fetch", action="store_true", help="Skip live fetch")
+    parser.add_argument("--year", type=int, default=0, help="Filter output to a year")
+    parser.add_argument("--mql5", default="", help="Save generated MQL5 block")
     args = parser.parse_args()
 
     sep("GOLDEN TRADE X — FOMC CALENDAR")
-
     if args.no_fetch or not _FETCH_OK:
-        if not _FETCH_OK and not args.no_fetch:
-            print("  requests/beautifulsoup4 not installed — using hardcoded dates.")
-            print("  Run: pip install requests beautifulsoup4")
         dates = sorted(set(FOMC_HARDCODED))
-        source = "hardcoded"
+        source = "verified hardcoded fallback"
     else:
         print(f"  Fetching from {FED_URL} ...")
         fetched = fetch_fomc_dates()
-        dates   = merge_dates(fetched)
-        source  = f"merged (fetched {len(fetched)} + hardcoded)"
-
+        dates = merge_dates(fetched)
+        source = f"merged (fetched {len(fetched)} + verified fallback)"
     print(f"  Source: {source}")
     print(f"  Total FOMC dates: {len(dates)}")
 
     today = date.today()
-    filter_year = args.year
-
-    # ── Upcoming meetings ──────────────────────────────────────────
-    sep("UPCOMING FOMC MEETINGS")
+    sep("FOMC MEETINGS")
     upcoming = []
-    for y, mo, day in dates:
-        try:
-            meeting_date = date(y, mo, day)
-        except ValueError:
+    for year, month, day in dates:
+        if args.year and year != args.year:
             continue
-        if filter_year and y != filter_year:
-            continue
-        delta = (meeting_date - today).days
-        upcoming.append((meeting_date, delta))
+        meeting = date(year, month, day)
+        upcoming.append((meeting, (meeting - today).days))
+    for meeting, delta in sorted(upcoming):
+        print(f"  {meeting}  delta_days={delta}")
 
-    if not upcoming:
-        print("  No meetings found for the selected filter.")
-    else:
-        print(f"  {'Date':<14} {'Day':<12} {'Countdown':>12}")
-        for meeting_date, delta in sorted(upcoming):
-            dow_name = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][meeting_date.weekday()]
-            if delta < 0:
-                countdown = f"{-delta} days ago"
-            elif delta == 0:
-                countdown = "TODAY"
-            elif delta <= 7:
-                countdown = f"in {delta} days (!)"
-            else:
-                countdown = f"in {delta} days"
-            print(f"  {str(meeting_date):<14} {dow_name:<12} {countdown:>12}")
-
-    # ── Next meeting alert ─────────────────────────────────────────
-    future = [(d, delta) for d, delta in upcoming if delta >= 0]
-    if future:
-        next_date, next_delta = min(future, key=lambda x: x[1])
-        sep("NEXT FOMC")
-        print(f"  Date:    {next_date}")
-        print(f"  In:      {next_delta} day(s)")
-        print(f"  Buffer:  block trading {next_delta - 1} day(s) before (InpNewsBufferBefore)")
-        if next_delta <= 3:
-            print("  *** IMMINENT — consider activating InpPauseForNews=true ***")
-
-    # ── MQL5 block generation ──────────────────────────────────────
     mql5_block = generate_mql5_block(dates)
-
-    sep("MQL5 IsFomcDay() CODE BLOCK")
+    sep("MQL5 IsFomcDecisionDate() CODE BLOCK")
     print(mql5_block)
-
     if args.mql5:
-        with open(args.mql5, "w", encoding="utf-8") as f:
-            f.write(mql5_block + "\n")
+        with open(args.mql5, "w", encoding="utf-8") as handle:
+            handle.write(mql5_block + "\n")
         print(f"\n  MQL5 block saved → {args.mql5}")
-
-    # ── Summary by year ────────────────────────────────────────────
-    sep("MEETINGS BY YEAR")
-    by_year: dict = {}
-    for y, mo, day in dates:
-        by_year.setdefault(y, 0)
-        by_year[y] += 1
-    for y in sorted(by_year):
-        print(f"  {y}: {by_year[y]} meetings")
 
 
 if __name__ == "__main__":
