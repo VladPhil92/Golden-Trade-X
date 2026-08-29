@@ -38,7 +38,7 @@ jobs:
       - name: Install exact parser dependency
         run: python -m pip install --disable-pip-version-check "requests==2.34.2"
 
-      - name: Validate versioned approval request and bind source merge
+      - name: Validate versioned approval request
         shell: bash
         run: |
           set -euo pipefail
@@ -74,6 +74,11 @@ jobs:
           print(f"GTX_APPROVED_AT_UTC={approved_at}")
           print(f"GTX_SOURCE_MERGE_COMMIT={source_merge}")
           PY
+
+      - name: Bind approval request to exact source merge
+        shell: bash
+        run: |
+          set -euo pipefail
           git fetch origin main --quiet
           test "$(git merge-base HEAD origin/main)" = "$GTX_SOURCE_MERGE_COMMIT"
 
@@ -125,7 +130,7 @@ jobs:
           PY
 
       - name: Upload immutable freeze candidate
-        if: always()
+        if: success()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: economic-calendar-approval-freeze-candidate-${{ github.run_id }}
