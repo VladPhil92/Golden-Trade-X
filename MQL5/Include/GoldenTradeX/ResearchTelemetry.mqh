@@ -1,10 +1,12 @@
 //+------------------------------------------------------------------+
 //|                                      ResearchTelemetry.mqh       |
-//| Golden Trade X v2.70 — append-only research event telemetry     |
+//| Golden Trade X v2.90.4 — append-only research telemetry         |
 //+------------------------------------------------------------------+
 // Research-only observability. Telemetry failures NEVER authorize a trade,
 // change risk, or synthesize missing execution/outcome data. Files are written
 // to Common\Files so Python tooling can ingest them without scraping journals.
+// Forward-demo sessions add hourly provenance heartbeats so configuration drift
+// can be detected by the offline evaluator.
 //+------------------------------------------------------------------+
 #property strict
 
@@ -17,6 +19,10 @@ private:
    string          m_symbol;
    ENUM_TIMEFRAMES m_timeframe;
    long            m_sequence;
+   string          m_candidateId;
+   string          m_buildId;
+   string          m_configSnapshot;
+   datetime        m_lastHeartbeatUtc;
 
    string Clean(string value)
      {
@@ -40,6 +46,14 @@ private:
 
    string D(double value, int digits = 8)
      { return DoubleToString(value, digits); }
+
+   string TradeModeText()
+     {
+      ENUM_ACCOUNT_TRADE_MODE mode = (ENUM_ACCOUNT_TRADE_MODE)AccountInfoInteger(ACCOUNT_TRADE_MODE);
+      if(mode == ACCOUNT_TRADE_MODE_DEMO) return "DEMO";
+      if(mode == ACCOUNT_TRADE_MODE_REAL) return "REAL";
+      return "CONTEST";
+     }
 
    string EventId(string family, datetime when, string discriminator = "")
      {
@@ -96,6 +110,27 @@ private:
       return true;
      }
 
+   bool LogSessionEvent(string kind)
+     {
+      if(!m_enabled) return true;
+      datetime serverNow = TimeCurrent();
+      datetime utcNow = TimeGMT();
+      if(serverNow <= 0) serverNow = utcNow;
+      if(utcNow <= 0) utcNow = serverNow;
+
+      string header =
+         "EventID,ServerTime,UtcTime,Account,Magic,Symbol,Timeframe,Kind,CandidateID,BuildID,Broker,"
+         "TerminalBuild,TradeMode,ServerUtcOffsetSeconds,ConfigSnapshot";
+      string line = EventId("SES", serverNow, kind) + "," + T(serverNow) + "," + T(utcNow) + "," +
+                    L(m_login) + "," + U(m_magic) + "," + Clean(m_symbol) + "," +
+                    Clean(EnumToString(m_timeframe)) + "," + Clean(kind) + "," +
+                    Clean(m_candidateId) + "," + Clean(m_buildId) + "," +
+                    Clean(AccountInfoString(ACCOUNT_COMPANY)) + "," +
+                    L((long)TerminalInfoInteger(TERMINAL_BUILD)) + "," + TradeModeText() + "," +
+                    L((long)(serverNow - utcNow)) + "," + Clean(m_configSnapshot);
+      return Append(SessionFileName(serverNow), header, line);
+     }
+
 public:
    void Init(bool enabled, ulong magic, string symbol, ENUM_TIMEFRAMES timeframe)
      {
@@ -105,10 +140,17 @@ public:
       m_symbol = symbol;
       m_timeframe = timeframe;
       m_sequence = 0;
+      m_candidateId = "";
+      m_buildId = "";
+      m_configSnapshot = "";
+      m_lastHeartbeatUtc = 0;
      }
 
    bool IsEnabled() const
      { return m_enabled; }
+
+   string SessionFileName(datetime when)
+     { return FileName("sessions", when); }
 
    string SignalFileName(datetime when)
      { return FileName("signals", when); }
@@ -118,6 +160,38 @@ public:
 
    string OutcomeFileName(datetime when)
      { return FileName("outcomes", when); }
+
+   bool StartSession(string candidateId, string buildId, string configSnapshot)
+     {
+      m_candidateId = candidateId;
+      m_buildId = buildId;
+      m_configSnapshot = configSnapshot;
+      datetime utcNow = TimeGMT();
+      if(utcNow <= 0) utcNow = TimeCurrent();
+      m_lastHeartbeatUtc = utcNow;
+      return LogSessionEvent("START");
+     }
+
+   bool Heartbeat()
+     {
+      if(!m_enabled) return true;
+      datetime utcNow = TimeGMT();
+      if(utcNow <= 0) utcNow = TimeCurrent();
+      if(m_lastHeartbeatUtc > 0 && utcNow - m_lastHeartbeatUtc < 3600)
+         return true;
+      bool ok = LogSessionEvent("HEARTBEAT");
+      if(ok) m_lastHeartbeatUtc = utcNow;
+      return ok;
+     }
+
+   bool EndSession(int reason)
+     {
+      string previous = m_buildId;
+      m_buildId = previous + "|deinit=" + IntegerToString(reason);
+      bool ok = LogSessionEvent("END");
+      m_buildId = previous;
+      return ok;
+     }
 
    bool LogSignal(datetime barTime,
                   string stage,
