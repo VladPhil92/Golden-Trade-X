@@ -1,4 +1,5 @@
 import csv
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -6,6 +7,11 @@ import pytest
 from telemetry_db import connect, counts, discover, ingest_files, ingest_root
 
 
+SESSION_HEADERS = [
+    "EventID", "ServerTime", "UtcTime", "Account", "Magic", "Symbol", "Timeframe", "Kind",
+    "CandidateID", "BuildID", "Broker", "TerminalBuild", "TradeMode", "ServerUtcOffsetSeconds",
+    "ConfigSnapshot",
+]
 SIGNAL_HEADERS = [
     "EventID", "EventTime", "BarTime", "Account", "Magic", "Symbol", "Timeframe", "Stage",
     "Decision", "Reason", "Direction", "Confidence", "Regime", "BaseScore", "RegimeScore",
@@ -34,6 +40,18 @@ def _write(path: Path, headers: list[str], row: dict[str, object]) -> None:
 
 
 def _fixtures(root: Path) -> None:
+    snapshot = "InpMagicNumber=920260|InpEmaFast=21|InpRiskPercent=1.00000000"
+    _write(
+        root / "GoldenTradeX_sessions_100_920260_XAUUSD_2026.csv",
+        SESSION_HEADERS,
+        {
+            "EventID": "ses-1", "ServerTime": "2026.08.28 12:00:00", "UtcTime": "2026.08.28 10:00:00",
+            "Account": 100, "Magic": 920260, "Symbol": "XAUUSD", "Timeframe": "PERIOD_M15",
+            "Kind": "START", "CandidateID": "gtx-candidate-1", "BuildID": "a" * 40,
+            "Broker": "TEST-BROKER", "TerminalBuild": 5100, "TradeMode": "DEMO",
+            "ServerUtcOffsetSeconds": 7200, "ConfigSnapshot": snapshot,
+        },
+    )
     _write(
         root / "GoldenTradeX_signals_100_920260_XAUUSD_2026.csv",
         SIGNAL_HEADERS,
@@ -86,9 +104,22 @@ def test_ingest_root_is_idempotent_and_typed(tmp_path: Path) -> None:
         first = ingest_root(conn, root)
         second = ingest_root(conn, root)
 
-        assert [r.rows_inserted for r in first] == [1, 1, 1]
-        assert [r.rows_inserted for r in second] == [0, 0, 0]
-        assert counts(conn) == {"signals": 1, "executions": 1, "outcomes": 1}
+        assert [r.rows_inserted for r in first] == [1, 1, 1, 1]
+        assert [r.rows_inserted for r in second] == [0, 0, 0, 0]
+        assert counts(conn) == {"sessions": 1, "signals": 1, "executions": 1, "outcomes": 1}
+
+        session = conn.execute(
+            "SELECT candidate_id, build_id, trade_mode, config_snapshot, config_sha256 "
+            "FROM research_sessions WHERE event_id='ses-1'"
+        ).fetchone()
+        expected_snapshot = "InpMagicNumber=920260|InpEmaFast=21|InpRiskPercent=1.00000000"
+        assert session == (
+            "gtx-candidate-1",
+            "a" * 40,
+            "DEMO",
+            expected_snapshot,
+            hashlib.sha256(expected_snapshot.encode("utf-8")).hexdigest(),
+        )
 
         signal = conn.execute(
             "SELECT confidence, initial_rr, lots FROM signal_events WHERE event_id='sig-1'"
@@ -108,15 +139,16 @@ def test_ingest_root_is_idempotent_and_typed(tmp_path: Path) -> None:
 
 def test_discover_only_matches_requested_family(tmp_path: Path) -> None:
     _fixtures(tmp_path)
+    assert len(discover(tmp_path, "sessions")) == 1
     assert len(discover(tmp_path, "signals")) == 1
     assert len(discover(tmp_path, "executions")) == 1
     assert len(discover(tmp_path, "outcomes")) == 1
 
 
 def test_missing_required_headers_fails_closed(tmp_path: Path) -> None:
-    bad = tmp_path / "GoldenTradeX_signals_bad.csv"
-    _write(bad, ["EventID", "EventTime"], {"EventID": "bad", "EventTime": "now"})
+    bad = tmp_path / "GoldenTradeX_sessions_bad.csv"
+    _write(bad, ["EventID", "ServerTime"], {"EventID": "bad", "ServerTime": "now"})
 
     with connect(tmp_path / "research.sqlite") as conn:
         with pytest.raises(ValueError, match="missing required header"):
-            ingest_files(conn, "signals", [bad])
+            ingest_files(conn, "sessions", [bad])
