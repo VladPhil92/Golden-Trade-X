@@ -132,7 +132,7 @@ jobs:
             --cov=scripts.official_campaign_runner \
             --cov=scripts.rc1_release_review_gate \
             --cov-report=term-missing \
-            --cov-fail-under=65
+            --cov-fail-under=70
 
   reproducibility-required:
     name: Reproducibility required gate
