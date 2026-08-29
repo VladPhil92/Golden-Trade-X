@@ -26,19 +26,49 @@ BLS_HTML = """
 </table>
 """
 
-FED_HTML = """
-<html><body>
-<a href="/newsevents/pressreleases/monetary20210127a.htm">January statement</a>
-<a href="/newsevents/pressreleases/monetary20210317a.htm">March statement</a>
-<a href="/newsevents/pressreleases/monetary20210428a.htm">April statement</a>
-<a href="/newsevents/pressreleases/monetary20210616a.htm">June statement</a>
-<a href="/newsevents/pressreleases/monetary20210728a.htm">July statement</a>
-<a href="/newsevents/pressreleases/monetary20210922a.htm">September statement</a>
-<a href="/newsevents/pressreleases/monetary20211103a.htm">November statement</a>
-<a href="/newsevents/pressreleases/monetary20211215a.htm">December statement</a>
-<a href="/newsevents/pressreleases/monetary20210127a1.htm">implementation note must not match</a>
-<a href="/monetarypolicy/files/monetary20210127a1.pdf">statement PDF must not match</a>
-<a href="/newsevents/pressreleases/monetary20210127a.htm">duplicate statement link</a>
+
+def _statement_block(date: str) -> str:
+    return (
+        '<div>Statement: '
+        f'<a href="/monetarypolicy/files/monetary{date}a1.pdf">PDF</a> | '
+        f'<a href="/newsevents/pressreleases/monetary{date}a.htm">HTML</a>'
+        '</div>'
+    )
+
+
+FED_HTML = "<html><body>" + "".join(
+    _statement_block(date)
+    for date in (
+        "20210127",
+        "20210317",
+        "20210428",
+        "20210616",
+        "20210728",
+        "20210922",
+        "20211103",
+        "20211215",
+    )
+) + """
+<a href="/newsevents/pressreleases/monetary20210127a1.htm">Implementation Note</a>
+<a href="/newsevents/pressreleases/monetary20210127a.htm">duplicate statement link outside Statement block</a>
+</body></html>
+"""
+
+FED_2025_WITH_NOTATION_VOTE = "<html><body>" + "".join(
+    _statement_block(date)
+    for date in (
+        "20250129",
+        "20250319",
+        "20250507",
+        "20250618",
+        "20250730",
+        "20250917",
+        "20251029",
+        "20251210",
+    )
+) + """
+<div>August 22 (notation vote)</div>
+<a href="/newsevents/pressreleases/monetary20250822a.htm">Statement on Longer-Run Goals and Monetary Policy Strategy</a>
 </body></html>
 """
 
@@ -111,6 +141,22 @@ def test_fomc_parser_uses_current_press_release_statement_urls() -> None:
     assert all(event.source_authority == "FEDERAL_RESERVE" for event in events)
     assert all("/newsevents/pressreleases/monetary" in event.source_url for event in events)
     assert all("a1.htm" not in event.source_url for event in events)
+
+
+def test_fomc_parser_excludes_notation_vote_release_with_same_url_shape() -> None:
+    events = parse_fomc_statement_links(FED_2025_WITH_NOTATION_VOTE, start_year=2025, end_year=2025)
+    assert len(events) == 8
+    assert all("20250822" not in event.source_url for event in events)
+    assert [event.release_utc[:10] for event in events] == [
+        "2025-01-29",
+        "2025-03-19",
+        "2025-05-07",
+        "2025-06-18",
+        "2025-07-30",
+        "2025-09-17",
+        "2025-10-29",
+        "2025-12-10",
+    ]
 
 
 def test_fomc_parser_keeps_legacy_statement_url_compatibility() -> None:
