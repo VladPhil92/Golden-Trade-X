@@ -18,6 +18,7 @@ FILES = (
 
 
 def _copy_bundle(tmp_path: Path) -> Path:
+    tmp_path.mkdir(parents=True, exist_ok=True)
     source = Path("config")
     for name in FILES:
         (tmp_path / name).write_text((source / name).read_text(encoding="utf-8"), encoding="utf-8")
