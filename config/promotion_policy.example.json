@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "policy_id": "GTX-OOS-PROMOTION-V1-DRAFT",
+  "approved": false,
+  "status_note": "Illustrative thresholds only. Copy to a new immutable policy, review and set approved=true BEFORE any official OOS freeze. Do not tune after seeing OOS results.",
+  "criteria": [
+    {
+      "metric": "fold_count",
+      "operator": ">=",
+      "value": 4
+    },
+    {
+      "metric": "total_trades",
+      "operator": ">=",
+      "value": 200
+    },
+    {
+      "metric": "total_net_profit",
+      "operator": ">",
+      "value": 0
+    },
+    {
+      "metric": "aggregate_expected_payoff",
+      "operator": ">",
+      "value": 0
+    },
+    {
+      "metric": "median_profit_factor",
+      "operator": ">=",
+      "value": 1.1
+    },
+    {
+      "metric": "profitable_fold_ratio",
+      "operator": ">=",
+      "value": 0.6
+    },
+    {
+      "metric": "positive_expectancy_fold_ratio",
+      "operator": ">=",
+      "value": 0.6
+    },
+    {
+      "metric": "max_drawdown_pct",
+      "operator": "<=",
+      "value": 12.0
+    }
+  ]
+}
