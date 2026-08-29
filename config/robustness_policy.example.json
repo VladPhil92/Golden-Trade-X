@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "policy_id": "GTX-ROBUSTNESS-V1-DRAFT",
+  "approved": false,
+  "status_note": "Illustrative thresholds only. Review and freeze an immutable approved policy before executing an official robustness campaign. Modeled cost sensitivity is not executed MT5 evidence.",
+  "criteria": [
+    {
+      "metric": "baseline_total_net_profit",
+      "operator": ">",
+      "value": 0
+    },
+    {
+      "metric": "parameter_positive_net_ratio",
+      "operator": ">=",
+      "value": 0.6
+    },
+    {
+      "metric": "parameter_positive_expectancy_ratio",
+      "operator": ">=",
+      "value": 0.6
+    },
+    {
+      "metric": "parameter_min_profit_factor",
+      "operator": ">=",
+      "value": 1.0
+    },
+    {
+      "metric": "parameter_min_net_profit_retention",
+      "operator": ">=",
+      "value": 0.5
+    },
+    {
+      "metric": "broker_count",
+      "operator": ">=",
+      "value": 2
+    },
+    {
+      "metric": "broker_positive_net_ratio",
+      "operator": ">=",
+      "value": 0.5
+    },
+    {
+      "metric": "broker_min_profit_factor",
+      "operator": ">=",
+      "value": 1.0
+    },
+    {
+      "metric": "modeled_cost_min_adjusted_net_profit",
+      "operator": ">",
+      "value": 0
+    }
+  ]
+}
