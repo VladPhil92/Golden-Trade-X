@@ -10,6 +10,12 @@ America/New_York timezone, preserves per-event source URLs and emits the same sc
 consumed by economic_calendar_contract.py. It does not approve data by default; approval
 must be an explicit pre-observation action after reviewing the generated audit summary.
 
+For official/reproducible execution, pass ``--source-dir``. The directory must contain
+immutable source snapshots named ``bls-YYYY.html`` for every requested year and
+``fomccalendars.html`` for the Federal Reserve page. Snapshot mode is strictly offline:
+a missing source fails closed and never falls back to the network. Every source snapshot
+is bound into the audit by SHA-256 and byte size.
+
 The CLI defaults match the frozen GTX-WF-V1 historical window [2021-01-01, 2026-01-01):
 release years 2021 through 2025 inclusive. Future-year statement links are never invented.
 """
@@ -17,13 +23,14 @@ release years 2021 through 2025 inclusive. Future-year statement links are never
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 from dataclasses import dataclass
 from datetime import datetime, time
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 from urllib.parse import urljoin
 from zoneinfo import ZoneInfo
 
@@ -36,6 +43,7 @@ EASTERN = ZoneInfo("America/New_York")
 UTC = ZoneInfo("UTC")
 DEFAULT_START_YEAR = 2021
 DEFAULT_END_YEAR = 2025
+FED_SNAPSHOT_NAME = "fomccalendars.html"
 
 _BLS_DATE_FORMATS = ("%A, %B %d, %Y", "%A, %B %e, %Y")
 _FOMC_HREF_RE = re.compile(r"fomcstatement(?P<date>20\d{6})a?\.htm(?:$|[?#])", re.IGNORECASE)
@@ -107,6 +115,36 @@ def _request(url: str, *, timeout: int = 30, session: requests.Session | None = 
     response = client.get(url, timeout=timeout, headers={"User-Agent": USER_AGENT})
     response.raise_for_status()
     return response.text
+
+
+def _sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _read_source_snapshot(root: Path, name: str, source_url: str) -> tuple[str, dict[str, Any]]:
+    root = root.resolve()
+    path = (root / name).resolve()
+    try:
+        path.relative_to(root)
+    except ValueError as exc:
+        raise CalendarMaterializationError(f"source snapshot escapes source directory: {name}") from exc
+    if not path.is_file():
+        raise CalendarMaterializationError(f"required source snapshot not found: {path}")
+    raw = path.read_bytes()
+    if not raw:
+        raise CalendarMaterializationError(f"source snapshot is empty: {path}")
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise CalendarMaterializationError(f"source snapshot must be UTF-8: {path}") from exc
+    metadata = {
+        "mode": "SNAPSHOT",
+        "url": source_url,
+        "snapshot_name": name,
+        "snapshot_sha256": _sha256_bytes(raw),
+        "snapshot_size_bytes": len(raw),
+    }
+    return text, metadata
 
 
 def _parse_bls_date(raw: str) -> datetime:
@@ -231,16 +269,36 @@ def materialize_calendar(
     approved: bool = False,
     timeout: int = 30,
     session: requests.Session | None = None,
+    source_dir: str | Path | None = None,
 ) -> tuple[dict, dict]:
     if start_year < 2000 or end_year < start_year:
         raise CalendarMaterializationError("invalid materialization year range")
 
+    snapshot_root = Path(source_dir).resolve() if source_dir is not None else None
+    if snapshot_root is not None and not snapshot_root.is_dir():
+        raise CalendarMaterializationError(f"source snapshot directory not found: {snapshot_root}")
+
     events: list[Event] = []
+    bls_sources: list[dict[str, Any]] = []
     for year in range(start_year, end_year + 1):
         url = BLS_YEAR_URL.format(year=year)
-        events.extend(parse_bls_year(_request(url, timeout=timeout, session=session), year, url))
+        if snapshot_root is None:
+            html = _request(url, timeout=timeout, session=session)
+            source_meta: dict[str, Any] = {"mode": "LIVE", "url": url}
+        else:
+            html, source_meta = _read_source_snapshot(snapshot_root, f"bls-{year}.html", url)
+        events.extend(parse_bls_year(html, year, url))
+        bls_sources.append(source_meta)
 
-    fed_html = _request(FED_CALENDAR_URL, timeout=timeout, session=session)
+    if snapshot_root is None:
+        fed_html = _request(FED_CALENDAR_URL, timeout=timeout, session=session)
+        fed_source: dict[str, Any] = {"mode": "LIVE", "url": FED_CALENDAR_URL}
+        source_mode = "LIVE_OFFICIAL_HTTP"
+    else:
+        fed_html, fed_source = _read_source_snapshot(
+            snapshot_root, FED_SNAPSHOT_NAME, FED_CALENDAR_URL
+        )
+        source_mode = "IMMUTABLE_OFFICIAL_SNAPSHOTS"
     events.extend(parse_fomc_statement_links(fed_html, start_year=start_year, end_year=end_year))
 
     identities: set[tuple[str, str]] = set()
@@ -269,16 +327,17 @@ def materialize_calendar(
         "events": [event.as_dict() for event in events],
     }
     audit = {
-        "schema_version": 1,
-        "methodology": "OFFICIAL_ECONOMIC_CALENDAR_MATERIALIZATION_V1",
+        "schema_version": 2,
+        "methodology": "OFFICIAL_ECONOMIC_CALENDAR_MATERIALIZATION_V2",
+        "source_mode": source_mode,
         "approved": bool(approved),
         "start_year": start_year,
         "end_year": end_year,
         "event_count": len(events),
         "counts_by_year": counts,
         "sources": {
-            "bls": [BLS_YEAR_URL.format(year=year) for year in range(start_year, end_year + 1)],
-            "federal_reserve": FED_CALENDAR_URL,
+            "bls": bls_sources,
+            "federal_reserve": fed_source,
         },
         "live_trading_authorized": False,
         "real_capital_authorized": False,
@@ -292,6 +351,13 @@ def main() -> None:
     parser.add_argument("--end-year", type=int, default=DEFAULT_END_YEAR)
     parser.add_argument("--output", required=True)
     parser.add_argument("--audit-output", required=True)
+    parser.add_argument(
+        "--source-dir",
+        help=(
+            "Offline source snapshot directory containing bls-YYYY.html and "
+            "fomccalendars.html. When provided, network fallback is forbidden."
+        ),
+    )
     parser.add_argument("--approved", action="store_true")
     parser.add_argument("--timeout", type=int, default=30)
     args = parser.parse_args()
@@ -301,6 +367,7 @@ def main() -> None:
             args.end_year,
             approved=args.approved,
             timeout=args.timeout,
+            source_dir=args.source_dir,
         )
     except (CalendarMaterializationError, requests.RequestException) as exc:
         parser.error(str(exc))
