@@ -13,6 +13,11 @@ on:
         required: true
         default: "2025"
         type: string
+      source_dir:
+        description: Repository-relative immutable official source snapshot directory
+        required: true
+        default: data/research/calendar-sources/v1
+        type: string
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -23,7 +28,7 @@ permissions:
 
 jobs:
   materialize-calendar:
-    name: BLS + Federal Reserve calendar artifact
+    name: Verified offline BLS + Federal Reserve calendar artifact
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -32,11 +37,12 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Validate year inputs against frozen walk-forward window
+      - name: Validate frozen historical range and source path
         shell: bash
         env:
           GTX_START_YEAR: ${{ inputs.start_year }}
           GTX_END_YEAR: ${{ inputs.end_year }}
+          GTX_SOURCE_DIR: ${{ inputs.source_dir }}
         run: |
           set -euo pipefail
           [[ "$GTX_START_YEAR" =~ ^20[0-9]{2}$ ]]
@@ -55,34 +61,45 @@ jobs:
           end_exclusive = datetime.strptime(plan["end_date"], "%Y-%m-%d")
           if end_exclusive <= start:
               raise SystemExit("walk-forward end_date must be after start_date")
-          expected_start_year = start.year
-          expected_end_year = (end_exclusive - timedelta(days=1)).year
-          requested_start_year = int(os.environ["GTX_START_YEAR"])
-          requested_end_year = int(os.environ["GTX_END_YEAR"])
-          if (requested_start_year, requested_end_year) != (expected_start_year, expected_end_year):
+          expected = (start.year, (end_exclusive - timedelta(days=1)).year)
+          requested = (int(os.environ["GTX_START_YEAR"]), int(os.environ["GTX_END_YEAR"]))
+          if requested != expected:
               raise SystemExit(
                   "Calendar materialization range must match frozen GTX-WF-V1 half-open window: "
-                  f"expected {expected_start_year}-{expected_end_year}, got "
-                  f"{requested_start_year}-{requested_end_year}"
+                  f"expected {expected[0]}-{expected[1]}, got {requested[0]}-{requested[1]}"
               )
-          print(
-              "Frozen historical calendar range verified: "
-              f"{expected_start_year}-{expected_end_year} for "
-              f"[{plan['start_date']}, {plan['end_date']})"
-          )
+
+          repo = Path.cwd().resolve()
+          raw = os.environ["GTX_SOURCE_DIR"].strip()
+          source = (repo / raw).resolve()
+          try:
+              source.relative_to(repo)
+          except ValueError as exc:
+              raise SystemExit("source_dir must remain inside repository checkout") from exc
+          if not source.is_dir():
+              raise SystemExit(
+                  "immutable source snapshot directory is missing; capture and commit/retrieve "
+                  "the reviewed BLS/Federal Reserve snapshot bundle before materialization"
+              )
+          manifest = source / "source_manifest.json"
+          if not manifest.is_file():
+              raise SystemExit("source_manifest.json is required; network fallback is forbidden")
+          print(f"OFFLINE SNAPSHOT INPUT READY: {source}")
           PY
 
-      - name: Install exact source-fetch dependency
+      - name: Install exact parser dependency
         run: python -m pip install --disable-pip-version-check "requests==2.34.2"
 
-      - name: Materialize source-backed calendar as unapproved review artifact
+      - name: Verify immutable manifest and materialize unapproved calendar
         env:
           GTX_START_YEAR: ${{ inputs.start_year }}
           GTX_END_YEAR: ${{ inputs.end_year }}
+          GTX_SOURCE_DIR: ${{ inputs.source_dir }}
         run: |
-          python scripts/materialize_official_calendar.py \
+          python scripts/materialize_verified_official_calendar.py \
             --start-year "$GTX_START_YEAR" \
             --end-year "$GTX_END_YEAR" \
+            --source-dir "$GTX_SOURCE_DIR" \
             --output data/research/calendar-review/economic_calendar.generated.json \
             --audit-output data/research/calendar-review/economic_calendar.audit.json
 
@@ -95,16 +112,27 @@ jobs:
             --contract data/research/calendar-review/economic_calendar.generated.json \
             --verify-mql5 data/research/calendar-review/EconomicCalendarData.generated.mqh
 
-      - name: Confirm artifact remains unapproved before human review
+      - name: Enforce non-evidence review boundary
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
-          p = Path('data/research/calendar-review/economic_calendar.generated.json')
-          doc = json.loads(p.read_text(encoding='utf-8'))
-          if doc.get('approved') is not False:
-              raise SystemExit('Generated calendar must remain approved=false until reviewed')
-          print('CALENDAR REVIEW ARTIFACT READY; APPROVAL NOT GRANTED')
+
+          document = json.loads(
+              Path("data/research/calendar-review/economic_calendar.generated.json").read_text(encoding="utf-8")
+          )
+          audit = json.loads(
+              Path("data/research/calendar-review/economic_calendar.audit.json").read_text(encoding="utf-8")
+          )
+          if document.get("approved") is not False:
+              raise SystemExit("Generated calendar must remain approved=false until reviewed")
+          if audit.get("source_manifest_verified") is not True:
+              raise SystemExit("Source manifest verification is mandatory")
+          if audit.get("live_trading_authorized") is not False:
+              raise SystemExit("Calendar review must deny live trading")
+          if audit.get("real_capital_authorized") is not False:
+              raise SystemExit("Calendar review must deny real capital")
+          print("VERIFIED OFFLINE CALENDAR REVIEW ARTIFACT READY; APPROVAL NOT GRANTED")
           PY
 
       - name: Upload reviewable calendar evidence
