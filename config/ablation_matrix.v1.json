@@ -1,0 +1,52 @@
+{
+  "matrix_id": "GTX-ABLATION-V1",
+  "methodology": "ONE_CHANGE_AT_A_TIME",
+  "description": "First official Golden Trade X component-removal matrix. Each variant changes exactly one boolean preset input from the frozen baseline.",
+  "variants": [
+    {
+      "name": "no_smc",
+      "parameter": "InpUseSmcFilter",
+      "value": false
+    },
+    {
+      "name": "no_regime_filter",
+      "parameter": "InpUseRegimeFilter",
+      "value": false
+    },
+    {
+      "name": "no_htf_filter",
+      "parameter": "InpUseHtfFilter",
+      "value": false
+    },
+    {
+      "name": "no_equity_curve_filter",
+      "parameter": "InpUseEqCurveFilter",
+      "value": false
+    },
+    {
+      "name": "no_session_filter",
+      "parameter": "InpUseSessionFilter",
+      "value": false
+    },
+    {
+      "name": "no_news_filter",
+      "parameter": "InpUseNewsFilter",
+      "value": false
+    },
+    {
+      "name": "no_trailing",
+      "parameter": "InpUseTrailing",
+      "value": false
+    },
+    {
+      "name": "no_break_even",
+      "parameter": "InpUseBreakEven",
+      "value": false
+    },
+    {
+      "name": "no_partial_take_profit",
+      "parameter": "InpUsePartialTP",
+      "value": false
+    }
+  ]
+}
