@@ -17,15 +17,26 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from experiment_registry import (
-    RegistryValidationError,
-    attach_artifact,
-    connect_registry,
-    load_spec,
-    register_experiment,
-    set_status,
-    sha256_file,
-)
+try:
+    from scripts.experiment_registry import (
+        RegistryValidationError,
+        attach_artifact,
+        connect_registry,
+        load_spec,
+        register_experiment,
+        set_status,
+        sha256_file,
+    )
+except ModuleNotFoundError:
+    from experiment_registry import (
+        RegistryValidationError,
+        attach_artifact,
+        connect_registry,
+        load_spec,
+        register_experiment,
+        set_status,
+        sha256_file,
+    )
 
 
 def _required(spec: dict[str, Any], key: str) -> Any:
