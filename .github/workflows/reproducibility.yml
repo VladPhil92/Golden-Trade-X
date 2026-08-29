@@ -83,6 +83,7 @@ jobs:
           tests/test_official_campaign.py
           tests/test_official_campaign_runner.py
           tests/test_official_campaign_runner_fail_closed.py
+          tests/test_quant_orchestration_adversarial.py
           tests/test_real_money_interlock.py
           -v --tb=short
 
@@ -119,6 +120,7 @@ jobs:
             tests/test_official_campaign.py \
             tests/test_official_campaign_runner.py \
             tests/test_official_campaign_runner_fail_closed.py \
+            tests/test_quant_orchestration_adversarial.py \
             --tb=short \
             --cov=scripts.experiment_registry \
             --cov=scripts.strategy_tester_results \
