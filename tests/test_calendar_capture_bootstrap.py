@@ -30,3 +30,11 @@ def test_capture_bootstrap_requires_verified_manifest_and_live_denial() -> None:
     assert "source_manifest_verified" in text
     assert "live_trading_authorized" in text
     assert "real_capital_authorized" in text
+
+
+def test_capture_bootstrap_installs_exact_windows_calendar_dependencies() -> None:
+    text = _text()
+    assert 'requests==2.34.2' in text
+    assert 'tzdata==2026.3' in text
+    assert "America/New_York" in text
+    assert "-m pip install" in text
