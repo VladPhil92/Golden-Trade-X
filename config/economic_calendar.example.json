@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "calendar_id": "GTX-ECONOMIC-CALENDAR-DRAFT",
+  "approved": false,
+  "status_note": "Engineering template only. Official validation remains blocked until every NFP, CPI and FOMC release used by the campaign is sourced from BLS/Federal Reserve records, reviewed, and this contract plus EconomicCalendarData.mqh are regenerated and committed together.",
+  "coverage": {
+    "start_utc": "2021-01-01T00:00:00Z",
+    "end_utc": "2026-12-31T23:59:59Z"
+  },
+  "events": []
+}
