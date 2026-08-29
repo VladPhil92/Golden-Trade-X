@@ -24,11 +24,20 @@ jobs:
       - name: Install test dependencies
         run: pip install "pytest~=9.1"
       - name: Compile reproducibility tooling
-        run: python -m compileall -q scripts/experiment_registry.py scripts/strategy_tester_harness.py
+        run: >-
+          python -m compileall -q
+          scripts/experiment_registry.py
+          scripts/experiment_matrix.py
+          scripts/strategy_tester_harness.py
       - name: Run reproducibility contract tests
         env:
           PYTHONPATH: ${{ github.workspace }}/scripts:${{ github.workspace }}
-        run: pytest tests/test_experiment_registry.py tests/test_strategy_tester_harness.py -v --tb=short
+        run: >-
+          pytest
+          tests/test_experiment_registry.py
+          tests/test_experiment_matrix.py
+          tests/test_strategy_tester_harness.py
+          -v --tb=short
 
   reproducibility-required:
     name: Reproducibility required gate
