@@ -23,6 +23,14 @@ Push-Location $repoRoot
 try {
   Invoke-Checked "Checking Python" { & $Python --version }
 
+  Invoke-Checked "Installing exact calendar-capture Python dependencies" {
+    & $Python -m pip install "requests==2.34.2" "tzdata==2026.3"
+  }
+
+  Invoke-Checked "Checking IANA America/New_York timezone" {
+    & $Python -c "from zoneinfo import ZoneInfo; assert str(ZoneInfo('America/New_York')) == 'America/New_York'"
+  }
+
   Invoke-Checked "Capturing official BLS/Federal Reserve source snapshots" {
     & $Python scripts/capture_official_calendar_sources.py `
       --start-year $StartYear `
