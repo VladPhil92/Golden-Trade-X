@@ -1,0 +1,183 @@
+name: Official Validation Campaign
+
+on:
+  workflow_dispatch:
+    inputs:
+      campaign_config:
+        description: Repository-relative approved campaign config JSON
+        required: true
+        default: config/official_validation_campaign.json
+        type: string
+      timeout_seconds:
+        description: Per Strategy Tester experiment timeout
+        required: true
+        default: "3600"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  official-campaign:
+    name: Frozen DEMO IS to OOS campaign
+    runs-on: windows-latest
+    timeout-minutes: 720
+    env:
+      GTX_CAMPAIGN_CONFIG: ${{ inputs.campaign_config }}
+      GTX_TIMEOUT_SECONDS: ${{ inputs.timeout_seconds }}
+      GTX_MT5_LOGIN: ${{ secrets.GTX_MT5_LOGIN }}
+      GTX_MT5_PASSWORD: ${{ secrets.GTX_MT5_PASSWORD }}
+      GTX_MT5_SERVER: ${{ secrets.GTX_MT5_SERVER }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Validate campaign input paths
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+
+          if ([System.IO.Path]::IsPathRooted($env:GTX_CAMPAIGN_CONFIG)) {
+            throw "campaign_config must be repository-relative"
+          }
+
+          $repo = [System.IO.Path]::GetFullPath($env:GITHUB_WORKSPACE)
+          $campaignPath = [System.IO.Path]::GetFullPath(
+            (Join-Path $repo $env:GTX_CAMPAIGN_CONFIG)
+          )
+          $repoPrefix = $repo.TrimEnd('\') + '\'
+          if (-not $campaignPath.StartsWith(
+              $repoPrefix,
+              [System.StringComparison]::OrdinalIgnoreCase
+          )) {
+            throw "campaign_config escapes the repository"
+          }
+          if (-not (Test-Path -LiteralPath $campaignPath -PathType Leaf)) {
+            throw "Campaign config not found: $campaignPath"
+          }
+
+          $timeout = 0
+          if (-not [int]::TryParse($env:GTX_TIMEOUT_SECONDS, [ref]$timeout) -or
+              $timeout -lt 60 -or $timeout -gt 7200) {
+            throw "timeout_seconds must be an integer in [60, 7200]"
+          }
+
+          $campaign = Get-Content -Raw -LiteralPath $campaignPath | ConvertFrom-Json
+          if (-not $campaign.execution_environment_path) {
+            throw "Campaign config requires execution_environment_path"
+          }
+          $configRoot = Split-Path $campaignPath -Parent
+          $environmentPath = [System.IO.Path]::GetFullPath(
+            (Join-Path $configRoot ([string]$campaign.execution_environment_path))
+          )
+          $configPrefix = [System.IO.Path]::GetFullPath($configRoot).TrimEnd('\') + '\'
+          if (-not $environmentPath.StartsWith(
+              $configPrefix,
+              [System.StringComparison]::OrdinalIgnoreCase
+          )) {
+            throw "execution_environment_path escapes the campaign config root"
+          }
+          if (-not (Test-Path -LiteralPath $environmentPath -PathType Leaf)) {
+            throw "Execution environment contract not found: $environmentPath"
+          }
+
+          "GTX_CAMPAIGN_PATH=$campaignPath" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "GTX_CONFIG_ROOT=$configRoot" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "GTX_ENVIRONMENT_PATH=$environmentPath" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "GTX_TIMEOUT=$timeout" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Freeze campaign before evidence
+        shell: pwsh
+        run: |
+          python scripts/official_campaign_freeze.py `
+            --config "$env:GTX_CAMPAIGN_PATH" `
+            --output-dir "data/research/official_campaign/freeze" `
+            --build-id "$env:GITHUB_SHA"
+
+      - name: Install MetaTrader 5 and compile frozen build
+        shell: pwsh
+        run: .github/scripts/compile-mql5.ps1
+
+      - name: Install MT5 Python attestation client
+        shell: pwsh
+        run: python -m pip install "MetaTrader5>=5,<6"
+
+      - name: Resolve actual MetaTrader data root
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+
+          if (-not $env:GTX_EX5 -or -not (Test-Path -LiteralPath $env:GTX_EX5)) {
+            throw "GTX_EX5 is unavailable after the compile gate"
+          }
+          $expertDir = Split-Path $env:GTX_EX5 -Parent
+          $expertsDir = Split-Path $expertDir -Parent
+          $mql5Root = Split-Path $expertsDir -Parent
+          $profilesTester = Join-Path $mql5Root "Profiles\Tester"
+          New-Item -ItemType Directory -Force -Path $profilesTester | Out-Null
+
+          $installDir = Join-Path $env:RUNNER_TEMP "MetaTrader5"
+          $terminal = @(
+            (Join-Path $installDir "terminal64.exe"),
+            (Join-Path $installDir "terminal.exe")
+          ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+          if (-not $terminal) {
+            throw "MetaTrader terminal executable not found under $installDir"
+          }
+
+          $portableRoot = Join-Path $installDir "MQL5"
+          $actualPortable = $mql5Root.StartsWith(
+            $portableRoot,
+            [System.StringComparison]::OrdinalIgnoreCase
+          )
+          $contract = Get-Content -Raw -LiteralPath $env:GTX_ENVIRONMENT_PATH | ConvertFrom-Json
+          if ([bool]$contract.portable_mode -ne [bool]$actualPortable) {
+            throw "Frozen portable_mode does not match the compiled MetaTrader data root"
+          }
+
+          "GTX_MT5_TERMINAL=$terminal" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "GTX_TESTER_PROFILES=$profilesTester" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Terminal: $terminal"
+          Write-Host "MQL5 root: $mql5Root"
+          Write-Host "Tester profiles: $profilesTester"
+          Write-Host "Portable mode: $actualPortable"
+
+      - name: Attest exact DEMO broker environment
+        shell: pwsh
+        run: |
+          python scripts/mt5_environment_probe.py `
+            --contract "$env:GTX_ENVIRONMENT_PATH" `
+            --terminal "$env:GTX_MT5_TERMINAL" `
+            --output "data/research/official_campaign/environment_attestation.json"
+
+      - name: Execute official rolling IS to frozen OOS campaign
+        shell: pwsh
+        run: |
+          python scripts/official_campaign_runner.py `
+            --campaign-lock "data/research/official_campaign/freeze/campaign_lock.json" `
+            --attestation "data/research/official_campaign/environment_attestation.json" `
+            --config-root "$env:GTX_CONFIG_ROOT" `
+            --output-dir "data/research/official_campaign/execution" `
+            --actual-git-sha "$env:GITHUB_SHA" `
+            --terminal "$env:GTX_MT5_TERMINAL" `
+            --tester-profiles-dir "$env:GTX_TESTER_PROFILES" `
+            --registry "data/research/official_campaign/experiments.sqlite" `
+            --runs-dir "data/research/official_campaign/runs" `
+            --timeout-seconds $env:GTX_TIMEOUT
+
+      - name: Upload official campaign evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: official-validation-campaign-${{ github.run_id }}
+          retention-days: 30
+          if-no-files-found: warn
+          path: |
+            data/research/official_campaign/
+            ${{ env.GTX_COMPILE_LOG }}
+            ${{ env.GTX_EX5 }}
