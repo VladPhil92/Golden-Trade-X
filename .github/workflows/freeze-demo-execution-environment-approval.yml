@@ -1,0 +1,132 @@
+name: Freeze DEMO Execution Environment Approval
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_path:
+        description: Repository-relative reviewed discovery candidate JSON
+        required: true
+        default: data/research/environment-review/execution_environment.candidate.json
+        type: string
+      discovery_audit_path:
+        description: Repository-relative credential-free discovery audit JSON
+        required: true
+        default: data/research/environment-review/execution_environment.discovery.json
+        type: string
+      confirmation:
+        description: Type APPROVE_DEMO_EXECUTION_ENVIRONMENT to freeze approval
+        required: true
+        type: string
+      approval_note:
+        description: Human review rationale (minimum 8 characters)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  freeze-environment:
+    name: Explicit validation-only DEMO environment approval freeze
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GTX_CANDIDATE_PATH: ${{ inputs.candidate_path }}
+      GTX_DISCOVERY_AUDIT_PATH: ${{ inputs.discovery_audit_path }}
+      GTX_CONFIRMATION: ${{ inputs.confirmation }}
+      GTX_APPROVAL_NOTE: ${{ inputs.approval_note }}
+      GTX_APPROVED_BY: ${{ github.actor }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+
+      - name: Validate explicit approval inputs and repository paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GTX_CONFIRMATION" = "APPROVE_DEMO_EXECUTION_ENVIRONMENT"
+          test "${#GTX_APPROVAL_NOTE}" -ge 8
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          repo = Path.cwd().resolve()
+          for label, raw in {
+              "candidate_path": os.environ["GTX_CANDIDATE_PATH"],
+              "discovery_audit_path": os.environ["GTX_DISCOVERY_AUDIT_PATH"],
+          }.items():
+              target = (repo / raw).resolve()
+              try:
+                  target.relative_to(repo)
+              except ValueError as exc:
+                  raise SystemExit(f"{label} must remain inside repository checkout") from exc
+              if not target.is_file():
+                  raise SystemExit(f"{label} file is missing: {target}")
+          PY
+
+      - name: Resolve approval timestamp
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY' >> "$GITHUB_ENV"
+          from datetime import datetime, timezone
+          print("GTX_APPROVED_AT_UTC=" + datetime.now(timezone.utc).replace(microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ"))
+          PY
+
+      - name: Freeze approved environment from reviewed discovery evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/freeze_approved_execution_environment.py \
+            --candidate "$GTX_CANDIDATE_PATH" \
+            --discovery-audit "$GTX_DISCOVERY_AUDIT_PATH" \
+            --approved-by "$GTX_APPROVED_BY" \
+            --approval-note "$GTX_APPROVAL_NOTE" \
+            --approved-at-utc "$GTX_APPROVED_AT_UTC" \
+            --confirmation "$GTX_CONFIRMATION" \
+            --output data/research/environment-freeze/execution_environment.approved.json \
+            --approval-record data/research/environment-freeze/execution_environment.approval.json
+
+      - name: Revalidate approved contract and validation-only boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from scripts.execution_environment import load_execution_environment_contract
+
+          approved_path = Path("data/research/environment-freeze/execution_environment.approved.json")
+          record_path = Path("data/research/environment-freeze/execution_environment.approval.json")
+          contract, _ = load_execution_environment_contract(approved_path)
+          record = json.loads(record_path.read_text(encoding="utf-8"))
+          if contract["approved"] is not True:
+              raise SystemExit("frozen environment must be approved=true")
+          if contract["require_trade_mode"] != "DEMO":
+              raise SystemExit("frozen environment must require DEMO")
+          if contract["live_trading_authorized"] is not False:
+              raise SystemExit("frozen environment must deny live trading")
+          if record.get("decision") != "APPROVED_FOR_OFFICIAL_VALIDATION":
+              raise SystemExit("environment approval decision is invalid")
+          if record.get("live_trading_authorized") is not False:
+              raise SystemExit("environment approval must deny live trading")
+          if record.get("real_capital_authorized") is not False:
+              raise SystemExit("environment approval must deny real capital")
+          print("DEMO ENVIRONMENT APPROVAL FREEZE PASS — validation only")
+          PY
+
+      - name: Upload immutable environment freeze artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: demo-execution-environment-approval-freeze-${{ github.run_id }}
+          retention-days: 90
+          if-no-files-found: error
+          path: data/research/environment-freeze/
