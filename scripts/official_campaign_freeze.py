@@ -92,13 +92,22 @@ def _policy_snapshot(path: Path, role: str) -> dict[str, Any]:
 
 
 def _preset_allows_real_trading(path: Path) -> bool:
+    values: list[str] = []
     for raw in path.read_text(encoding="utf-8-sig").splitlines():
         line = raw.strip()
         if line.startswith("InpAllowRealTrading="):
-            value = line.split("=", 1)[1].strip().lower()
-            return value in {"true", "1"}
+            values.append(line.split("=", 1)[1].strip().lower())
+    if len(values) != 1:
+        raise RegistryValidationError(
+            "candidate preset must contain exactly one InpAllowRealTrading=false entry: "
+            f"{path}"
+        )
+    if values[0] in {"false", "0"}:
+        return False
+    if values[0] in {"true", "1"}:
+        return True
     raise RegistryValidationError(
-        f"candidate preset must explicitly declare InpAllowRealTrading=false: {path}"
+        f"candidate preset has invalid InpAllowRealTrading value {values[0]!r}: {path}"
     )
 
 
