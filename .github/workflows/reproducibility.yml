@@ -74,6 +74,7 @@ jobs:
           tests/test_forward_demo_validation.py
           tests/test_official_campaign.py
           tests/test_official_campaign_runner.py
+          tests/test_official_campaign_runner_fail_closed.py
           tests/test_real_money_interlock.py
           -v --tb=short
 
@@ -106,6 +107,7 @@ jobs:
             tests/test_forward_demo_validation.py \
             tests/test_official_campaign.py \
             tests/test_official_campaign_runner.py \
+            tests/test_official_campaign_runner_fail_closed.py \
             --tb=short \
             --cov=scripts.experiment_registry \
             --cov=scripts.strategy_tester_results \
