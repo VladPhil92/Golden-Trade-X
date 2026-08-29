@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "campaign_id": "GTX-V3-RC1-OFFICIAL-VALIDATION-DRAFT",
+  "status_note": "Engineering example only. Before an official freeze, replace build_id with the exact immutable candidate Git SHA, approve all policies in separate immutable files, choose the complete candidate universe and replace placeholder broker labels in the robustness template.",
+  "build_id": "83f87cb5d17d36f2937925461c5e7ad9d3981d75",
+  "candidate_universe": [
+    {
+      "name": "baseline",
+      "preset_path": "GoldenTradeX.set"
+    }
+  ],
+  "walk_forward_config_path": "walk_forward_plan.example.json",
+  "robustness_template_path": "robustness_template.example.json",
+  "robustness_policy_path": "robustness_policy.example.json",
+  "forward_policy_path": "forward_demo_policy.example.json"
+}
