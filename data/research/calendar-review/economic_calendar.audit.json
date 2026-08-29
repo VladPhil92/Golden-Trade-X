@@ -36,7 +36,7 @@
   "source_manifest": {
     "methodology": "OFFICIAL_CALENDAR_SOURCE_SNAPSHOT_V1",
     "path": "source_manifest.json",
-    "sha256": "8776cb9955bcc8c94185a30915b461974ae549bf86b660ebccc563332cae84c6"
+    "sha256": "79d3392e8c7b38d700def0d0ca347279b74a5a6ab43a4e818de194d8de08591c"
   },
   "source_manifest_verified": true,
   "source_mode": "IMMUTABLE_OFFICIAL_SNAPSHOTS",
