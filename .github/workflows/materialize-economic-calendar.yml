@@ -32,7 +32,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Validate year inputs
+      - name: Validate year inputs against frozen walk-forward window
         shell: bash
         env:
           GTX_START_YEAR: ${{ inputs.start_year }}
@@ -44,6 +44,33 @@ jobs:
           test "$GTX_START_YEAR" -le "$GTX_END_YEAR"
           test "$GTX_START_YEAR" -ge 2000
           test "$GTX_END_YEAR" -le 2100
+          python - <<'PY'
+          import json
+          import os
+          from datetime import datetime, timedelta
+          from pathlib import Path
+
+          plan = json.loads(Path("config/walk_forward_plan.v1.json").read_text(encoding="utf-8"))
+          start = datetime.strptime(plan["start_date"], "%Y-%m-%d")
+          end_exclusive = datetime.strptime(plan["end_date"], "%Y-%m-%d")
+          if end_exclusive <= start:
+              raise SystemExit("walk-forward end_date must be after start_date")
+          expected_start_year = start.year
+          expected_end_year = (end_exclusive - timedelta(days=1)).year
+          requested_start_year = int(os.environ["GTX_START_YEAR"])
+          requested_end_year = int(os.environ["GTX_END_YEAR"])
+          if (requested_start_year, requested_end_year) != (expected_start_year, expected_end_year):
+              raise SystemExit(
+                  "Calendar materialization range must match frozen GTX-WF-V1 half-open window: "
+                  f"expected {expected_start_year}-{expected_end_year}, got "
+                  f"{requested_start_year}-{requested_end_year}"
+              )
+          print(
+              "Frozen historical calendar range verified: "
+              f"{expected_start_year}-{expected_end_year} for "
+              f"[{plan['start_date']}, {plan['end_date']})"
+          )
+          PY
 
       - name: Install exact source-fetch dependency
         run: python -m pip install --disable-pip-version-check "requests==2.34.2"

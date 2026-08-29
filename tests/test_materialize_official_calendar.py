@@ -1,6 +1,8 @@
 import pytest
 
 from scripts.materialize_official_calendar import (
+    DEFAULT_END_YEAR,
+    DEFAULT_START_YEAR,
     CalendarMaterializationError,
     _audit_counts,
     _validate_counts,
@@ -36,6 +38,11 @@ FED_HTML = """
 """
 
 
+def test_v1_defaults_use_only_completed_historical_release_years() -> None:
+    assert DEFAULT_START_YEAR == 2021
+    assert DEFAULT_END_YEAR == 2025
+
+
 def test_bls_parser_selects_only_nfp_and_cpi_and_applies_dst() -> None:
     events = parse_bls_year(BLS_HTML, 2021, "https://www.bls.gov/schedule/2021/")
     assert [(event.event, event.release_utc) for event in events] == [
@@ -69,4 +76,10 @@ def test_count_audit_fails_closed_on_incomplete_source_parse() -> None:
     counts = _audit_counts(events, 2021, 2021)
     assert counts["2021"] == {"NFP": 2, "CPI": 2, "FOMC": 8}
     with pytest.raises(CalendarMaterializationError, match="only 2 NFP releases"):
+        _validate_counts(counts)
+
+
+def test_count_audit_rejects_partial_future_fomc_year() -> None:
+    counts = {"2026": {"NFP": 12, "CPI": 12, "FOMC": 5}}
+    with pytest.raises(CalendarMaterializationError, match="expected exactly 8 regular FOMC"):
         _validate_counts(counts)
