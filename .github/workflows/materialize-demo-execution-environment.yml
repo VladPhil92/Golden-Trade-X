@@ -1,0 +1,156 @@
+name: Materialize DEMO Execution Environment
+
+on:
+  workflow_dispatch:
+    inputs:
+      symbol:
+        description: MT5 symbol to materialize
+        required: true
+        default: XAUUSD
+        type: string
+      timeframe:
+        description: Strategy timeframe
+        required: true
+        default: M15
+        type: string
+      deposit:
+        description: Frozen Strategy Tester initial deposit
+        required: true
+        default: "10000"
+        type: string
+      portable_mode:
+        description: Require MT5 portable mode
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  discover-demo-environment:
+    name: Discover connected DEMO broker environment
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      GTX_SYMBOL: ${{ inputs.symbol }}
+      GTX_TIMEFRAME: ${{ inputs.timeframe }}
+      GTX_DEPOSIT: ${{ inputs.deposit }}
+      GTX_PORTABLE_MODE: ${{ inputs.portable_mode }}
+      GTX_MT5_LOGIN: ${{ secrets.GTX_MT5_LOGIN }}
+      GTX_MT5_PASSWORD: ${{ secrets.GTX_MT5_PASSWORD }}
+      GTX_MT5_SERVER: ${{ secrets.GTX_MT5_SERVER }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+
+      - name: Validate non-secret discovery inputs
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+
+          if ([string]::IsNullOrWhiteSpace($env:GTX_SYMBOL)) {
+            throw "symbol is required"
+          }
+          if ([string]::IsNullOrWhiteSpace($env:GTX_TIMEFRAME)) {
+            throw "timeframe is required"
+          }
+          $deposit = 0.0
+          if (-not [double]::TryParse(
+              $env:GTX_DEPOSIT,
+              [Globalization.NumberStyles]::Float,
+              [Globalization.CultureInfo]::InvariantCulture,
+              [ref]$deposit
+          ) -or $deposit -le 0) {
+            throw "deposit must be a positive number"
+          }
+          if ([string]::IsNullOrWhiteSpace($env:GTX_MT5_LOGIN) -or
+              [string]::IsNullOrWhiteSpace($env:GTX_MT5_PASSWORD) -or
+              [string]::IsNullOrWhiteSpace($env:GTX_MT5_SERVER)) {
+            throw "GTX_MT5_LOGIN, GTX_MT5_PASSWORD and GTX_MT5_SERVER secrets are required"
+          }
+
+      - name: Install MetaTrader 5 and compile current build
+        shell: pwsh
+        run: .github/scripts/compile-mql5.ps1
+
+      - name: Install exact MT5 Python discovery client
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check "MetaTrader5==5.0.6147"
+          python -c "import importlib.metadata as m; print('MetaTrader5=' + m.version('MetaTrader5'))"
+
+      - name: Resolve MetaTrader terminal
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          $installDir = Join-Path $env:RUNNER_TEMP "MetaTrader5"
+          $terminal = @(
+            (Join-Path $installDir "terminal64.exe"),
+            (Join-Path $installDir "terminal.exe")
+          ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+          if (-not $terminal) {
+            throw "MetaTrader terminal executable not found under $installDir"
+          }
+          "GTX_MT5_TERMINAL=$terminal" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Discover fail-closed DEMO environment
+        shell: pwsh
+        run: |
+          $portableArg = if ($env:GTX_PORTABLE_MODE -eq "true") { "--portable-mode" } else { "--no-portable-mode" }
+          python scripts/mt5_environment_discovery.py `
+            --terminal "$env:GTX_MT5_TERMINAL" `
+            --symbol "$env:GTX_SYMBOL" `
+            --timeframe "$env:GTX_TIMEFRAME" `
+            --deposit "$env:GTX_DEPOSIT" `
+            $portableArg `
+            --output-contract "data/research/environment-discovery/execution_environment.candidate.json" `
+            --output-audit "data/research/environment-discovery/execution_environment.discovery.json"
+
+      - name: Enforce candidate remains unapproved and credential-free
+        shell: pwsh
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from scripts.execution_environment import validate_execution_environment
+
+          contract_path = Path("data/research/environment-discovery/execution_environment.candidate.json")
+          audit_path = Path("data/research/environment-discovery/execution_environment.discovery.json")
+          contract = json.loads(contract_path.read_text(encoding="utf-8"))
+          audit = json.loads(audit_path.read_text(encoding="utf-8"))
+          normalized = validate_execution_environment(contract)
+          if normalized["approved"] is not False:
+              raise SystemExit("discovered environment must remain approved=false")
+          if normalized["require_trade_mode"] != "DEMO":
+              raise SystemExit("discovered environment must require DEMO")
+          if normalized["live_trading_authorized"] is not False:
+              raise SystemExit("discovered environment must deny live trading")
+          if audit.get("real_capital_authorized") is not False:
+              raise SystemExit("discovery audit must deny real capital")
+          forbidden = ("login", "password")
+          payload = (contract_path.read_text(encoding="utf-8") + audit_path.read_text(encoding="utf-8")).lower()
+          if any(token in payload for token in forbidden):
+              raise SystemExit("discovery artifact contains a forbidden credential field")
+          print("DEMO ENVIRONMENT DISCOVERY PASS — review candidate only")
+          PY
+
+      - name: Upload DEMO environment review candidate
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: demo-execution-environment-candidate-${{ github.run_id }}
+          retention-days: 90
+          if-no-files-found: error
+          path: |
+            data/research/environment-discovery/
+            ${{ env.GTX_COMPILE_LOG }}
