@@ -54,13 +54,14 @@ void OnStart()
    datetime monday = MakeTime(2026, 8, 24, 12, 0);
    AssertTrue(session.IsTradingAllowedAt(monday), "Session gate allows Monday 12:00 server time");
 
-   // 2) News gate: inject server offset. 2026-01-28 is official FOMC date;
+   // 2) News gate: inject server offset against the frozen official calendar.
+   // 2025-01-29 is an approved FOMC statement date in the 2021-2025 contract;
    // decision 14:00 ET = 19:00 UTC in January => 21:00 at UTC+2 server.
    CNewsFilter news;
    news.Init(true, 30, 90);
    news.SetServerOffset(2);
-   datetime fomc = MakeTime(2026, 1, 28, 21, 0);
-   AssertTrue(news.IsNewsBlockedAt(fomc), "News gate blocks official FOMC window");
+   datetime fomc = MakeTime(2025, 1, 29, 21, 0);
+   AssertTrue(news.IsNewsBlockedAt(fomc), "News gate blocks approved FOMC window");
 
    // 3) Market regime -> confluence integration, entirely pure.
    CMarketRegimeEngine regime;
