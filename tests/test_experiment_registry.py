@@ -23,9 +23,17 @@ def _spec(preset_name: str = "preset.set") -> dict:
         "source_type": "strategy_tester",
         "mt5_build": "6000",
         "modelling": "Every tick based on real ticks",
+        "tester_model": 4,
+        "expert": "GoldenTradeX\\GoldenTradeX.ex5",
+        "expert_parameters": preset_name,
+        "execution_mode": 0,
+        "portable_mode": True,
         "deposit": 10000,
         "currency": "USD",
         "leverage": 100,
+        "optimization": False,
+        "forward_mode": "disabled",
+        "forward_mode_code": 0,
     }
 
 
@@ -54,6 +62,51 @@ def test_preset_content_change_changes_experiment_identity(tmp_path: Path) -> No
         second = register_experiment(connection, _spec(), base_dir=tmp_path)
         assert first["experiment_id"] != second["experiment_id"]
         assert first["spec"]["preset_sha256"] != second["spec"]["preset_sha256"]
+    finally:
+        connection.close()
+
+
+def test_tester_model_change_changes_experiment_identity(tmp_path: Path) -> None:
+    preset = tmp_path / "preset.set"
+    preset.write_text("x=1\n", encoding="utf-8")
+    first_spec = _spec()
+    second_spec = _spec()
+    second_spec["tester_model"] = 0
+    connection = connect_registry(tmp_path / "registry.sqlite")
+    try:
+        first = register_experiment(connection, first_spec, base_dir=tmp_path)
+        second = register_experiment(connection, second_spec, base_dir=tmp_path)
+        assert first["experiment_id"] != second["experiment_id"]
+    finally:
+        connection.close()
+
+
+def test_human_notes_do_not_manufacture_new_execution_identity(tmp_path: Path) -> None:
+    preset = tmp_path / "preset.set"
+    preset.write_text("x=1\n", encoding="utf-8")
+    first_spec = _spec()
+    second_spec = _spec()
+    first_spec["notes"] = "baseline candidate"
+    second_spec["notes"] = "same execution, relabelled later"
+    connection = connect_registry(tmp_path / "registry.sqlite")
+    try:
+        first = register_experiment(connection, first_spec, base_dir=tmp_path)
+        second = register_experiment(connection, second_spec, base_dir=tmp_path)
+        assert first["experiment_id"] == second["experiment_id"]
+        assert connection.execute("SELECT COUNT(*) FROM experiments").fetchone()[0] == 1
+    finally:
+        connection.close()
+
+
+def test_missing_strategy_tester_execution_provenance_fails_closed(tmp_path: Path) -> None:
+    preset = tmp_path / "preset.set"
+    preset.write_text("x=1\n", encoding="utf-8")
+    spec = _spec()
+    del spec["tester_model"]
+    connection = connect_registry(tmp_path / "registry.sqlite")
+    try:
+        with pytest.raises(RegistryValidationError, match="tester_model"):
+            register_experiment(connection, spec, base_dir=tmp_path)
     finally:
         connection.close()
 
