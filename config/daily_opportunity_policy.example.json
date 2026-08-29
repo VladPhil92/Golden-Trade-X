@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "policy_id": "GTX-DAILY-OPPORTUNITY-RESEARCH-DRAFT",
+  "approved": false,
+  "research_only": true,
+  "status_note": "Illustrative v3.1 research targets. This file must not be used to promise daily trades or authorize production behavior.",
+  "ranking": {
+    "minimum_confidence": 55,
+    "minimum_quality_score": 60.0,
+    "maximum_candidate_risk_pct": 1.0,
+    "forced_trade_when_no_candidate": false,
+    "relax_thresholds_after_zero_trade_day": false
+  },
+  "setup_risk_ceiling_pct": {
+    "A_HIGH_CONVICTION": 1.0,
+    "B_STANDARD_INTRADAY": 0.5,
+    "C_TACTICAL": 0.25
+  },
+  "portfolio": {
+    "maximum_open_risk_pct": 1.5,
+    "maximum_aligned_pairwise_correlation": 0.8
+  },
+  "research_targets": {
+    "active_trading_day_ratio_target": 0.8,
+    "zero_trade_day_ratio_target_max": 0.2,
+    "trades_per_day_mean_target_min": 1.0,
+    "trades_per_day_mean_target_max": 3.0
+  },
+  "promotion_constraints": {
+    "require_oos_expectancy_positive": true,
+    "require_no_material_drawdown_deterioration": true,
+    "require_robustness_validation": true,
+    "require_forward_demo_validation": true
+  },
+  "live_trading_authorized": false,
+  "real_capital_authorized": false
+}
