@@ -46,7 +46,14 @@ DEFAULT_END_YEAR = 2025
 FED_SNAPSHOT_NAME = "fomccalendars.html"
 
 _BLS_DATE_FORMATS = ("%A, %B %d, %Y", "%A, %B %e, %Y")
-_FOMC_HREF_RE = re.compile(r"fomcstatement(?P<date>20\d{6})a?\.htm(?:$|[?#])", re.IGNORECASE)
+# Current Federal Reserve calendar HTML statement links use
+# /newsevents/pressreleases/monetaryYYYYMMDDa.htm. Older snapshots may use
+# /monetarypolicy/fomcstatementYYYYMMDD[a].htm. Accept only those exact statement
+# forms and deliberately reject PDFs / implementation-note suffixes such as a1.
+_FOMC_HREF_RE = re.compile(
+    r"(?:fomcstatement(?P<legacy_date>20\d{6})a?|monetary(?P<press_date>20\d{6})a)\.htm(?:$|[?#])",
+    re.IGNORECASE,
+)
 
 
 class CalendarMaterializationError(ValueError):
@@ -149,7 +156,6 @@ def _read_source_snapshot(root: Path, name: str, source_url: str) -> tuple[str, 
 
 def _parse_bls_date(raw: str) -> datetime:
     normalized = " ".join(raw.split())
-    # %e is not portable on Windows, so normalize one-digit day manually first.
     normalized = re.sub(r"(, [A-Za-z]+)\s+0?(\d{1,2})(, \d{4})$", r"\1 \2\3", normalized)
     for fmt in _BLS_DATE_FORMATS:
         try:
@@ -215,12 +221,12 @@ def parse_fomc_statement_links(html: str, *, start_year: int, end_year: int) -> 
         match = _FOMC_HREF_RE.search(href)
         if not match:
             continue
-        raw_date = match.group("date")
+        raw_date = match.group("legacy_date") or match.group("press_date")
         stamp = datetime.strptime(raw_date, "%Y%m%d")
         if not (start_year <= stamp.year <= end_year):
             continue
         source_url = urljoin(FED_CALENDAR_URL, href)
-        by_date[raw_date] = source_url
+        by_date.setdefault(raw_date, source_url)
 
     events: list[Event] = []
     for raw_date in sorted(by_date):
@@ -249,9 +255,6 @@ def _audit_counts(events: Iterable[Event], start_year: int, end_year: int) -> di
 
 def _validate_counts(counts: dict[str, dict[str, int]]) -> None:
     for year, row in counts.items():
-        # BLS schedules can contain government-shutdown delays/cancellations, so do not
-        # hard-code 12. Requiring at least 10 catches parser/source failures while keeping
-        # exceptional official schedules reviewable. FOMC regular meetings are eight/year.
         if row["NFP"] < 10:
             raise CalendarMaterializationError(f"{year}: only {row['NFP']} NFP releases parsed")
         if row["CPI"] < 10:
@@ -295,9 +298,7 @@ def materialize_calendar(
         fed_source: dict[str, Any] = {"mode": "LIVE", "url": FED_CALENDAR_URL}
         source_mode = "LIVE_OFFICIAL_HTTP"
     else:
-        fed_html, fed_source = _read_source_snapshot(
-            snapshot_root, FED_SNAPSHOT_NAME, FED_CALENDAR_URL
-        )
+        fed_html, fed_source = _read_source_snapshot(snapshot_root, FED_SNAPSHOT_NAME, FED_CALENDAR_URL)
         source_mode = "IMMUTABLE_OFFICIAL_SNAPSHOTS"
     events.extend(parse_fomc_statement_links(fed_html, start_year=start_year, end_year=end_year))
 
@@ -335,10 +336,7 @@ def materialize_calendar(
         "end_year": end_year,
         "event_count": len(events),
         "counts_by_year": counts,
-        "sources": {
-            "bls": bls_sources,
-            "federal_reserve": fed_source,
-        },
+        "sources": {"bls": bls_sources, "federal_reserve": fed_source},
         "live_trading_authorized": False,
         "real_capital_authorized": False,
     }
