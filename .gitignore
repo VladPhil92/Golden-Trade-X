@@ -1,6 +1,19 @@
 *.ex5
 *.log
+*.sqlite
+*.sqlite3
+*.db
 __pycache__/
 *.pyc
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
 .env
 .vscode/
+
+# Reproducible research outputs are uploaded as workflow artifacts, not committed.
+config/runtime-*.json
+data/research/runtime/
+data/research/runs/
+data/research/matrix/
