@@ -1,0 +1,33 @@
+; Golden Trade X v3.1 — A-only multi-symbol shadow research
+; This Expert never sends orders. It records hypothetical eligible opportunities only.
+InpEnableOpportunityShadow=true
+InpOpportunitySymbols=XAUUSD,XAGUSD,EURUSD
+InpOpportunityMagic=931100
+InpEnableOpportunityTelemetry=true
+InpOpportunityMinQuality=55.0
+InpOpportunityRiskPct=1.0
+
+InpEmaFast=21
+InpEmaSlow=55
+InpRsiPeriod=14
+InpRsiUpper=70.0
+InpRsiLower=30.0
+InpRsiLongMin=45.0
+InpRsiShortMax=55.0
+InpTimeframe=15
+InpAtrPeriod=14
+InpAtrMinRatio=0.8
+InpAtrMaxRatio=3.0
+InpAdxPeriod=14
+InpAdxMinLevel=25.0
+InpMinTickVolume=10
+InpUseHtfFilter=true
+InpHtfEmaPeriod=50
+InpUseRegimeFilter=true
+InpUseSmcFilter=true
+InpMinConfidence=55
+InpConfWeightBase=25
+InpConfWeightRegime=25
+InpConfWeightSmc=30
+InpConfWeightHtf=15
+InpConfWeightFib=5

@@ -7,6 +7,7 @@ from scripts.daily_opportunity_metrics import (
     ActivityMetricsError,
     TradeActivity,
     compute_activity_metrics,
+    load_shadow_ledger,
     load_trades_csv,
     load_trading_days,
     weekday_trading_days,
@@ -60,3 +61,48 @@ def test_csv_requires_timezone_aware_entry_timestamp(tmp_path: Path) -> None:
     path.write_text("entry_utc,symbol,setup\n2026-01-05T14:00:00,XAUUSD,A\n", encoding="utf-8")
     with pytest.raises(ActivityMetricsError, match="UTC offset"):
         load_trades_csv(path)
+
+
+def shadow_header() -> str:
+    return (
+        "ServerTime,UtcTime,Magic,ScannedSymbol,Setup,Selected,Direction,Confidence,"
+        "QualityScore,ProposedRiskPct,Regime,BaseScore,RegimeScore,SmcScore,HtfScore,"
+        "FibScore,ATR,SourceValid,Reason\n"
+    )
+
+
+def test_shadow_ledger_counts_only_selected_candidate(tmp_path: Path) -> None:
+    path = tmp_path / "shadow.csv"
+    path.write_text(
+        shadow_header()
+        + "2026.01.05 09:00:00,2026.01.05 14:00:00,1,XAUUSD,A_HIGH_CONVICTION,0,BUY,70,70,1,1,25,25,10,8,2,12,1,NOT_SELECTED\n"
+        + "2026.01.05 09:00:00,2026.01.05 14:00:00,1,EURUSD,A_HIGH_CONVICTION,1,BUY,75,75,1,1,25,25,15,8,2,1,1,SELECTED_BY_PRE_REGISTERED_QUALITY\n",
+        encoding="utf-8",
+    )
+    selected = load_shadow_ledger(path)
+    assert len(selected) == 1
+    assert selected[0].symbol == "EURUSD"
+    assert selected[0].setup == "A_HIGH_CONVICTION"
+    assert selected[0].entry_utc == datetime(2026, 1, 5, 14, 0, tzinfo=timezone.utc)
+
+
+def test_selected_invalid_shadow_row_fails_closed(tmp_path: Path) -> None:
+    path = tmp_path / "shadow.csv"
+    path.write_text(
+        shadow_header()
+        + "2026.01.05 09:00:00,2026.01.05 14:00:00,1,XAUUSD,A_HIGH_CONVICTION,1,BUY,70,70,1,1,25,25,10,8,2,0,0,ATR_INVALID\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ActivityMetricsError, match="not source-valid"):
+        load_shadow_ledger(path)
+
+
+def test_shadow_ledger_rejects_non_binary_selected_flag(tmp_path: Path) -> None:
+    path = tmp_path / "shadow.csv"
+    path.write_text(
+        shadow_header()
+        + "2026.01.05 09:00:00,2026.01.05 14:00:00,1,XAUUSD,A_HIGH_CONVICTION,true,BUY,70,70,1,1,25,25,10,8,2,12,1,BAD\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ActivityMetricsError, match="Selected must be 0 or 1"):
+        load_shadow_ledger(path)
