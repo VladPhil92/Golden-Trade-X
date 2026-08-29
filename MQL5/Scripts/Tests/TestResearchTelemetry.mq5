@@ -35,6 +35,20 @@ bool ReadTwoLines(string file, string &header, string &row)
    return true;
   }
 
+bool ReadLastLine(string file, string &last)
+  {
+   int handle = FileOpen(file, FILE_READ | FILE_TXT | FILE_ANSI | FILE_COMMON);
+   if(handle == INVALID_HANDLE) return false;
+   last = "";
+   while(!FileIsEnding(handle))
+     {
+      string line = FileReadString(handle);
+      if(StringLen(line) > 0) last = line;
+     }
+   FileClose(handle);
+   return StringLen(last) > 0;
+  }
+
 void DeleteIfExists(string file)
   {
    if(FileIsExist(file, FILE_COMMON))
@@ -84,6 +98,23 @@ void OnStart()
                  "Session row contains canonical runtime config snapshot");
       AssertTrue(CsvFieldCount(header) == 15 && CsvFieldCount(row) == 15,
                  "Session header and row both contain 15 fields");
+     }
+
+   bool endWrote = telemetry.EndSession(42);
+   AssertTrue(endWrote, "Synthetic session END writes successfully");
+   string lastSession = "";
+   bool readEnd = ReadLastLine(sessionFile, lastSession);
+   AssertTrue(readEnd, "Session END can be reopened for verification");
+   if(readEnd)
+     {
+      AssertTrue(StringFind(lastSession, ",END,") >= 0,
+                 "Final session row is END");
+      AssertTrue(StringFind(lastSession, "build-test-123") >= 0,
+                 "END preserves exact build identity");
+      AssertTrue(StringFind(lastSession, "deinit=") < 0,
+                 "Deinit reason is not mixed into BuildID");
+      AssertTrue(CsvFieldCount(lastSession) == 15,
+                 "Session END preserves the 15-field contract");
      }
 
    bool signalWrote = telemetry.LogSignal(
