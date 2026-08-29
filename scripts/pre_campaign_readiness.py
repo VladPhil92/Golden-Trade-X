@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -184,12 +184,15 @@ def evaluate_campaign_readiness(
 
     walk = _load(walk_path)
     start = _day_start(walk.get("start_date"))
-    end = _day_start(walk.get("end_date"))
+    end_exclusive = _day_start(walk.get("end_date"))
+    if end_exclusive <= start:
+        raise CampaignReadinessError("walk-forward end_date must be after start_date")
+    required_last_instant = end_exclusive - timedelta(seconds=1)
     cal_start = datetime.fromisoformat(calendar["coverage"]["start_utc"].replace("Z", "+00:00"))
     cal_end = datetime.fromisoformat(calendar["coverage"]["end_utc"].replace("Z", "+00:00"))
-    if cal_start > start or cal_end < end:
+    if cal_start > start or cal_end < required_last_instant:
         raise CampaignReadinessError(
-            "approved economic calendar does not cover the complete walk-forward period"
+            "approved economic calendar does not cover the complete half-open walk-forward period"
         )
 
     runtime_pin_count = _validate_runtime_lock(lock_path)

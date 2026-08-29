@@ -9,6 +9,9 @@ The materializer converts published Eastern Time release clocks to UTC using the
 America/New_York timezone, preserves per-event source URLs and emits the same schema
 consumed by economic_calendar_contract.py. It does not approve data by default; approval
 must be an explicit pre-observation action after reviewing the generated audit summary.
+
+The CLI defaults match the frozen GTX-WF-V1 historical window [2021-01-01, 2026-01-01):
+release years 2021 through 2025 inclusive. Future-year statement links are never invented.
 """
 
 from __future__ import annotations
@@ -31,6 +34,8 @@ FED_CALENDAR_URL = "https://www.federalreserve.gov/monetarypolicy/fomccalendars.
 USER_AGENT = "GoldenTradeX-OfficialCalendar/1.0 (+reproducible-validation)"
 EASTERN = ZoneInfo("America/New_York")
 UTC = ZoneInfo("UTC")
+DEFAULT_START_YEAR = 2021
+DEFAULT_END_YEAR = 2025
 
 _BLS_DATE_FORMATS = ("%A, %B %d, %Y", "%A, %B %e, %Y")
 _FOMC_HREF_RE = re.compile(r"fomcstatement(?P<date>20\d{6})a?\.htm(?:$|[?#])", re.IGNORECASE)
@@ -283,8 +288,8 @@ def materialize_calendar(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--start-year", type=int, default=2021)
-    parser.add_argument("--end-year", type=int, default=2026)
+    parser.add_argument("--start-year", type=int, default=DEFAULT_START_YEAR)
+    parser.add_argument("--end-year", type=int, default=DEFAULT_END_YEAR)
     parser.add_argument("--output", required=True)
     parser.add_argument("--audit-output", required=True)
     parser.add_argument("--approved", action="store_true")
