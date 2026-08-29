@@ -12,39 +12,66 @@ The following must be green before an official campaign is frozen:
 2. `Security required gate`
 3. `MQL5 required gate`
 4. `Reproducibility required gate`
-5. `scripts/pre_campaign_readiness.py` returns `READY_TO_FREEZE`
+5. `scripts/official_policy_check.py` returns `POLICY_BUNDLE_FROZEN`
+6. `scripts/pre_campaign_readiness.py` returns `READY_TO_FREEZE`
 
 The pre-campaign gate requires:
 
 - a non-DRAFT campaign id;
+- the frozen `GTX-WF-V1` walk-forward geometry and policy references;
+- approved OOS, robustness and forward-demo V1 policies;
+- an approved DEMO execution-environment contract;
+- at least two distinct, non-placeholder broker labels in the robustness template;
 - an approved economic-calendar contract;
 - calendar coverage spanning the complete walk-forward period;
 - exact BLS provenance for NFP/CPI and Federal Reserve provenance for FOMC;
 - a generated `EconomicCalendarData.mqh` that matches the canonical calendar hash;
-- an exact campaign dependency lock.
+- an exact campaign dependency lock including `MetaTrader5`.
 
-## External inputs that cannot be manufactured in the repository
+## Ex-ante quantitative policy freeze
 
-These remain manual/runtime blockers until real values exist:
+The first official policy generation is now versioned before any official OOS evidence exists:
 
-- DEMO broker account and server;
-- `GTX_MT5_LOGIN`, `GTX_MT5_PASSWORD`, `GTX_MT5_SERVER` stored as GitHub Secrets;
-- exact broker/account-company identity;
-- exact MT5 terminal build;
-- synchronized symbol/history availability;
-- approved OOS/robustness/forward policies;
-- approved historical economic-calendar dataset;
-- actual Strategy Tester results;
-- actual forward DEMO observation.
+- `config/promotion_policy.v1.json` — `GTX-OOS-PROMOTION-V1`;
+- `config/robustness_policy.v1.json` — `GTX-ROBUSTNESS-V1`;
+- `config/forward_demo_policy.v1.json` — `GTX-FORWARD-DEMO-V1`;
+- `config/walk_forward_plan.v1.json` — `GTX-WF-V1`.
 
-No placeholder value is acceptable for official evidence.
+These files are `approved=true` because approval here means **pre-registered for evaluation**, not that the strategy passed. Their values must not be changed after official evidence begins. A changed threshold, criterion or observation rule requires a new policy id and a new campaign identity.
+
+The resulting progression remains:
+
+```text
+OOS policy PASS
+    -> robustness evaluation only
+robustness policy PASS
+    -> forward DEMO readiness only
+forward DEMO policy PASS
+    -> manual release review only
+```
+
+No policy grants live trading or real-capital authorization.
+
+## Canonical campaign definition
+
+`config/official_validation_campaign.json` is the canonical non-DRAFT V1 campaign definition. Its quantitative policies and walk-forward geometry are fixed, but it deliberately remains operationally blocked while it references unapproved/example external inputs such as the DEMO execution environment, economic calendar and robustness broker template.
+
+The exact Git build SHA is injected at campaign freeze; the tracked zero SHA is a pre-freeze sentinel rather than evidence identity.
 
 ## Economic-calendar lifecycle
 
+The official calendar must be sourced rather than transcribed heuristically:
+
 ```text
-BLS/Federal Reserve primary records
+BLS annual schedules + Federal Reserve FOMC statement links
         ↓
-reviewed JSON contract
+scripts/materialize_official_calendar.py
+        ↓
+unapproved review JSON + audit counts
+        ↓
+human/source review
+        ↓
+approved immutable JSON contract
         ↓
 canonical SHA-256
         ↓
@@ -57,7 +84,27 @@ pre-campaign coverage check
 official campaign freeze
 ```
 
-`config/economic_calendar.example.json` is deliberately `approved=false`. Exploratory/demo runs may retain the documented legacy NFP/CPI proxy fallback while this contract is draft. The official workflow cannot pass the preflight with the draft artifact.
+`.github/workflows/materialize-economic-calendar.yml` creates the review artifact from primary-source pages and deliberately leaves `approved=false`. It uses `America/New_York` timezone rules to convert BLS 08:30 ET and FOMC 14:00 ET release clocks to UTC, so DST is not represented by a fixed offset.
+
+The materializer fails closed if a year produces fewer than ten NFP/CPI releases or does not contain exactly eight regular FOMC statement dates. Exceptional schedules therefore remain reviewable rather than silently synthesized.
+
+`config/economic_calendar.example.json` remains deliberately `approved=false`. Exploratory/demo runs may retain the documented legacy NFP/CPI proxy fallback while this contract is draft. The official workflow cannot pass the preflight with the draft artifact.
+
+## External inputs that cannot be manufactured in the repository
+
+These remain manual/runtime blockers until real values exist:
+
+- approved DEMO broker account, company and server;
+- `GTX_MT5_LOGIN`, `GTX_MT5_PASSWORD`, `GTX_MT5_SERVER` stored as GitHub Secrets;
+- exact MT5 terminal build;
+- synchronized symbol/history availability;
+- at least two real broker labels/environments for robustness replication;
+- reviewed and approved historical BLS/Fed calendar artifact;
+- actual Strategy Tester IS/OOS results;
+- actual robustness evidence;
+- actual forward DEMO observation.
+
+No placeholder value is acceptable for official evidence.
 
 ## Dependency lifecycle
 
@@ -90,4 +137,4 @@ Merged historical branches should be pruned only after confirming their commits 
 
 ## Exit criterion
 
-Engineering hardening is complete when all required workflow families pass on the same immutable SHA and `pre_campaign_readiness.py` is capable of returning `READY_TO_FREEZE` for real, approved campaign inputs. That status means **ready to generate evidence**, not profitable and not authorized for real capital.
+Engineering hardening is complete when all required workflow families pass on the same immutable SHA and `pre_campaign_readiness.py` returns `READY_TO_FREEZE` for real, approved external inputs. That status means **ready to generate evidence**, not profitable and not authorized for real capital.
