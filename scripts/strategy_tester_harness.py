@@ -46,6 +46,13 @@ def _required(spec: dict[str, Any], key: str) -> Any:
     return value
 
 
+def _portable_mode(spec: dict[str, Any]) -> bool:
+    value = spec.get("portable_mode", True)
+    if not isinstance(value, bool):
+        raise RegistryValidationError("portable_mode must be true/false")
+    return value
+
+
 def build_tester_config(spec: dict[str, Any], output_dir: str | Path) -> tuple[Path, Path]:
     """Write deterministic MT5 tester INI + execution manifest.
 
@@ -64,6 +71,7 @@ def build_tester_config(spec: dict[str, Any], output_dir: str | Path) -> tuple[P
     tester_model = int(_required(spec, "tester_model"))
     if tester_model < 0:
         raise RegistryValidationError("tester_model must be >= 0")
+    portable_mode = _portable_mode(spec)
 
     report_path = out / "strategy_tester_report.htm"
     ini_path = out / "strategy_tester.ini"
@@ -106,6 +114,8 @@ def build_tester_config(spec: dict[str, Any], output_dir: str | Path) -> tuple[P
         "period_start": spec.get("period_start"),
         "period_end": spec.get("period_end"),
         "tester_model": tester_model,
+        "execution_mode": int(spec.get("execution_mode", 0)),
+        "portable_mode": portable_mode,
         "modelling": spec.get("modelling"),
         "status": "PREPARED_NOT_EXECUTED",
     }
@@ -116,14 +126,34 @@ def build_tester_config(spec: dict[str, Any], output_dir: str | Path) -> tuple[P
     return ini_path, manifest_path
 
 
-def execute_terminal(terminal: str | Path, ini_path: str | Path, timeout_seconds: int = 3600) -> int:
+def build_terminal_command(
+    terminal: str | Path,
+    ini_path: str | Path,
+    *,
+    portable_mode: bool = True,
+) -> list[str]:
+    terminal_path = Path(terminal)
+    ini = Path(ini_path).resolve()
+    command = [str(terminal_path)]
+    if portable_mode:
+        command.append("/portable")
+    command.append(f"/config:{ini}")
+    return command
+
+
+def execute_terminal(
+    terminal: str | Path,
+    ini_path: str | Path,
+    timeout_seconds: int = 3600,
+    *,
+    portable_mode: bool = True,
+) -> int:
     if platform.system() != "Windows":
         raise RegistryValidationError("Strategy Tester execution is supported only on Windows")
     terminal_path = Path(terminal)
     if not terminal_path.is_file():
         raise RegistryValidationError(f"terminal executable not found: {terminal_path}")
-    ini = Path(ini_path).resolve()
-    command = [str(terminal_path), "/portable", f"/config:{ini}"]
+    command = build_terminal_command(terminal_path, ini_path, portable_mode=portable_mode)
     completed = subprocess.run(command, check=False, timeout=timeout_seconds)
     return int(completed.returncode)
 
@@ -137,6 +167,7 @@ def run_registered_experiment(
 ) -> dict[str, Any]:
     spec_path = Path(spec_path)
     spec = load_spec(spec_path)
+    portable_mode = _portable_mode(spec)
     connection = connect_registry(registry_db)
     try:
         record = register_experiment(connection, spec, base_dir=spec_path.parent, status="PLANNED")
@@ -150,8 +181,13 @@ def run_registered_experiment(
         if terminal is None:
             return record
 
-        record = set_status(connection, experiment_id, "RUNNING")
-        exit_code = execute_terminal(terminal, ini_path, timeout_seconds=timeout_seconds)
+        set_status(connection, experiment_id, "RUNNING")
+        exit_code = execute_terminal(
+            terminal,
+            ini_path,
+            timeout_seconds=timeout_seconds,
+            portable_mode=portable_mode,
+        )
         report_path = run_dir / "strategy_tester_report.htm"
         if exit_code != 0 or not report_path.is_file() or report_path.stat().st_size == 0:
             set_status(connection, experiment_id, "FAILED")
