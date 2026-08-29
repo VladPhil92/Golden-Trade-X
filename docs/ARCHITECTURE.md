@@ -57,6 +57,14 @@ current position_ticket
 
 `POSITION_IDENTIFIER` es la clave durable usada por Golden Trade X para estado y Portfolio Risk Cap. El position ticket es una referencia operativa actual y se resuelve desde el identificador estable.
 
+## Real-money interlock
+
+El EA declara `InpAllowRealTrading=false` por defecto. Durante `OnInit()`, una cuenta `ACCOUNT_TRADE_MODE_REAL` falla cerrada con `INIT_FAILED` salvo que ese input haya sido cambiado explícitamente.
+
+Los presets versionados XAUUSD/XAGUSD mantienen el valor en `false` y `scripts/validate_set.py` rechaza un override a `true`. El bit también forma parte del snapshot canónico de configuración de research/forward, por lo que un cambio posterior altera el fingerprint y no puede reutilizar la evidencia DEMO previa.
+
+Este interlock no constituye autorización de producción: cualquier futura activación requiere una revisión de producción controlada separada y no puede derivarse automáticamente de los gates cuantitativos.
+
 ## Execution Engine
 
 `OrderManager` clasifica resultados server-side:
@@ -254,7 +262,7 @@ SQLite research DB
 
 La capa de research es observacional y no autoriza trading. Valores faltantes permanecen faltantes; no se sustituyen por resultados sintéticos ni se convierten en evidencia de rentabilidad, OOS o forward.
 
-Target de las siguientes fases:
+Target de validación:
 
 ```text
 SQLite telemetry
@@ -266,6 +274,10 @@ Experiment Registry
 True Strategy Tester Walk-Forward / robustness
    ↓
 OOS gates / forward demo gates
+   ↓
+Official Validation Campaign Lock
+   ↓
+RC1 manual release review
 ```
 
 ## Verificación
@@ -280,12 +292,12 @@ MetaTrader 5 + MetaEditor compilan realmente `GoldenTradeX.mq5` y todos los `MQL
 
 ### Próximo nivel de testing
 
-La automatización MQL5 L1/L2 quedó cubierta en v2.63. Los siguientes niveles permanecen separados para no confundir software verification con evidencia cuantitativa:
+La automatización MQL5 L1/L2 quedó cubierta en v2.63. La infraestructura cuantitativa posterior está implementada, pero la evidencia empírica oficial permanece separada para no confundir software verification con validación económica:
 
-1. Strategy Tester smoke/research runs reproducibles;
-2. true walk-forward con optimización IS y ejecución OOS independiente;
-3. stress de costes, estabilidad paramétrica y robustez entre brokers;
-4. forward demo antes de cualquier promoción a producción controlada.
+1. ejecutar Strategy Tester oficial sobre el campaign lock congelado;
+2. completar true walk-forward con optimización IS y ejecución OOS independiente;
+3. ejecutar stress de costes, estabilidad paramétrica y replicación entre brokers pre-registrados;
+4. completar la ventana forward DEMO antes de cualquier revisión de producción controlada.
 
 ## Roadmap técnico
 
@@ -294,20 +306,21 @@ La automatización MQL5 L1/L2 quedó cubierta en v2.63. Los siguientes niveles p
 | v2.62 | Trading Correctness | Completado |
 | v2.63 | Automated MQL5 Verification | Completado |
 | v2.70 | Event Ledger / Research Telemetry | Completado |
-| v2.80 | Baseline + ablation + exit research | Siguiente fase |
-| v2.90 | Experiment Registry + true WF + robustness | Pendiente |
-| v3.0-rc1 | OOS gates | NOT VALIDATED |
-| v3.0-rc2 | Forward demo gates | NOT VALIDATED |
+| v2.80 | Baseline + ablation + exit research tooling | Infraestructura completada; evidencia cuantitativa pendiente |
+| v2.90 | Experiment Registry + true WF + robustness + forward gates | Infraestructura completada; campaña empírica pendiente |
+| v3.0-rc1 | Official evidence freeze + OOS/robustness/forward lineage | En implementación/validación CI; NOT EMPIRICALLY VALIDATED |
 | v3.0 | Controlled production | NOT VALIDATED |
 
 ## Principio de seguridad
 
 Ante incertidumbre de:
 
+- account trade mode / autorización real;
 - ownership;
 - Initial R;
 - position identity;
 - riesgo monetario;
 - broker execution;
+- procedencia de evidencia;
 
 toda lógica safety-critical debe **fallar cerrada** y no incrementar exposición.
