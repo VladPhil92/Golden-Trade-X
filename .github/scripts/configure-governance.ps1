@@ -20,10 +20,13 @@ if ($LASTEXITCODE -ne 0) {
     throw "GitHub CLI is not authenticated. Run 'gh auth login' with an owner/admin account for $Repository."
 }
 
+# These aggregate jobs are the only checks that belong in branch protection.
+# Each one fails closed when any of its underlying jobs fails.
 $requiredChecks = @(
     "CI required gate",
     "Security required gate",
-    "MQL5 required gate"
+    "MQL5 required gate",
+    "Reproducibility required gate"
 )
 
 $reviewProtection = @{
@@ -76,6 +79,10 @@ $protection = gh api `
     -H "X-GitHub-Api-Version: 2026-03-10" `
     "repos/$Repository/branches/$Branch/protection" | ConvertFrom-Json
 
+if (-not $protection.required_status_checks.strict) {
+    throw "Verification failed: required status checks are not strict/up-to-date."
+}
+
 $actualContexts = @($protection.required_status_checks.contexts)
 foreach ($check in $requiredChecks) {
     if ($actualContexts -notcontains $check) {
@@ -104,5 +111,5 @@ Write-Host "- Conversation resolution required"
 Write-Host "- Required approvals: $RequiredApprovals"
 
 if ($RequiredApprovals -eq 0) {
-    Write-Host "Note: approval count is 0 to avoid deadlocking a single-maintainer repository. Set -RequiredApprovals 1 when an independent reviewer is available."
+    Write-Host "Note: approval count is 0 to avoid deadlocking a single-maintainer repository. Code-owner and last-push approval are disabled in this mode. Set -RequiredApprovals 1 when an independent reviewer is available."
 }
