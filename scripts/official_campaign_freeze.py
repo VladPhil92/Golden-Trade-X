@@ -268,8 +268,8 @@ def freeze_official_campaign(
     }
 
     manifest = {
-        "schema_version": 2,
-        "methodology": "OFFICIAL_VALIDATION_CAMPAIGN_FREEZE_V2",
+        "schema_version": 1,
+        "methodology": "OFFICIAL_VALIDATION_CAMPAIGN_FREEZE_V1",
         "campaign_id": campaign_id.strip(),
         "status": (
             "OFFICIAL_CAMPAIGN_FROZEN"
