@@ -28,7 +28,22 @@ BLS_HTML = """
 
 FED_HTML = """
 <html><body>
-<a href="/newsevents/pressreleases/monetary20210127a.htm">not a statement-pattern link</a>
+<a href="/newsevents/pressreleases/monetary20210127a.htm">January statement</a>
+<a href="/newsevents/pressreleases/monetary20210317a.htm">March statement</a>
+<a href="/newsevents/pressreleases/monetary20210428a.htm">April statement</a>
+<a href="/newsevents/pressreleases/monetary20210616a.htm">June statement</a>
+<a href="/newsevents/pressreleases/monetary20210728a.htm">July statement</a>
+<a href="/newsevents/pressreleases/monetary20210922a.htm">September statement</a>
+<a href="/newsevents/pressreleases/monetary20211103a.htm">November statement</a>
+<a href="/newsevents/pressreleases/monetary20211215a.htm">December statement</a>
+<a href="/newsevents/pressreleases/monetary20210127a1.htm">implementation note must not match</a>
+<a href="/monetarypolicy/files/monetary20210127a1.pdf">statement PDF must not match</a>
+<a href="/newsevents/pressreleases/monetary20210127a.htm">duplicate statement link</a>
+</body></html>
+"""
+
+LEGACY_FED_HTML = """
+<html><body>
 <a href="/monetarypolicy/fomcstatement20210127a.htm">January statement</a>
 <a href="/monetarypolicy/fomcstatement20210317a.htm">March statement</a>
 <a href="/monetarypolicy/fomcstatement20210428a.htm">April statement</a>
@@ -37,7 +52,6 @@ FED_HTML = """
 <a href="/monetarypolicy/fomcstatement20210922a.htm">September statement</a>
 <a href="/monetarypolicy/fomcstatement20211103a.htm">November statement</a>
 <a href="/monetarypolicy/fomcstatement20211215a.htm">December statement</a>
-<a href="/monetarypolicy/fomcstatement20210127a.htm">duplicate statement link</a>
 </body></html>
 """
 
@@ -88,13 +102,20 @@ def test_bls_parser_rejects_unexpected_release_clock() -> None:
         parse_bls_year(bad, 2021, "https://www.bls.gov/schedule/2021/")
 
 
-def test_fomc_parser_uses_statement_dates_and_deduplicates_links() -> None:
+def test_fomc_parser_uses_current_press_release_statement_urls() -> None:
     events = parse_fomc_statement_links(FED_HTML, start_year=2021, end_year=2021)
     assert len(events) == 8
     assert events[0].release_utc == "2021-01-27T19:00:00Z"
     assert events[3].release_utc == "2021-06-16T18:00:00Z"
     assert events[-1].release_utc == "2021-12-15T19:00:00Z"
     assert all(event.source_authority == "FEDERAL_RESERVE" for event in events)
+    assert all("/newsevents/pressreleases/monetary" in event.source_url for event in events)
+    assert all("a1.htm" not in event.source_url for event in events)
+
+
+def test_fomc_parser_keeps_legacy_statement_url_compatibility() -> None:
+    events = parse_fomc_statement_links(LEGACY_FED_HTML, start_year=2021, end_year=2021)
+    assert len(events) == 8
     assert all("fomcstatement" in event.source_url for event in events)
 
 
