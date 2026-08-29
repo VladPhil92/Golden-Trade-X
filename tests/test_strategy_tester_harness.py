@@ -4,7 +4,11 @@ from pathlib import Path
 import pytest
 
 from scripts.experiment_registry import RegistryValidationError
-from scripts.strategy_tester_harness import build_tester_config, execute_terminal
+from scripts.strategy_tester_harness import (
+    build_terminal_command,
+    build_tester_config,
+    execute_terminal,
+)
 
 
 def _tester_spec() -> dict:
@@ -18,6 +22,8 @@ def _tester_spec() -> dict:
         "period_start": "2024-01-01T00:00:00Z",
         "period_end": "2024-12-31T23:59:59Z",
         "tester_model": 4,
+        "execution_mode": 0,
+        "portable_mode": True,
         "modelling": "Every tick based on real ticks",
         "deposit": 10000,
         "currency": "USD",
@@ -39,6 +45,8 @@ def test_prepare_writes_deterministic_ini_and_nonexecuted_manifest(tmp_path: Pat
     assert second_manifest == first_manifest
     assert first_manifest["status"] == "PREPARED_NOT_EXECUTED"
     assert first_manifest["tester_ini_sha256"] == second_manifest["tester_ini_sha256"]
+    assert first_manifest["portable_mode"] is True
+    assert first_manifest["execution_mode"] == 0
     assert "Optimization=0" in first_ini
     assert "Visual=0" in first_ini
     assert "ShutdownTerminal=1" in first_ini
@@ -56,6 +64,24 @@ def test_negative_model_fails_closed(tmp_path: Path) -> None:
     spec["tester_model"] = -1
     with pytest.raises(RegistryValidationError, match="tester_model"):
         build_tester_config(spec, tmp_path)
+
+
+def test_portable_mode_must_be_boolean(tmp_path: Path) -> None:
+    spec = _tester_spec()
+    spec["portable_mode"] = "true"
+    with pytest.raises(RegistryValidationError, match="portable_mode"):
+        build_tester_config(spec, tmp_path)
+
+
+def test_terminal_command_only_uses_portable_when_declared(tmp_path: Path) -> None:
+    terminal = tmp_path / "terminal64.exe"
+    ini = tmp_path / "tester.ini"
+    portable = build_terminal_command(terminal, ini, portable_mode=True)
+    normal = build_terminal_command(terminal, ini, portable_mode=False)
+    assert "/portable" in portable
+    assert "/portable" not in normal
+    assert portable[-1].startswith("/config:")
+    assert normal[-1].startswith("/config:")
 
 
 def test_terminal_execution_is_not_silently_emulated_off_windows(tmp_path: Path) -> None:
