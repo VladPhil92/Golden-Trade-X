@@ -50,6 +50,8 @@ def test_prepare_writes_deterministic_ini_and_nonexecuted_manifest(tmp_path: Pat
     assert "Optimization=0" in first_ini
     assert "Visual=0" in first_ini
     assert "ShutdownTerminal=1" in first_ini
+    report_line = next(line for line in first_ini.splitlines() if line.startswith("Report="))
+    assert Path(report_line.split("=", 1)[1]).is_absolute()
 
 
 def test_prepare_requires_explicit_tester_model(tmp_path: Path) -> None:
