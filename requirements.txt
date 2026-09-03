@@ -15,7 +15,7 @@ xgboost~=3.3
 scikit-learn~=1.9
 
 # Market data (scripts/correlation_engine.py)
-yfinance~=0.2
+yfinance~=1.7
 
 # Live monitoring (scripts/live_monitor.py) — optional runtime capability
 python-dotenv~=1.0
