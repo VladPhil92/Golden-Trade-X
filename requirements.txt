@@ -11,7 +11,7 @@ requests~=2.34
 MetaTrader5~=5.0; platform_system == "Windows"
 
 # Machine learning (scripts/ml_pipeline.py)
-xgboost~=3.3
+xgboost~=3.4
 scikit-learn~=1.9
 
 # Market data (scripts/correlation_engine.py)
