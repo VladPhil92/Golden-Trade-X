@@ -265,7 +265,7 @@ Invoke-PythonChecked $python @(
 ) "Validate completed L4 OOS evidence"
 
 $result = Get-Content -Raw -LiteralPath $l4Completion | ConvertFrom-Json
-$zipPath = "$runRoot.zip"
+$zipPath = "${runRoot}.zip"
 Compress-Archive -Path (Join-Path $runRoot "*") -DestinationPath $zipPath -Force
 
 Write-Host ""
