@@ -155,6 +155,9 @@ public:
    string SignalFileName(datetime when)
      { return FileName("signals", when); }
 
+   string AnalysisFileName(datetime when)
+     { return FileName("analysis", when); }
+
    string ExecutionFileName(datetime when)
      { return FileName("executions", when); }
 
@@ -237,6 +240,40 @@ public:
                     D(sl) + "," + D(tp) + "," + D(initialRR, 6) + "," + D(lots, 4) + "," +
                     U(positionId) + "," + U(orderTicket) + "," + U(dealTicket);
       return Append(SignalFileName(now), header, line);
+     }
+
+   bool LogAdaptiveAnalysis(datetime barTime,
+                            string profile,
+                            string direction,
+                            string decision,
+                            int quality,
+                            int trendScore,
+                            int momentumScore,
+                            int strengthScore,
+                            int htfScore,
+                            int structureScore,
+                            int efficiencyScore,
+                            int liquidityScore,
+                            double atrBps,
+                            double spreadBps,
+                            double volumeRatio)
+     {
+      if(!m_enabled) return true;
+      datetime now = TimeCurrent();
+      string header =
+         "EventID,EventTime,BarTime,Account,Magic,Symbol,Timeframe,Profile,Direction,Decision,"
+         "Quality,TrendScore,MomentumScore,StrengthScore,HtfScore,StructureScore,EfficiencyScore,"
+         "LiquidityScore,AtrBps,SpreadBps,VolumeRatio";
+      string line = EventId("ANA", now, profile) + "," + T(now) + "," + T(barTime) + "," +
+                    L(m_login) + "," + U(m_magic) + "," + Clean(m_symbol) + "," +
+                    Clean(EnumToString(m_timeframe)) + "," + Clean(profile) + "," +
+                    Clean(direction) + "," + Clean(decision) + "," +
+                    IntegerToString(quality) + "," + IntegerToString(trendScore) + "," +
+                    IntegerToString(momentumScore) + "," + IntegerToString(strengthScore) + "," +
+                    IntegerToString(htfScore) + "," + IntegerToString(structureScore) + "," +
+                    IntegerToString(efficiencyScore) + "," + IntegerToString(liquidityScore) + "," +
+                    D(atrBps, 4) + "," + D(spreadBps, 4) + "," + D(volumeRatio, 4);
+      return Append(AnalysisFileName(now), header, line);
      }
 
    bool LogOrderResult(string action,
