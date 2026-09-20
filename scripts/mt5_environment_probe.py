@@ -117,6 +117,7 @@ def create_mt5_environment_attestation(
             "account_company": str(account_info.company),
             "account_server": str(account_info.server),
             "account_currency": str(account_info.currency),
+            "leverage": int(account_info.leverage),
             "symbol": str(symbol_info.name),
             "mt5_build": str(terminal_info.build),
             "terminal_connected": bool(terminal_info.connected),
