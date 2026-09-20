@@ -7,6 +7,7 @@ from scripts.campaign_contract import candidate_universe_sha256
 from scripts.execution_environment import canonical_environment_sha256
 from scripts.experiment_registry import RegistryValidationError, sha256_file
 from scripts.official_campaign_freeze import freeze_official_campaign
+from scripts.official_campaign_runner import _experiment_spec
 from scripts.rc1_release_review_gate import evaluate_rc1_release_review
 
 
@@ -418,3 +419,36 @@ def test_rc1_gate_rejects_candidate_universe_mutation(tmp_path: Path) -> None:
 
     with pytest.raises(RegistryValidationError, match="candidate universe differs"):
         evaluate_rc1_release_review(bundle)
+
+
+def test_official_experiment_spec_preserves_frozen_portable_mode_without_override() -> None:
+    environment = _environment()
+    environment["portable_mode"] = False
+    spec = _experiment_spec(
+        environment,
+        "a" * 40,
+        "../presets/gold.set",
+        "gold.set",
+        "2024-01-01",
+        "2024-12-31",
+        notes="test",
+    )
+    assert spec["portable_mode"] is False
+
+
+def test_official_experiment_spec_can_use_runner_local_portable_layout() -> None:
+    environment = _environment()
+    environment["portable_mode"] = False
+    spec = _experiment_spec(
+        environment,
+        "a" * 40,
+        "../presets/gold.set",
+        "gold.set",
+        "2024-01-01",
+        "2024-12-31",
+        notes="test",
+        runtime_portable_mode=True,
+    )
+    assert spec["portable_mode"] is True
+    assert spec["broker"] == environment["broker_label"]
+    assert spec["symbol"] == environment["symbol"]

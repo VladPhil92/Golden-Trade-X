@@ -220,6 +220,7 @@ def _experiment_spec(
     period_end: str,
     *,
     notes: str,
+    runtime_portable_mode: bool | None = None,
 ) -> dict[str, Any]:
     return {
         "git_sha": build_id,
@@ -236,7 +237,11 @@ def _experiment_spec(
         "expert": environment["expert"],
         "expert_parameters": expert_parameters,
         "execution_mode": environment["execution_mode"],
-        "portable_mode": environment["portable_mode"],
+        "portable_mode": (
+            environment["portable_mode"]
+            if runtime_portable_mode is None
+            else bool(runtime_portable_mode)
+        ),
         "deposit": environment["deposit"],
         "currency": environment["currency"],
         "leverage": environment["leverage"],
@@ -262,6 +267,7 @@ def prepare_official_campaign(
     output_dir: str | Path,
     *,
     actual_git_sha: str | None = None,
+    runtime_portable_mode: bool | None = None,
 ) -> dict[str, Any]:
     lock_path = Path(campaign_lock_path).resolve()
     lock = _load_json(lock_path)
@@ -337,6 +343,7 @@ def prepare_official_campaign(
                     f"Official campaign {lock['campaign_id']} {fold_id} IS candidate "
                     f"{name}; campaign_fingerprint={lock.get('campaign_fingerprint')}."
                 ),
+                runtime_portable_mode=runtime_portable_mode,
             )
             spec_path = specs_dir / f"{name}.json"
             _write_json(spec_path, spec)
@@ -396,6 +403,12 @@ def prepare_official_campaign(
         "candidate_universe_sha256": lock["candidate_universe"]["sha256"],
         "execution_environment": {
             "environment_id": environment["environment_id"],
+            "frozen_portable_mode": environment["portable_mode"],
+            "runtime_portable_mode": (
+                environment["portable_mode"]
+                if runtime_portable_mode is None
+                else bool(runtime_portable_mode)
+            ),
             "contract_file_sha256": contract_file_sha,
             "attestation_sha256": attestation_sha,
             "attested_mt5_build": attestation["observed"]["mt5_build"],
@@ -467,6 +480,7 @@ def execute_official_campaign(
     registry_db: str | Path,
     runs_dir: str | Path,
     timeout_seconds: int = 3600,
+    runtime_portable_mode: bool | None = None,
 ) -> dict[str, Any]:
     output = Path(output_dir).resolve()
     manifest = prepare_official_campaign(
@@ -475,6 +489,7 @@ def execute_official_campaign(
         config_root,
         output,
         actual_git_sha=actual_git_sha,
+        runtime_portable_mode=runtime_portable_mode,
     )
     manifest_path = output / "campaign_execution_manifest.json"
     lock_path = Path(campaign_lock_path).resolve()
@@ -660,7 +675,17 @@ def main() -> None:
         default="data/research/official_campaign/runs",
     )
     parser.add_argument("--timeout-seconds", type=int, default=3600)
+    parser.add_argument(
+        "--runtime-portable-mode",
+        choices=("true", "false"),
+        default=None,
+        help="Runner-local MT5 data layout; does not alter the frozen broker contract.",
+    )
     args = parser.parse_args()
+
+    runtime_portable_mode = None
+    if args.runtime_portable_mode is not None:
+        runtime_portable_mode = args.runtime_portable_mode == "true"
 
     try:
         if args.terminal:
@@ -683,6 +708,7 @@ def main() -> None:
                 registry_db=args.registry,
                 runs_dir=args.runs_dir,
                 timeout_seconds=args.timeout_seconds,
+                runtime_portable_mode=runtime_portable_mode,
             )
         else:
             result = prepare_official_campaign(
@@ -691,6 +717,7 @@ def main() -> None:
                 args.config_root,
                 args.output_dir,
                 actual_git_sha=args.actual_git_sha,
+                runtime_portable_mode=runtime_portable_mode,
             )
     except RegistryValidationError as exc:
         parser.error(str(exc))

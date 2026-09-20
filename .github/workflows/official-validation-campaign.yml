@@ -211,11 +211,16 @@ jobs:
           )
           $contract = Get-Content -Raw -LiteralPath $env:GTX_ENVIRONMENT_PATH | ConvertFrom-Json
           if ([bool]$contract.portable_mode -ne [bool]$actualPortable) {
-            throw "Frozen portable_mode does not match the compiled MetaTrader data root"
+            Write-Warning (
+              "Frozen portable_mode=$($contract.portable_mode) differs from runner layout=" +
+              "$actualPortable. Using runner layout for terminal IPC/tester paths while " +
+              "preserving the frozen broker/account/symbol contract."
+            )
           }
 
           "GTX_MT5_TERMINAL=$terminal" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "GTX_TESTER_PROFILES=$profilesTester" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "GTX_RUNTIME_PORTABLE=$($actualPortable.ToString().ToLowerInvariant())" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           Write-Host "Terminal: $terminal"
           Write-Host "MQL5 root: $mql5Root"
           Write-Host "Tester profiles: $profilesTester"
@@ -227,6 +232,7 @@ jobs:
           python scripts/mt5_environment_probe.py `
             --contract "$env:GTX_ENVIRONMENT_PATH" `
             --terminal "$env:GTX_MT5_TERMINAL" `
+            --runtime-portable-mode "$env:GTX_RUNTIME_PORTABLE" `
             --output "data/research/official_campaign/environment_attestation.json"
 
       - name: Verify exact DEMO attestation boundary
@@ -254,6 +260,7 @@ jobs:
             --actual-git-sha "$env:GITHUB_SHA" `
             --terminal "$env:GTX_MT5_TERMINAL" `
             --tester-profiles-dir "$env:GTX_TESTER_PROFILES" `
+            --runtime-portable-mode "$env:GTX_RUNTIME_PORTABLE" `
             --registry "data/research/official_campaign/experiments.sqlite" `
             --runs-dir "data/research/official_campaign/runs" `
             --timeout-seconds $env:GTX_TIMEOUT

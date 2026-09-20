@@ -46,6 +46,8 @@ def create_mt5_environment_attestation(
     contract_path: str | Path,
     terminal_path: str | Path,
     output_path: str | Path,
+    *,
+    runtime_portable_mode: bool | None = None,
 ) -> dict[str, Any]:
     if platform.system() != "Windows":
         raise RegistryValidationError("MT5 environment attestation is supported only on Windows")
@@ -79,13 +81,19 @@ def create_mt5_environment_attestation(
             "MetaTrader5 Python package is required for runtime attestation"
         ) from exc
 
+    effective_portable_mode = (
+        bool(contract["portable_mode"])
+        if runtime_portable_mode is None
+        else bool(runtime_portable_mode)
+    )
+
     bootstrap_process = connect_mt5(
         mt5,
         terminal_path=terminal,
         login=login,
         password=password,
         server=server,
-        portable=bool(contract["portable_mode"]),
+        portable=effective_portable_mode,
     )
 
     try:
@@ -135,6 +143,7 @@ def create_mt5_environment_attestation(
             "environment_id": contract["environment_id"],
             "contract_file_sha256": contract_sha,
             "python_api_version": getattr(mt5, "__version__", None),
+            "runtime_portable_mode": effective_portable_mode,
             "observed": observed,
         }
         validated = validate_environment_attestation(payload, contract, contract_sha)
@@ -158,12 +167,25 @@ def main() -> None:
         "--output",
         default="data/research/official_campaign/environment_attestation.json",
     )
+    parser.add_argument(
+        "--runtime-portable-mode",
+        choices=("true", "false"),
+        default=None,
+        help=(
+            "Override the terminal data-layout mode used only for this runner. "
+            "Broker/account/symbol attestation still validates against the frozen contract."
+        ),
+    )
     args = parser.parse_args()
     try:
+        runtime_portable_mode = None
+        if args.runtime_portable_mode is not None:
+            runtime_portable_mode = args.runtime_portable_mode == "true"
         result = create_mt5_environment_attestation(
             args.contract,
             args.terminal,
             args.output,
+            runtime_portable_mode=runtime_portable_mode,
         )
     except RegistryValidationError as exc:
         parser.error(str(exc))
