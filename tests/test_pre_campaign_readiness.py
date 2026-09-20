@@ -78,6 +78,14 @@ def _environment(approved: bool = True) -> dict:
         "optimization": False,
         "forward_mode": "disabled",
         "forward_mode_code": 0,
+        "symbol_contract": {
+            "digits": 2,
+            "point": 0.01,
+            "trade_contract_size": 100.0,
+            "trade_tick_size": 0.01,
+            "trade_tick_value": 1.0,
+            "currency_profit": "USD",
+        },
     }
 
 
@@ -141,6 +149,9 @@ def test_ready_to_freeze_requires_complete_approved_repository_inputs(tmp_path: 
     assert result["decision"] == "READY_TO_FREEZE"
     assert result["ready"] is True
     assert result["execution_environment"]["trade_mode"] == "DEMO"
+    assert result["execution_environment"]["currency"] == "USD"
+    assert result["execution_environment"]["leverage"] == 100
+    assert result["execution_environment"]["symbol_contract"]["trade_tick_value"] == 1.0
     assert result["economic_calendar"]["coverage"]["end_utc"] == "2025-12-31T23:59:59Z"
     assert result["robustness_brokers"] == ["BROKER-A-DEMO", "BROKER-B-DEMO"]
     assert result["python_runtime_pin_count"] == 2
@@ -231,4 +242,15 @@ def test_campaign_must_reference_canonical_approved_calendar(tmp_path: Path) -> 
     payload["economic_calendar_path"] = "economic_calendar.example.json"
     _write(campaign, payload)
     with pytest.raises(CampaignReadinessError, match="economic_calendar.v1.json"):
+        evaluate_campaign_readiness(campaign, include)
+
+
+def test_missing_symbol_contract_blocks_official_readiness(tmp_path: Path) -> None:
+    campaign, include = _fixture(tmp_path)
+    environment_path = tmp_path / "environment.json"
+    payload = json.loads(environment_path.read_text(encoding="utf-8"))
+    payload.pop("symbol_contract", None)
+    _write(environment_path, payload)
+
+    with pytest.raises(CampaignReadinessError, match="freeze symbol_contract metadata"):
         evaluate_campaign_readiness(campaign, include)
