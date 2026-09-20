@@ -48,7 +48,8 @@ second transition. It requires the literal confirmation
 - the candidate still validates as an unapproved DEMO-only execution environment;
 - the discovery audit carries `MT5_EXECUTION_ENVIRONMENT_DISCOVERY_V1` and remains unapproved;
 - the audit's candidate canonical SHA-256 matches the reviewed candidate;
-- broker company, server, symbol and terminal build match the observed values;
+- broker company, server, account currency, leverage, symbol and terminal build match the observed values;
+- symbol digits, point, contract size, tick size/value and profit currency match the observed values;
 - the terminal was connected and the symbol synchronized during discovery; and
 - the would-be approved contract contains no placeholder broker/build identity.
 
@@ -63,3 +64,11 @@ artifact into canonical `config/` and update `official_validation_campaign.json`
 
 Even an approved execution environment remains research-only: `live_trading_authorized=false` and
 `real_capital_authorized=false` are mandatory throughout the official validation pipeline.
+
+
+## Phase 7A continuation
+
+After installing one approved primary DEMO environment, repeat discovery/approval for at least one
+genuinely distinct broker environment. Then run `Materialize Robustness Template` to derive the
+official broker universe from the approved contracts. See
+`docs/CAMPAIGN_READINESS_FINALIZATION.md` for the complete Phase 7A exit sequence.

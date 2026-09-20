@@ -68,6 +68,9 @@ def test_freeze_approves_only_validated_demo_candidate(tmp_path: Path) -> None:
     assert record["live_trading_authorized"] is False
     assert record["real_capital_authorized"] is False
     assert record["approved_environment_canonical_sha256"] == canonical_environment_sha256(approved)
+    assert record["observed"]["account_currency"] == "USD"
+    assert record["observed"]["leverage"] == 100
+    assert record["observed"]["trade_contract_size"] == 100.0
 
 
 def test_freeze_rejects_missing_explicit_confirmation(tmp_path: Path) -> None:
@@ -136,4 +139,58 @@ def test_freeze_rejects_already_approved_candidate(tmp_path: Path) -> None:
     audit_path.write_text(json.dumps(audit, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     with pytest.raises(EnvironmentApprovalError, match="approved=false"):
+        _freeze(candidate_path, audit_path)
+
+
+def test_freeze_rejects_observed_currency_mismatch(tmp_path: Path) -> None:
+    candidate_path, audit_path, _, audit = _write_bundle(tmp_path)
+    audit = copy.deepcopy(audit)
+    audit["observed"]["account_currency"] = "EUR"
+    audit_path.write_text(json.dumps(audit, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    with pytest.raises(EnvironmentApprovalError, match="account_currency mismatch"):
+        _freeze(candidate_path, audit_path)
+
+
+def test_freeze_rejects_observed_leverage_mismatch(tmp_path: Path) -> None:
+    candidate_path, audit_path, _, audit = _write_bundle(tmp_path)
+    audit = copy.deepcopy(audit)
+    audit["observed"]["leverage"] = 500
+    audit_path.write_text(json.dumps(audit, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    with pytest.raises(EnvironmentApprovalError, match="leverage mismatch"):
+        _freeze(candidate_path, audit_path)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("symbol_digits", 3),
+        ("symbol_point", 0.001),
+        ("trade_contract_size", 10.0),
+        ("trade_tick_size", 0.1),
+        ("trade_tick_value", 0.5),
+        ("currency_profit", "EUR"),
+    ],
+)
+def test_freeze_rejects_observed_symbol_contract_mismatch(
+    tmp_path: Path, field: str, value: object
+) -> None:
+    candidate_path, audit_path, _, audit = _write_bundle(tmp_path)
+    audit = copy.deepcopy(audit)
+    audit["observed"][field] = value
+    audit_path.write_text(json.dumps(audit, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    with pytest.raises(EnvironmentApprovalError, match=rf"{field} mismatch"):
+        _freeze(candidate_path, audit_path)
+
+
+def test_freeze_rejects_candidate_without_symbol_contract(tmp_path: Path) -> None:
+    candidate_path, audit_path, candidate, audit = _write_bundle(tmp_path)
+    candidate.pop("symbol_contract", None)
+    audit["candidate_canonical_sha256"] = canonical_environment_sha256(candidate)
+    candidate_path.write_text(json.dumps(candidate, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    audit_path.write_text(json.dumps(audit, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    with pytest.raises(EnvironmentApprovalError, match="freeze symbol_contract metadata"):
         _freeze(candidate_path, audit_path)

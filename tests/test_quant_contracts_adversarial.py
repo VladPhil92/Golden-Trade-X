@@ -147,6 +147,14 @@ def _environment() -> dict:
         "optimization": False,
         "forward_mode": "disabled",
         "forward_mode_code": 0,
+        "symbol_contract": {
+            "digits": 2,
+            "point": 0.01,
+            "trade_contract_size": 100.0,
+            "trade_tick_size": 0.01,
+            "trade_tick_value": 1.0,
+            "currency_profit": "USD",
+        },
     }
 
 
@@ -157,6 +165,7 @@ def test_environment_normalization_loading_and_hash(tmp_path: Path) -> None:
     assert normalized["currency"] == "USD"
     assert normalized["deposit"] == 10000.0
     assert normalized["leverage"] == 100
+    assert normalized["symbol_contract"]["trade_contract_size"] == 100.0
     path = _write_json(tmp_path / "environment.json", env)
     loaded, file_sha = load_execution_environment_contract(path)
     assert loaded == normalized
@@ -209,8 +218,16 @@ def _attestation(env: dict, file_sha: str) -> dict:
             "trade_mode": "DEMO",
             "account_company": env["account_company"],
             "account_server": env["account_server"],
+            "account_currency": str(env["currency"]).upper(),
+            "leverage": env["leverage"],
             "symbol": env["symbol"],
             "mt5_build": env["mt5_build"],
+            "symbol_digits": env["symbol_contract"]["digits"],
+            "symbol_point": env["symbol_contract"]["point"],
+            "trade_contract_size": env["symbol_contract"]["trade_contract_size"],
+            "trade_tick_size": env["symbol_contract"]["trade_tick_size"],
+            "trade_tick_value": env["symbol_contract"]["trade_tick_value"],
+            "currency_profit": env["symbol_contract"]["currency_profit"],
             "terminal_connected": True,
             "symbol_synchronized": True,
         },
@@ -245,8 +262,12 @@ def test_attestation_happy_path_and_loader(tmp_path: Path) -> None:
         (lambda a: a["observed"].update(trade_mode="REAL"), "trade_mode mismatch"),
         (lambda a: a["observed"].update(account_company="Other"), "account_company mismatch"),
         (lambda a: a["observed"].update(account_server="Other"), "account_server mismatch"),
+        (lambda a: a["observed"].update(account_currency="EUR"), "account_currency mismatch"),
+        (lambda a: a["observed"].update(leverage=500), "leverage mismatch"),
         (lambda a: a["observed"].update(symbol="EURUSD"), "symbol mismatch"),
         (lambda a: a["observed"].update(mt5_build="9999"), "mt5_build mismatch"),
+        (lambda a: a["observed"].update(trade_contract_size=10.0), "trade_contract_size mismatch"),
+        (lambda a: a["observed"].update(trade_tick_value=0.5), "trade_tick_value mismatch"),
         (lambda a: a["observed"].update(terminal_connected=False), "terminal_connected=true"),
         (lambda a: a["observed"].update(symbol_synchronized=False), "symbol_synchronized=true"),
     ],

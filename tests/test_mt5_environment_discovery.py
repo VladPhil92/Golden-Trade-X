@@ -39,6 +39,14 @@ def test_build_discovered_environment_is_unapproved_and_demo_only() -> None:
     assert normalized["broker_label"] == "Example Broker Ltd"
     assert normalized["account_server"] == "ExampleBroker-Demo"
     assert normalized["mt5_build"] == "5320"
+    assert normalized["symbol_contract"] == {
+        "digits": 2,
+        "point": 0.01,
+        "trade_contract_size": 100.0,
+        "trade_tick_size": 0.01,
+        "trade_tick_value": 1.0,
+        "currency_profit": "USD",
+    }
     assert audit["status"] == "CANDIDATE_DISCOVERED"
     assert audit["approved"] is False
     assert audit["live_trading_authorized"] is False
