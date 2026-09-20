@@ -41,6 +41,13 @@ void OnStart()
    AssertFalse(rm.IsConsecutiveLossLimitReached(),
                "Limite NO alcanzado con estado limpio");
 
+   //--- Spread normalizado: permite comparar instrumentos con escalas de precio distintas.
+   double btcSpreadBps = rm.CalculateSpreadBps(80000.0, 80040.0);
+   AssertTrue(MathAbs(btcSpreadBps - 4.9987503124) < 0.000001,
+              "BTC spread 40 sobre ~80020 equivale a ~4.999 bps");
+   AssertTrue(rm.CalculateSpreadBps(0.0, 1.0) == DBL_MAX,
+              "Spread BPS invalido falla cerrado");
+
    //--- Pérdidas consecutivas observadas por sus efectos públicos
    rm.RegisterTradeResult(-10.0);
    AssertEq(rm.GetPositionSizeMultiplier(), 1.0,

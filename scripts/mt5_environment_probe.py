@@ -16,12 +16,14 @@ try:
         validate_environment_attestation,
     )
     from scripts.experiment_registry import RegistryValidationError
+    from scripts.mt5_connection import connect_mt5, stop_bootstrap_process
 except ModuleNotFoundError:
     from execution_environment import (
         load_execution_environment_contract,
         validate_environment_attestation,
     )
     from experiment_registry import RegistryValidationError
+    from mt5_connection import connect_mt5, stop_bootstrap_process
 
 
 def _required_env(name: str) -> str:
@@ -77,18 +79,14 @@ def create_mt5_environment_attestation(
             "MetaTrader5 Python package is required for runtime attestation"
         ) from exc
 
-    initialized = mt5.initialize(
-        str(terminal),
+    bootstrap_process = connect_mt5(
+        mt5,
+        terminal_path=terminal,
         login=login,
         password=password,
         server=server,
         portable=bool(contract["portable_mode"]),
     )
-    if not initialized:
-        code, message = mt5.last_error()
-        raise RegistryValidationError(
-            f"MetaTrader5 initialize failed: code={code}, message={message}"
-        )
 
     try:
         terminal_info = mt5.terminal_info()
@@ -149,6 +147,7 @@ def create_mt5_environment_attestation(
         return validated
     finally:
         mt5.shutdown()
+        stop_bootstrap_process(bootstrap_process)
 
 
 def main() -> None:

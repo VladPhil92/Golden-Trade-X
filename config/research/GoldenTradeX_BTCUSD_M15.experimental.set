@@ -1,0 +1,102 @@
+; Golden Trade X v3.2 — BTCUSD M15 experimental research preset
+; Research/DEMO only. This preset has NOT demonstrated profitable edge.
+; Load on the broker's exact BTCUSD chart/symbol after environment discovery.
+; Do not enable real trading. Forward DEMO remains blocked until official OOS,
+; robustness and current economic-calendar coverage are complete.
+
+InpMagicNumber=932260
+InpTradeComment=GoldenTradeX_BTCUSD_EXP
+InpAllowRealTrading=false
+
+; --- Signals: baseline hypothesis only; must be selected/validated independently ---
+InpEmaFast=21
+InpEmaSlow=55
+InpRsiPeriod=14
+InpRsiUpper=70.0
+InpRsiLower=30.0
+InpRsiLongMin=45.0
+InpRsiShortMax=55.0
+InpTimeframe=15
+InpAtrPeriod=14
+InpAtrMinRatio=0.8
+InpAtrMaxRatio=3.0
+InpAdxPeriod=14
+InpAdxMinLevel=25.0
+InpMinTickVolume=10
+
+; --- HTF / confluence ---
+InpUseHtfFilter=true
+InpHtfEmaPeriod=50
+InpUseRegimeFilter=true
+InpUseSmcFilter=true
+InpMinConfidence=55
+InpConfWeightBase=25
+InpConfWeightRegime=25
+InpConfWeightSmc=30
+InpConfWeightHtf=15
+InpConfWeightFib=5
+
+; --- Risk: conservative research default, not an optimization result ---
+InpRiskPercent=0.5
+InpMaxDailyDD=3.0
+InpMaxWeeklyDD=6.0
+InpMaxMonthlyDD=10.0
+InpMaxConsecLosses=3
+InpMaxPositions=1
+InpAtrSlMultiplier=2.0
+InpAtrTpMultiplier=3.0
+
+; BTCUSD point size differs materially from metals/FX.
+; Disable the legacy absolute-point cap and use normalized basis points.
+; 10 bps is a research candidate threshold and must be validated, not assumed optimal.
+InpMaxSpreadPoints=0
+InpMaxSpreadBps=10.0
+InpCpThresholdPct=3.0
+InpMinInitialRR=0.0
+
+; --- Position management ---
+InpUseTrailing=true
+InpTrailAtrMult=1.5
+InpUseBreakEven=true
+InpBreakEvenR=0.5
+InpUsePartialTP=true
+InpPartialTPR=1.0
+InpPartialTPPct=50.0
+InpUseEqCurveFilter=true
+InpEqCurvePeriod=20
+
+; --- Session profile ---
+; Crypto availability is broker-specific. Do not impose the GOLD weekday/session gate.
+; The broker itself may still close or restrict BTCUSD at certain times.
+InpUseSessionFilter=false
+InpStartHour=0
+InpEndHour=23
+InpCloseOnFriday=false
+InpFridayCloseHour=23
+
+; --- Macro news ---
+; Keep macro filter observable, but current 2026 forward use remains blocked until
+; the approved economic-calendar contract is extended to the current period.
+InpUseNewsFilter=true
+InpNewsBufferBefore=30
+InpNewsBufferAfter=90
+InpNewsCalendarPolicy=0
+InpPauseForNews=false
+
+; --- Kelly OFF / portfolio cap available ---
+InpUseKelly=false
+InpKellyFraction=0.25
+InpKellyMinTrades=30
+InpUsePortfolioCap=true
+InpMaxPortfolioRiskPct=1.0
+
+; --- Execution ---
+InpOrderMaxRetries=3
+InpOrderRetryDelay=500
+InpMinMarginLevel=250.0
+
+; --- Telemetry ---
+InpEnableTradeLog=true
+InpEnableResearchTelemetry=true
+InpResearchCandidateId=BTCUSD_M15_V32_BASELINE
+InpResearchBuildId=

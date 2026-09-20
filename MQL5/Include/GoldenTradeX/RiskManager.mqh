@@ -11,6 +11,7 @@ private:
    double  m_maxDailyDD;
    int     m_maxPositions;
    double  m_maxSpreadPoints;
+   double  m_maxSpreadBps;
    ulong   m_magic;
    double  m_dayStartEquity;
    int     m_currentDay;
@@ -209,12 +210,14 @@ public:
              double maxSpreadPoints, ulong magic,
              int maxConsecutiveLosses, double maxWeeklyDD,
              double maxMonthlyDD = 0.0,
-             double cpThresholdPct = 8.0)
+             double cpThresholdPct = 8.0,
+             double maxSpreadBps = 0.0)
      {
       m_riskPercent = riskPercent;
       m_maxDailyDD = maxDailyDD;
       m_maxPositions = maxPositions;
       m_maxSpreadPoints = maxSpreadPoints;
+      m_maxSpreadBps = MathMax(0.0, maxSpreadBps);
       m_magic = magic;
       m_currentDay = -1;
       m_maxConsecutiveLosses = maxConsecutiveLosses;
@@ -496,8 +499,31 @@ public:
       return 1.0;
      }
 
+   double CalculateSpreadBps(double bid, double ask)
+     {
+      if(bid <= 0 || ask <= 0 || ask < bid) return DBL_MAX;
+      double mid = (bid + ask) * 0.5;
+      if(mid <= 0) return DBL_MAX;
+      return ((ask - bid) / mid) * 10000.0;
+     }
+
    bool IsSpreadAcceptable(string symbol)
-     { return SymbolInfoInteger(symbol, SYMBOL_SPREAD) <= (long)m_maxSpreadPoints; }
+     {
+      if(m_maxSpreadPoints > 0 &&
+         SymbolInfoInteger(symbol, SYMBOL_SPREAD) > (long)m_maxSpreadPoints)
+         return false;
+
+      if(m_maxSpreadBps > 0)
+        {
+         double bid = SymbolInfoDouble(symbol, SYMBOL_BID);
+         double ask = SymbolInfoDouble(symbol, SYMBOL_ASK);
+         double spreadBps = CalculateSpreadBps(bid, ask);
+         if(spreadBps == DBL_MAX || spreadBps > m_maxSpreadBps)
+            return false;
+        }
+
+      return true;
+     }
 
    int CountOpenPositions(string symbol)
      {
