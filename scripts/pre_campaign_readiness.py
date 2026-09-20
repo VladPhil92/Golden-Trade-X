@@ -47,9 +47,9 @@ _PLACEHOLDER_MARKERS = ("REPLACE_WITH", "PLACEHOLDER", "TBD", "UNKNOWN")
 _OFFICIAL_REFERENCES = {
     "economic_calendar_path": "economic_calendar.v1.json",
     "walk_forward_config_path": "walk_forward_plan.v1.json",
-    "robustness_policy_path": "robustness_policy.v1.json",
     "forward_policy_path": "forward_demo_policy.v1.json",
 }
+_VALIDATION_SCOPES = {"MULTI_BROKER", "TARGET_BROKER_SINGLE"}
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -138,8 +138,26 @@ def evaluate_campaign_readiness(
         if campaign.get(field) != expected:
             raise CampaignReadinessError(f"{field} must reference frozen {expected}")
 
+    validation_scope = campaign.get("validation_scope", "MULTI_BROKER")
+    if validation_scope not in _VALIDATION_SCOPES:
+        raise CampaignReadinessError(
+            "validation_scope must be MULTI_BROKER or TARGET_BROKER_SINGLE"
+        )
+    expected_robustness_policy = (
+        "robustness_policy.xm_single.v1.json"
+        if validation_scope == "TARGET_BROKER_SINGLE"
+        else "robustness_policy.v1.json"
+    )
+    if campaign.get("robustness_policy_path") != expected_robustness_policy:
+        raise CampaignReadinessError(
+            f"robustness_policy_path must reference frozen {expected_robustness_policy}"
+        )
+
     try:
-        policy_bundle = validate_official_policy_bundle(base)
+        policy_bundle = validate_official_policy_bundle(
+            base,
+            robustness_policy_name=expected_robustness_policy,
+        )
     except OfficialPolicyValidationError as exc:
         raise CampaignReadinessError(str(exc)) from exc
 
@@ -164,17 +182,37 @@ def evaluate_campaign_readiness(
         base, campaign.get("robustness_template_path"), "robustness_template_path"
     )
     robustness_template = _load(robustness_template_path)
+    template_scope = robustness_template.get("validation_scope", "MULTI_BROKER")
+    if template_scope != validation_scope:
+        raise CampaignReadinessError(
+            "robustness template validation_scope differs from campaign validation_scope"
+        )
     broker_requirements = robustness_template.get("broker_requirements")
     if not isinstance(broker_requirements, dict):
         raise CampaignReadinessError("robustness template requires broker_requirements")
     labels = broker_requirements.get("required_labels")
     minimum = broker_requirements.get("minimum_distinct_brokers")
-    if not isinstance(labels, list) or not labels or not isinstance(minimum, int) or minimum < 2:
-        raise CampaignReadinessError("robustness template requires at least two broker labels")
+    if not isinstance(labels, list) or not labels or not isinstance(minimum, int):
+        raise CampaignReadinessError("robustness template requires broker labels and minimum")
     if len(set(labels)) != len(labels) or len(labels) < minimum:
         raise CampaignReadinessError("robustness broker labels must be distinct and satisfy the minimum")
     if _contains_placeholder(labels):
         raise CampaignReadinessError("robustness broker labels still contain placeholders")
+
+    if validation_scope == "MULTI_BROKER":
+        if minimum < 2:
+            raise CampaignReadinessError(
+                "MULTI_BROKER robustness requires at least two broker labels"
+            )
+    else:
+        if minimum != 1 or len(labels) != 1:
+            raise CampaignReadinessError(
+                "TARGET_BROKER_SINGLE robustness requires exactly one broker label"
+            )
+        if labels[0] != environment["broker_label"]:
+            raise CampaignReadinessError(
+                "TARGET_BROKER_SINGLE robustness label must match execution environment broker"
+            )
 
     calendar_path = _resolve(base, campaign.get("economic_calendar_path"), "economic_calendar_path")
     walk_path = _resolve(base, campaign.get("walk_forward_config_path"), "walk_forward_config_path")
@@ -209,6 +247,7 @@ def evaluate_campaign_readiness(
         "decision": "READY_TO_FREEZE",
         "ready": True,
         "campaign_id": campaign_id.strip(),
+        "validation_scope": validation_scope,
         "policy_bundle_sha256": policy_bundle["bundle_sha256"],
         "execution_environment": {
             "environment_id": environment["environment_id"],
