@@ -19,10 +19,13 @@ except ModuleNotFoundError:
     from experiment_registry import RegistryValidationError, sha256_file
 
 SUPPORTED_OPERATORS = {">=", "<=", ">", "<", "=="}
-REQUIRED_EVIDENCE_CLASSES = {
+BASE_EVIDENCE_CLASSES = {
     "parameter_stability": "EXECUTED_COUNTERFACTUAL",
-    "broker_replication": "EXTERNAL_BROKER_REPLICATION",
     "cost_sensitivity": "MODELED_COST_SENSITIVITY",
+}
+_ALLOWED_BROKER_EVIDENCE_CLASSES = {
+    "EXTERNAL_BROKER_REPLICATION",
+    "TARGET_BROKER_STABILITY",
 }
 
 
@@ -62,8 +65,15 @@ def evaluate_robustness(
     if summary_doc.get("methodology") != "ROBUSTNESS_AGGREGATION_V1":
         raise RegistryValidationError("unsupported robustness summary methodology")
     evidence_classes = summary_doc.get("evidence_classes")
-    if evidence_classes != REQUIRED_EVIDENCE_CLASSES:
-        raise RegistryValidationError("robustness evidence classes are missing or misclassified")
+    if not isinstance(evidence_classes, dict):
+        raise RegistryValidationError("robustness evidence classes are missing")
+    if evidence_classes.get("parameter_stability") != BASE_EVIDENCE_CLASSES["parameter_stability"]:
+        raise RegistryValidationError("parameter stability evidence is misclassified")
+    if evidence_classes.get("cost_sensitivity") != BASE_EVIDENCE_CLASSES["cost_sensitivity"]:
+        raise RegistryValidationError("cost sensitivity evidence is misclassified")
+    broker_evidence_class = evidence_classes.get("broker_replication")
+    if broker_evidence_class not in _ALLOWED_BROKER_EVIDENCE_CLASSES:
+        raise RegistryValidationError("broker robustness evidence is missing or misclassified")
 
     if policy.get("schema_version") != 1:
         raise RegistryValidationError("unsupported robustness policy schema_version")
@@ -145,7 +155,7 @@ def evaluate_robustness(
         "baseline_preset_sha256": summary_doc.get("baseline", {}).get("preset_sha256"),
         "criteria": checks,
         "all_criteria_passed": all_passed,
-        "evidence_classes": REQUIRED_EVIDENCE_CLASSES,
+        "evidence_classes": evidence_classes,
     }
 
     if output_path is not None:
