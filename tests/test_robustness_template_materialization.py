@@ -169,3 +169,28 @@ def test_requires_at_least_two_environments(tmp_path: Path) -> None:
             base_template_path=_base_template(tmp_path),
             environment_paths=[first],
         )
+
+
+def test_materializes_single_target_broker_from_one_approved_demo_environment(tmp_path: Path) -> None:
+    first = _write(
+        tmp_path / "xm.json",
+        _environment("XM Global Limited", "XM Global Limited", "XMGlobal-MT5 2"),
+    )
+    base = json.loads(_base_template(tmp_path).read_text(encoding="utf-8"))
+    base["validation_scope"] = "TARGET_BROKER_SINGLE"
+    base["broker_requirements"] = {
+        "required_labels": ["PLACEHOLDER-XM"],
+        "minimum_distinct_brokers": 1,
+    }
+    base_path = _write(tmp_path / "single_base.json", base)
+
+    template, audit = materialize_robustness_template(
+        base_template_path=base_path,
+        environment_paths=[first],
+    )
+
+    assert template["validation_scope"] == "TARGET_BROKER_SINGLE"
+    assert template["broker_requirements"]["required_labels"] == ["XM Global Limited"]
+    assert template["broker_requirements"]["minimum_distinct_brokers"] == 1
+    assert audit["validation_scope"] == "TARGET_BROKER_SINGLE"
+    assert len(audit["source_environments"]) == 1
