@@ -149,15 +149,23 @@ if (-not (Test-Path $source)) {
     throw "EA source was not staged into initialized MQL5 tree: $source"
 }
 
+$ex5 = [System.IO.Path]::ChangeExtension($source, ".ex5")
+$sourceLog = [System.IO.Path]::ChangeExtension($source, ".log")
+
 Write-Host "Source:  $source"
 Write-Host "Include: $includeRoot"
 Write-Host "Log:     $compileLog"
 
-# MetaEditor documents /compile, /include and /log as its command-line build interface.
+# MetaEditor documents /log as a flag; the compiler writes <source>.log beside
+# the MQ5 source. Copy that log into the CI evidence location after compilation.
+foreach ($stale in @($sourceLog, $ex5, $compileLog)) {
+    Remove-Item -LiteralPath $stale -Force -ErrorAction SilentlyContinue
+}
+
 $arguments = @(
     "/compile:$source",
     "/include:$includeRoot",
-    "/log:$compileLog"
+    "/log"
 )
 if ($portableMode) {
     $arguments += "/portable"
@@ -166,13 +174,26 @@ if ($portableMode) {
 $compile = Start-Process -FilePath $metaEditor -ArgumentList $arguments -PassThru -Wait
 Write-Host "MetaEditor process exit code: $($compile.ExitCode)"
 
-if (Test-Path $compileLog) {
-    Write-Host "---- MetaEditor compile log ----"
-    Get-Content $compileLog
-    Write-Host "--------------------------------"
-} else {
-    throw "MetaEditor did not produce the requested compile log: $compileLog"
+$deadline = (Get-Date).AddSeconds(60)
+while ((Get-Date) -lt $deadline) {
+    if ((Test-Path -LiteralPath $sourceLog) -and (Test-Path -LiteralPath $ex5)) {
+        break
+    }
+    Start-Sleep -Milliseconds 500
 }
+
+if (-not (Test-Path -LiteralPath $sourceLog)) {
+    throw "MetaEditor did not produce the source compilation log: $sourceLog"
+}
+if (-not (Test-Path -LiteralPath $ex5)) {
+    throw "MetaEditor did not produce the compiled EX5 artifact: $ex5"
+}
+
+Copy-Item -LiteralPath $sourceLog -Destination $compileLog -Force
+
+Write-Host "---- MetaEditor compile log ----"
+Get-Content $compileLog
+Write-Host "--------------------------------"
 
 $logText = Get-Content $compileLog -Raw
 if ($logText -match "(?im)(^|\s)([1-9][0-9]*)\s+errors?\b") {
@@ -180,11 +201,6 @@ if ($logText -match "(?im)(^|\s)([1-9][0-9]*)\s+errors?\b") {
 }
 if ($logText -notmatch "(?im)\b0\s+errors?\b") {
     throw "Compile log does not contain an explicit '0 errors' result; refusing to mark the gate green"
-}
-
-$ex5 = [System.IO.Path]::ChangeExtension($source, ".ex5")
-if (-not (Test-Path $ex5)) {
-    throw "Compilation reported success but EX5 artifact was not created: $ex5"
 }
 
 $sha256 = (Get-FileHash -Algorithm SHA256 $ex5).Hash.ToLowerInvariant()
