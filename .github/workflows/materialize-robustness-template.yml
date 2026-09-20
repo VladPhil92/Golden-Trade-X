@@ -8,8 +8,9 @@ on:
         required: true
         type: string
       environment_b_path:
-        description: Repository-relative approved DEMO environment for broker B
-        required: true
+        description: Optional second approved DEMO environment; leave blank for TARGET_BROKER_SINGLE templates
+        required: false
+        default: ""
         type: string
       base_template_path:
         description: Reviewed robustness geometry template
@@ -54,6 +55,8 @@ jobs:
               "environment_b_path": os.environ["GTX_ENV_B"],
               "base_template_path": os.environ["GTX_BASE_TEMPLATE"],
           }.items():
+              if label == "environment_b_path" and not raw.strip():
+                  continue
               target = (root / raw).resolve()
               try:
                   target.relative_to(root)
@@ -67,12 +70,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python scripts/materialize_robustness_template.py \
-            --base-template "$GTX_BASE_TEMPLATE" \
-            --environment "$GTX_ENV_A" \
-            --environment "$GTX_ENV_B" \
-            --output data/research/robustness-template/robustness_template.v1.json \
+          args=(
+            python scripts/materialize_robustness_template.py
+            --base-template "$GTX_BASE_TEMPLATE"
+            --environment "$GTX_ENV_A"
+          )
+          if [[ -n "$GTX_ENV_B" ]]; then
+            args+=(--environment "$GTX_ENV_B")
+          fi
+          args+=(
+            --output data/research/robustness-template/robustness_template.v1.json
             --audit-output data/research/robustness-template/robustness_template.materialization.json
+          )
+          "${args[@]}"
 
       - name: Verify materialized template remains validation-only
         shell: bash
@@ -89,8 +99,16 @@ jobs:
           audit = json.loads(audit_path.read_text(encoding="utf-8"))
           normalized = robustness_template_snapshot(template)
           labels = normalized["broker_requirements"]["required_labels"]
-          if len(labels) < 2 or len(set(labels)) < 2:
-              raise SystemExit("materialized robustness template requires two distinct brokers")
+          scope = normalized["validation_scope"]
+          minimum = normalized["broker_requirements"]["minimum_distinct_brokers"]
+          if scope == "MULTI_BROKER":
+              if minimum < 2 or len(labels) < 2 or len(set(labels)) < 2:
+                  raise SystemExit("MULTI_BROKER template requires two distinct brokers")
+          elif scope == "TARGET_BROKER_SINGLE":
+              if minimum != 1 or len(labels) != 1:
+                  raise SystemExit("TARGET_BROKER_SINGLE template requires exactly one broker")
+          else:
+              raise SystemExit(f"unsupported validation scope: {scope}")
           if audit.get("live_trading_authorized") is not False:
               raise SystemExit("materialization audit must deny live trading")
           if audit.get("real_capital_authorized") is not False:
