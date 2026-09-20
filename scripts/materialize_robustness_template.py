@@ -53,13 +53,9 @@ def materialize_robustness_template(
     output_path: str | Path | None = None,
     audit_output_path: str | Path | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    if len(environment_paths) < 2:
-        raise RegistryValidationError(
-            "robustness materialization requires at least two approved DEMO environments"
-        )
-
     base_template = _load_json(base_template_path)
     base_snapshot = robustness_template_snapshot(base_template)
+    validation_scope = str(base_snapshot["validation_scope"])
     minimum = int(base_snapshot["broker_requirements"]["minimum_distinct_brokers"])
     if len(environment_paths) < minimum:
         raise RegistryValidationError(
@@ -118,8 +114,17 @@ def materialize_robustness_template(
 
     template = {
         "schema_version": 1,
-        "template_id": "GTX-ROBUSTNESS-TEMPLATE-V1",
+        "template_id": (
+            "GTX-ROBUSTNESS-TEMPLATE-XM-SINGLE-V1"
+            if validation_scope == "TARGET_BROKER_SINGLE"
+            else "GTX-ROBUSTNESS-TEMPLATE-V1"
+        ),
+        "validation_scope": validation_scope,
         "status_note": (
+            "Materialized before official OOS observation from the approved target MT5 DEMO "
+            "environment. Single-broker scope is explicit and does not claim cross-broker portability."
+            if validation_scope == "TARGET_BROKER_SINGLE"
+            else
             "Materialized before official OOS observation from approved, distinct MT5 DEMO "
             "execution environments. Broker labels are derived from frozen contracts."
         ),
@@ -138,6 +143,7 @@ def materialize_robustness_template(
         "schema_version": 1,
         "methodology": METHODOLOGY,
         "status": "MATERIALIZED_FROM_APPROVED_DEMO_ENVIRONMENTS",
+        "validation_scope": validation_scope,
         "template_id": normalized["template_id"],
         "template_sha256": template_hash,
         "source_environments": sorted(source_rows, key=lambda row: row["broker_label"]),
@@ -201,6 +207,7 @@ def main() -> None:
                 "status": audit["status"],
                 "template_id": template["template_id"],
                 "template_sha256": audit["template_sha256"],
+                "validation_scope": template["validation_scope"],
                 "brokers": template["broker_requirements"]["required_labels"],
                 "live_trading_authorized": False,
                 "real_capital_authorized": False,
