@@ -21,6 +21,22 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      - name: Parse local official campaign script with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path "scripts\run-local-official-campaign.ps1"),
+            [ref]$tokens,
+            [ref]$errors
+          )
+          if ($errors.Count -gt 0) {
+            $errors | Format-List *
+            throw "Windows PowerShell 5.1 parser rejected the local campaign script."
+          }
+          Write-Host "POWERSHELL 5.1 PARSER PASS"
+
       - name: Install MetaTrader 5 and compile GoldenTradeX.mq5
         shell: pwsh
         run: .github/scripts/compile-mql5.ps1
