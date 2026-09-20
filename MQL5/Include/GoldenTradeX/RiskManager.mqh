@@ -499,8 +499,31 @@ public:
       return 1.0;
      }
 
+   double CalculateSpreadBps(double bid, double ask)
+     {
+      if(bid <= 0 || ask <= 0 || ask < bid) return DBL_MAX;
+      double mid = (bid + ask) * 0.5;
+      if(mid <= 0) return DBL_MAX;
+      return ((ask - bid) / mid) * 10000.0;
+     }
+
    bool IsSpreadAcceptable(string symbol)
-     { return SymbolInfoInteger(symbol, SYMBOL_SPREAD) <= (long)m_maxSpreadPoints; }
+     {
+      if(m_maxSpreadPoints > 0 &&
+         SymbolInfoInteger(symbol, SYMBOL_SPREAD) > (long)m_maxSpreadPoints)
+         return false;
+
+      if(m_maxSpreadBps > 0)
+        {
+         double bid = SymbolInfoDouble(symbol, SYMBOL_BID);
+         double ask = SymbolInfoDouble(symbol, SYMBOL_ASK);
+         double spreadBps = CalculateSpreadBps(bid, ask);
+         if(spreadBps == DBL_MAX || spreadBps > m_maxSpreadBps)
+            return false;
+        }
+
+      return true;
+     }
 
    int CountOpenPositions(string symbol)
      {
