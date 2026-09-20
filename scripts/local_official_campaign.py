@@ -15,6 +15,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -160,14 +161,24 @@ def _compile_exact_build(
 
     source = expert_dst / "GoldenTradeX.mq5"
     ex5 = source.with_suffix(".ex5")
+    source_log = source.with_suffix(".log")
     metaeditor = _find_metaeditor(terminal)
     compile_log.parent.mkdir(parents=True, exist_ok=True)
+
+    # MetaEditor documents /log as a flag. The generated compilation log is
+    # <source>.log beside the MQ5 file, so do not pass a custom /log:<path>.
+    # Remove stale artifacts so a successful gate always belongs to this build.
+    for stale in (ex5, source_log, compile_log):
+        try:
+            stale.unlink()
+        except FileNotFoundError:
+            pass
 
     command = [
         str(metaeditor),
         f"/compile:{source}",
         f"/include:{mql5_root}",
-        f"/log:{compile_log}",
+        "/log",
     ]
     if portable_mode:
         command.append("/portable")
@@ -176,10 +187,24 @@ def _compile_exact_build(
     completed = subprocess.run(command, check=False)
     print(f"MetaEditor exit code: {completed.returncode}", flush=True)
 
-    if not compile_log.is_file():
+    # If another MetaEditor process already owns the single-instance UI, the
+    # command process can exit before the compile artifact lands on disk.
+    deadline = time.monotonic() + 60.0
+    while time.monotonic() < deadline:
+        if source_log.is_file() and ex5.is_file():
+            break
+        time.sleep(0.5)
+
+    if not source_log.is_file():
         raise RegistryValidationError(
-            f"MetaEditor did not create compile log: {compile_log}"
+            f"MetaEditor did not create source compilation log: {source_log}"
         )
+    if not ex5.is_file():
+        raise RegistryValidationError(
+            f"MetaEditor did not create compiled EX5 artifact: {ex5}"
+        )
+
+    shutil.copy2(source_log, compile_log)
     compile_text = _read_compile_log(compile_log)
     if _ERROR_RE.search(compile_text):
         raise RegistryValidationError(
@@ -188,10 +213,6 @@ def _compile_exact_build(
     if not _ZERO_ERRORS_RE.search(compile_text):
         raise RegistryValidationError(
             "compile log lacks explicit 0 errors result"
-        )
-    if not ex5.is_file():
-        raise RegistryValidationError(
-            f"compilation passed but EX5 was not created: {ex5}"
         )
     print("MQL5 LOCAL COMPILE PASS — 0 errors", flush=True)
     return ex5, mql5_root
