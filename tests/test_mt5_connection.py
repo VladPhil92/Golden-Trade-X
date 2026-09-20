@@ -54,6 +54,12 @@ class _Mt5:
             return self.errors.pop(0)
         return self.errors[0]
 
+    def terminal_info(self):
+        return object()
+
+    def account_info(self):
+        return object()
+
 
 def _terminal(tmp_path: Path) -> Path:
     terminal = tmp_path / "terminal64.exe"
@@ -162,4 +168,31 @@ def test_connect_rejects_missing_terminal(tmp_path: Path) -> None:
             password="secret",
             server="XMGlobal-MT5 2",
             portable=True,
+        )
+
+
+def test_attach_existing_session_needs_no_credentials(tmp_path: Path) -> None:
+    mt5 = _Mt5([True])
+
+    mt5_connection.connect_existing_mt5_session(
+        mt5,
+        terminal_path=_terminal(tmp_path),
+        portable=False,
+        initialize_timeout_ms=1000,
+    )
+
+    assert mt5.init_calls == 1
+    assert mt5.login_calls == 0
+    assert mt5.shutdown_calls == 1
+
+
+def test_attach_existing_session_fails_on_ipc_timeout(tmp_path: Path) -> None:
+    mt5 = _Mt5([False], errors=[(-10005, "IPC timeout")])
+
+    with pytest.raises(RegistryValidationError, match="existing local terminal session"):
+        mt5_connection.connect_existing_mt5_session(
+            mt5,
+            terminal_path=_terminal(tmp_path),
+            portable=False,
+            initialize_timeout_ms=1000,
         )

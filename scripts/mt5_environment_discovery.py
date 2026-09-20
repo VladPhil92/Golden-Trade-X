@@ -24,11 +24,19 @@ try:
         validate_execution_environment,
     )
     from scripts.experiment_registry import RegistryValidationError
-    from scripts.mt5_connection import connect_mt5, stop_bootstrap_process
+    from scripts.mt5_connection import (
+        connect_existing_mt5_session,
+        connect_mt5,
+        stop_bootstrap_process,
+    )
 except ModuleNotFoundError:
     from execution_environment import canonical_environment_sha256, validate_execution_environment
     from experiment_registry import RegistryValidationError
-    from mt5_connection import connect_mt5, stop_bootstrap_process
+    from mt5_connection import (
+        connect_existing_mt5_session,
+        connect_mt5,
+        stop_bootstrap_process,
+    )
 
 METHODOLOGY = "MT5_EXECUTION_ENVIRONMENT_DISCOVERY_V1"
 
@@ -195,6 +203,7 @@ def discover_mt5_environment(
     timeframe: str = "M15",
     deposit: float = 10000.0,
     portable_mode: bool = True,
+    reuse_existing_session: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     if platform.system() != "Windows":
         raise RegistryValidationError("MT5 environment discovery is supported only on Windows")
@@ -203,13 +212,17 @@ def discover_mt5_environment(
     if not terminal.is_file():
         raise RegistryValidationError(f"MetaTrader terminal not found: {terminal}")
 
-    login_text = _required_env("GTX_MT5_LOGIN")
-    password = _required_env("GTX_MT5_PASSWORD")
-    requested_server = _required_env("GTX_MT5_SERVER")
-    try:
-        login = int(login_text)
-    except ValueError as exc:
-        raise RegistryValidationError("GTX_MT5_LOGIN must be an integer account login") from exc
+    requested_server: str | None = None
+    login: int | None = None
+    password: str | None = None
+    if not reuse_existing_session:
+        login_text = _required_env("GTX_MT5_LOGIN")
+        password = _required_env("GTX_MT5_PASSWORD")
+        requested_server = _required_env("GTX_MT5_SERVER")
+        try:
+            login = int(login_text)
+        except ValueError as exc:
+            raise RegistryValidationError("GTX_MT5_LOGIN must be an integer account login") from exc
 
     try:
         import MetaTrader5 as mt5
@@ -218,14 +231,25 @@ def discover_mt5_environment(
             "MetaTrader5 Python package is required for environment discovery"
         ) from exc
 
-    bootstrap_process = connect_mt5(
-        mt5,
-        terminal_path=terminal,
-        login=login,
-        password=password,
-        server=requested_server,
-        portable=bool(portable_mode),
-    )
+    bootstrap_process = None
+    if reuse_existing_session:
+        connect_existing_mt5_session(
+            mt5,
+            terminal_path=terminal,
+            portable=bool(portable_mode),
+        )
+    else:
+        assert login is not None
+        assert password is not None
+        assert requested_server is not None
+        bootstrap_process = connect_mt5(
+            mt5,
+            terminal_path=terminal,
+            login=login,
+            password=password,
+            server=requested_server,
+            portable=bool(portable_mode),
+        )
 
     try:
         terminal_info = mt5.terminal_info()
@@ -240,7 +264,7 @@ def discover_mt5_environment(
             raise RegistryValidationError(
                 f"environment discovery refuses non-DEMO account: observed {trade_mode}"
             )
-        if str(account_info.server).strip() != requested_server:
+        if requested_server is not None and str(account_info.server).strip() != requested_server:
             raise RegistryValidationError(
                 "observed account server differs from GTX_MT5_SERVER"
             )
@@ -310,6 +334,14 @@ def main() -> None:
     parser.add_argument("--deposit", type=float, default=10000.0)
     parser.add_argument("--portable-mode", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument(
+        "--reuse-existing-session",
+        action="store_true",
+        help=(
+            "Attach to the account already logged into the local MT5 terminal. "
+            "No GTX_MT5_LOGIN/PASSWORD/SERVER environment variables are read."
+        ),
+    )
+    parser.add_argument(
         "--output-contract",
         default="data/research/environment-discovery/execution_environment.candidate.json",
     )
@@ -327,6 +359,7 @@ def main() -> None:
             timeframe=args.timeframe,
             deposit=args.deposit,
             portable_mode=args.portable_mode,
+            reuse_existing_session=args.reuse_existing_session,
         )
     except RegistryValidationError as exc:
         parser.error(str(exc))

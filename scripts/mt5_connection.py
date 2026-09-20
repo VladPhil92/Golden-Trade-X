@@ -130,6 +130,49 @@ def connect_mt5(
     )
 
 
+
+def connect_existing_mt5_session(
+    mt5: Any,
+    *,
+    terminal_path: str | Path,
+    portable: bool = False,
+    initialize_timeout_ms: int = 60000,
+) -> None:
+    """Attach Python to an MT5 terminal/session already running on this Windows user desktop.
+
+    No account credentials are required. The selected account remains whatever is
+    currently authenticated in the terminal. Callers must independently verify DEMO
+    trade mode and any expected broker/server constraints before trusting the session.
+    """
+
+    terminal = Path(terminal_path).resolve()
+    if not terminal.is_file():
+        raise RegistryValidationError(f"MetaTrader terminal not found: {terminal}")
+
+    _safe_shutdown(mt5)
+    initialized = mt5.initialize(
+        str(terminal),
+        portable=bool(portable),
+        timeout=int(initialize_timeout_ms),
+    )
+    if not initialized:
+        code, message = _last_error(mt5)
+        raise RegistryValidationError(
+            "MetaTrader5 could not attach to the existing local terminal session: "
+            f"code={code}, message={message}"
+        )
+
+    if mt5.terminal_info() is None:
+        _safe_shutdown(mt5)
+        raise RegistryValidationError(
+            "MetaTrader5 attached but terminal_info() returned no data"
+        )
+    if mt5.account_info() is None:
+        _safe_shutdown(mt5)
+        raise RegistryValidationError(
+            "MetaTrader5 attached but account_info() returned no data"
+        )
+
 def stop_bootstrap_process(process: subprocess.Popen[Any] | None) -> None:
     if process is None or process.poll() is not None:
         return
