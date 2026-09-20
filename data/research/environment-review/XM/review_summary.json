@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "review_status": "DISCOVERY_EVIDENCE_VALIDATED_PENDING_EXPLICIT_APPROVAL",
+  "broker": "XM Global Limited",
+  "server": "XMGlobal-MT5 2",
+  "account_currency": "USD",
+  "leverage": 1000,
+  "mt5_build": "6204",
+  "trade_mode": "DEMO",
+  "symbols": [
+    {
+      "symbol": "GOLD",
+      "environment_id": "GTX-GOLD-M15-DEMO-C39BBEB63A6F",
+      "candidate_canonical_sha256": "0ab343a6d879f510643c43573a6a2366fc425ed9c02120aa0b05489a4d571932",
+      "contract_size": 100.0,
+      "tick_size": 0.01,
+      "tick_value": 1.0,
+      "profit_currency": "USD"
+    },
+    {
+      "symbol": "BTCUSD",
+      "environment_id": "GTX-BTCUSD-M15-DEMO-ECBD82E92679",
+      "candidate_canonical_sha256": "6ba773367c34b3867210f5bb5ed510aa9edff75b6689e46acb1587fcb17cbda3",
+      "contract_size": 1.0,
+      "tick_size": 0.01,
+      "tick_value": 0.01,
+      "profit_currency": "USD"
+    }
+  ],
+  "integrity_checks": {
+    "gold_candidate_hash_matches_discovery_audit": true,
+    "btcusd_candidate_hash_matches_discovery_audit": true,
+    "terminal_connected": true,
+    "symbols_synchronized": true,
+    "live_trading_authorized": false,
+    "real_capital_authorized": false
+  },
+  "robustness_note": "GOLD and BTCUSD are two symbol contracts on the same XM broker/server. They do not satisfy the two-distinct-broker robustness requirement.",
+  "next_transition": "APPROVE_DEMO_EXECUTION_ENVIRONMENT"
+}
