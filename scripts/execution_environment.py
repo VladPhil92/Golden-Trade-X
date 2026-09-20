@@ -68,6 +68,29 @@ def _contains_placeholder(value: str) -> bool:
     return any(marker in upper for marker in PLACEHOLDER_MARKERS)
 
 
+def _normalize_symbol_contract(value: Any) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise RegistryValidationError("symbol_contract must be an object when provided")
+    return {
+        "digits": _nonnegative_int(value.get("digits"), "symbol_contract.digits"),
+        "point": _positive_number(value.get("point"), "symbol_contract.point"),
+        "trade_contract_size": _positive_number(
+            value.get("trade_contract_size"), "symbol_contract.trade_contract_size"
+        ),
+        "trade_tick_size": _positive_number(
+            value.get("trade_tick_size"), "symbol_contract.trade_tick_size"
+        ),
+        "trade_tick_value": _positive_number(
+            value.get("trade_tick_value"), "symbol_contract.trade_tick_value"
+        ),
+        "currency_profit": _text(
+            value.get("currency_profit"), "symbol_contract.currency_profit"
+        ).upper(),
+    }
+
+
 def validate_execution_environment(contract: dict[str, Any]) -> dict[str, Any]:
     if contract.get("schema_version") != 1:
         raise RegistryValidationError("execution environment schema_version must be 1")
@@ -131,6 +154,8 @@ def validate_execution_environment(contract: dict[str, Any]) -> dict[str, Any]:
     slippage_points = _nonnegative_number(
         contract.get("slippage_points", 0.0), "slippage_points"
     )
+    symbol_contract = _normalize_symbol_contract(contract.get("symbol_contract"))
+
     commission = contract.get("commission")
     if commission is not None:
         if not isinstance(commission, (int, float)) or isinstance(commission, bool):
@@ -166,6 +191,7 @@ def validate_execution_environment(contract: dict[str, Any]) -> dict[str, Any]:
         "optimization": False,
         "forward_mode": "disabled",
         "forward_mode_code": 0,
+        "symbol_contract": symbol_contract,
     }
 
     if approved:
@@ -235,9 +261,23 @@ def validate_environment_attestation(
         "trade_mode": normalized_contract["require_trade_mode"],
         "account_company": normalized_contract["account_company"],
         "account_server": normalized_contract["account_server"],
+        "account_currency": normalized_contract["currency"],
+        "leverage": normalized_contract["leverage"],
         "symbol": normalized_contract["symbol"],
         "mt5_build": normalized_contract["mt5_build"],
     }
+    symbol_contract = normalized_contract.get("symbol_contract")
+    if isinstance(symbol_contract, dict):
+        expected.update(
+            {
+                "symbol_digits": symbol_contract["digits"],
+                "symbol_point": symbol_contract["point"],
+                "trade_contract_size": symbol_contract["trade_contract_size"],
+                "trade_tick_size": symbol_contract["trade_tick_size"],
+                "trade_tick_value": symbol_contract["trade_tick_value"],
+                "currency_profit": symbol_contract["currency_profit"],
+            }
+        )
     for field, expected_value in expected.items():
         actual = observed.get(field)
         if str(actual).strip() != str(expected_value).strip():
