@@ -74,15 +74,20 @@ def evaluate_robustness(
     if summary_doc.get("methodology") != "ROBUSTNESS_AGGREGATION_V1":
         raise RegistryValidationError("unsupported robustness summary methodology")
     evidence_classes = summary_doc.get("evidence_classes")
-    if not isinstance(evidence_classes, dict):
-        raise RegistryValidationError("robustness evidence classes are missing")
-    if evidence_classes.get("parameter_stability") != BASE_EVIDENCE_CLASSES["parameter_stability"]:
-        raise RegistryValidationError("parameter stability evidence is misclassified")
-    if evidence_classes.get("cost_sensitivity") != BASE_EVIDENCE_CLASSES["cost_sensitivity"]:
-        raise RegistryValidationError("cost sensitivity evidence is misclassified")
+    evidence_classes_valid = (
+        isinstance(evidence_classes, dict)
+        and evidence_classes.get("parameter_stability")
+        == BASE_EVIDENCE_CLASSES["parameter_stability"]
+        and evidence_classes.get("cost_sensitivity")
+        == BASE_EVIDENCE_CLASSES["cost_sensitivity"]
+        and evidence_classes.get("broker_replication")
+        in _ALLOWED_BROKER_EVIDENCE_CLASSES
+    )
+    if not evidence_classes_valid:
+        raise RegistryValidationError(
+            "robustness evidence classes are missing or misclassified"
+        )
     broker_evidence_class = evidence_classes.get("broker_replication")
-    if broker_evidence_class not in _ALLOWED_BROKER_EVIDENCE_CLASSES:
-        raise RegistryValidationError("broker robustness evidence is missing or misclassified")
 
     if policy.get("schema_version") != 1:
         raise RegistryValidationError("unsupported robustness policy schema_version")
