@@ -1,0 +1,108 @@
+name: Materialize Robustness Template
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment_a_path:
+        description: Repository-relative approved DEMO environment for broker A
+        required: true
+        type: string
+      environment_b_path:
+        description: Repository-relative approved DEMO environment for broker B
+        required: true
+        type: string
+      base_template_path:
+        description: Reviewed robustness geometry template
+        required: true
+        default: config/robustness_template.example.json
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  materialize:
+    name: Freeze broker universe from approved DEMO environments
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GTX_ENV_A: ${{ inputs.environment_a_path }}
+      GTX_ENV_B: ${{ inputs.environment_b_path }}
+      GTX_BASE_TEMPLATE: ${{ inputs.base_template_path }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+
+      - name: Validate repository-relative inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          root = Path.cwd().resolve()
+          for label, raw in {
+              "environment_a_path": os.environ["GTX_ENV_A"],
+              "environment_b_path": os.environ["GTX_ENV_B"],
+              "base_template_path": os.environ["GTX_BASE_TEMPLATE"],
+          }.items():
+              target = (root / raw).resolve()
+              try:
+                  target.relative_to(root)
+              except ValueError as exc:
+                  raise SystemExit(f"{label} must remain inside repository checkout") from exc
+              if not target.is_file():
+                  raise SystemExit(f"{label} file is missing: {target}")
+          PY
+
+      - name: Materialize robustness template from approved DEMO environments
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/materialize_robustness_template.py \
+            --base-template "$GTX_BASE_TEMPLATE" \
+            --environment "$GTX_ENV_A" \
+            --environment "$GTX_ENV_B" \
+            --output data/research/robustness-template/robustness_template.v1.json \
+            --audit-output data/research/robustness-template/robustness_template.materialization.json
+
+      - name: Verify materialized template remains validation-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from scripts.campaign_contract import robustness_template_snapshot
+
+          template_path = Path("data/research/robustness-template/robustness_template.v1.json")
+          audit_path = Path("data/research/robustness-template/robustness_template.materialization.json")
+          template = json.loads(template_path.read_text(encoding="utf-8"))
+          audit = json.loads(audit_path.read_text(encoding="utf-8"))
+          normalized = robustness_template_snapshot(template)
+          labels = normalized["broker_requirements"]["required_labels"]
+          if len(labels) < 2 or len(set(labels)) < 2:
+              raise SystemExit("materialized robustness template requires two distinct brokers")
+          if audit.get("live_trading_authorized") is not False:
+              raise SystemExit("materialization audit must deny live trading")
+          if audit.get("real_capital_authorized") is not False:
+              raise SystemExit("materialization audit must deny real capital")
+          print("ROBUSTNESS TEMPLATE MATERIALIZATION PASS")
+          PY
+
+      - name: Upload robustness template review artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: robustness-template-candidate-${{ github.run_id }}
+          retention-days: 90
+          if-no-files-found: error
+          path: data/research/robustness-template/
