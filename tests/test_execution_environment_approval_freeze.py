@@ -183,3 +183,14 @@ def test_freeze_rejects_observed_symbol_contract_mismatch(
 
     with pytest.raises(EnvironmentApprovalError, match=rf"{field} mismatch"):
         _freeze(candidate_path, audit_path)
+
+
+def test_freeze_rejects_candidate_without_symbol_contract(tmp_path: Path) -> None:
+    candidate_path, audit_path, candidate, audit = _write_bundle(tmp_path)
+    candidate.pop("symbol_contract", None)
+    audit["candidate_canonical_sha256"] = canonical_environment_sha256(candidate)
+    candidate_path.write_text(json.dumps(candidate, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    audit_path.write_text(json.dumps(audit, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    with pytest.raises(EnvironmentApprovalError, match="freeze symbol_contract metadata"):
+        _freeze(candidate_path, audit_path)
