@@ -254,3 +254,57 @@ def test_missing_symbol_contract_blocks_official_readiness(tmp_path: Path) -> No
 
     with pytest.raises(CampaignReadinessError, match="freeze symbol_contract metadata"):
         evaluate_campaign_readiness(campaign, include)
+
+
+def test_target_broker_single_scope_accepts_one_matching_approved_broker(tmp_path: Path) -> None:
+    campaign, include = _fixture(tmp_path)
+
+    # Install the separately frozen XM-only robustness policy.
+    (tmp_path / "robustness_policy.xm_single.v1.json").write_text(
+        (Path("config") / "robustness_policy.xm_single.v1.json").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    campaign_payload = json.loads(campaign.read_text(encoding="utf-8"))
+    campaign_payload["validation_scope"] = "TARGET_BROKER_SINGLE"
+    campaign_payload["robustness_policy_path"] = "robustness_policy.xm_single.v1.json"
+    _write(campaign, campaign_payload)
+
+    template_path = tmp_path / "robustness_template.json"
+    template = json.loads(template_path.read_text(encoding="utf-8"))
+    template["validation_scope"] = "TARGET_BROKER_SINGLE"
+    template["broker_requirements"] = {
+        "required_labels": ["TEST-BROKER-A"],
+        "minimum_distinct_brokers": 1,
+    }
+    _write(template_path, template)
+
+    result = evaluate_campaign_readiness(campaign, include)
+    assert result["decision"] == "READY_TO_FREEZE"
+    assert result["validation_scope"] == "TARGET_BROKER_SINGLE"
+    assert result["robustness_brokers"] == ["TEST-BROKER-A"]
+
+
+def test_target_broker_single_scope_rejects_mismatched_broker_label(tmp_path: Path) -> None:
+    campaign, include = _fixture(tmp_path)
+    (tmp_path / "robustness_policy.xm_single.v1.json").write_text(
+        (Path("config") / "robustness_policy.xm_single.v1.json").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    campaign_payload = json.loads(campaign.read_text(encoding="utf-8"))
+    campaign_payload["validation_scope"] = "TARGET_BROKER_SINGLE"
+    campaign_payload["robustness_policy_path"] = "robustness_policy.xm_single.v1.json"
+    _write(campaign, campaign_payload)
+
+    template_path = tmp_path / "robustness_template.json"
+    template = json.loads(template_path.read_text(encoding="utf-8"))
+    template["validation_scope"] = "TARGET_BROKER_SINGLE"
+    template["broker_requirements"] = {
+        "required_labels": ["OTHER-BROKER"],
+        "minimum_distinct_brokers": 1,
+    }
+    _write(template_path, template)
+
+    with pytest.raises(CampaignReadinessError, match="must match execution environment broker"):
+        evaluate_campaign_readiness(campaign, include)
