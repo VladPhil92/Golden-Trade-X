@@ -23,14 +23,14 @@ try:
         canonical_environment_sha256,
         load_execution_environment_contract,
     )
-    from scripts.experiment_registry import RegistryValidationError, sha256_file
+    from scripts.experiment_registry import RegistryValidationError
 except ModuleNotFoundError:
     from campaign_contract import robustness_template_sha256, robustness_template_snapshot
     from execution_environment import (
         canonical_environment_sha256,
         load_execution_environment_contract,
     )
-    from experiment_registry import RegistryValidationError, sha256_file
+    from experiment_registry import RegistryValidationError
 
 METHODOLOGY = "ROBUSTNESS_TEMPLATE_MATERIALIZATION_V1"
 
