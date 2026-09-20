@@ -130,8 +130,21 @@ Invoke-PythonChecked $python @(
     "--output", $readiness
 ) "Pre-campaign readiness"
 
-$ready = Get-Content -Raw -LiteralPath $readiness | ConvertFrom-Json
-if ($ready.decision -ne "READY_TO_FREEZE" -or -not [bool]$ready.ready) {
+if (-not (Test-Path -LiteralPath $readiness -PathType Leaf)) {
+    throw "Pre-campaign readiness did not create its JSON output: $readiness"
+}
+
+$readinessResult = Get-Content -Raw -LiteralPath $readiness | ConvertFrom-Json
+if ($null -eq $readinessResult) {
+    throw "Pre-campaign readiness JSON is empty or invalid."
+}
+
+$readinessProperties = @($readinessResult.PSObject.Properties.Name)
+if ($readinessProperties -notcontains "decision" -or $readinessProperties -notcontains "ready") {
+    throw "Pre-campaign readiness JSON is missing decision/ready fields."
+}
+
+if ([string]$readinessResult.decision -ne "READY_TO_FREEZE" -or -not [bool]$readinessResult.ready) {
     throw "Pre-campaign readiness did not return READY_TO_FREEZE."
 }
 
