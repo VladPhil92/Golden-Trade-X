@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "campaign_id": "GTX-XM-GOLD-V33-OFFICIAL-VALIDATION-V1",
+  "validation_scope": "TARGET_BROKER_SINGLE",
+  "status_note": "XM-specific GOLD campaign. No cross-broker portability claim. Live trading and real capital remain unauthorized.",
+  "build_id": "0000000000000000000000000000000000000000",
+  "candidate_universe": [
+    {"name":"gold_legacy","preset_path":"GoldenTradeX.set"},
+    {"name":"gold_adaptive","preset_path":"research/GoldenTradeX_GOLD_M15_adaptive.experimental.set"}
+  ],
+  "execution_environment_path": "execution_environment.xm_gold.v1.json",
+  "economic_calendar_path": "economic_calendar.v1.json",
+  "python_runtime_lock_path": "campaign_requirements.lock",
+  "walk_forward_config_path": "walk_forward_plan.v1.json",
+  "robustness_template_path": "robustness_template.xm_single.v1.json",
+  "robustness_policy_path": "robustness_policy.xm_single.v1.json",
+  "forward_policy_path": "forward_demo_policy.v1.json"
+}

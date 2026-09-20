@@ -277,6 +277,7 @@ v3.0-rc2  Forward validated                           PENDING
 v3.1      Daily opportunity / multi-symbol research   READY; research-only
 v3.2      BTCUSD multi-asset expansion                 READY; evidence pending
 v3.3      Adaptive GOLD/BTC analysis                   READY; research-only
+v3.4      XM single-broker robustness                  READY; XM-only validation path
 v3.0      Controlled production                       BLOCKED
 ```
 

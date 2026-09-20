@@ -230,8 +230,27 @@ def generate_robustness_plan(config_path: str | Path, output_dir: str | Path) ->
         raise RegistryValidationError(f"base preset not found: {source_preset}")
 
     policy = _validate_policy_snapshot(config_path, config)
+    validation_scope = config.get("validation_scope", "MULTI_BROKER")
+    if validation_scope not in {"MULTI_BROKER", "TARGET_BROKER_SINGLE"}:
+        raise RegistryValidationError(
+            "validation_scope must be MULTI_BROKER or TARGET_BROKER_SINGLE"
+        )
     parameter_scenarios = _validate_parameter_scenarios(config.get("parameter_scenarios"))
     broker_requirements = _validate_broker_requirements(config.get("broker_requirements"))
+    if validation_scope == "MULTI_BROKER":
+        if broker_requirements["minimum_distinct_brokers"] < 2:
+            raise RegistryValidationError(
+                "MULTI_BROKER robustness requires minimum_distinct_brokers >= 2"
+            )
+    else:
+        if broker_requirements["minimum_distinct_brokers"] != 1:
+            raise RegistryValidationError(
+                "TARGET_BROKER_SINGLE robustness requires minimum_distinct_brokers == 1"
+            )
+        if len(broker_requirements["required_labels"]) != 1:
+            raise RegistryValidationError(
+                "TARGET_BROKER_SINGLE robustness requires exactly one broker label"
+            )
     cost_scenarios = _validate_cost_scenarios(config.get("modeled_cost_scenarios"))
 
     output = Path(output_dir).resolve()
@@ -288,6 +307,7 @@ def generate_robustness_plan(config_path: str | Path, output_dir: str | Path) ->
         "schema_version": PLAN_SCHEMA_VERSION,
         "methodology": "ROBUSTNESS_V1",
         "campaign_id": campaign_id.strip(),
+        "validation_scope": validation_scope,
         "status": "READY_FOR_REGISTERED_EXECUTION" if policy["approved"] else "DRAFT_POLICY_UNAPPROVED",
         "base": {
             "spec_path": Path(str(config.get("base_spec_path"))).as_posix(),
@@ -308,9 +328,19 @@ def generate_robustness_plan(config_path: str | Path, output_dir: str | Path) ->
                 "scenarios": scenarios,
             },
             "broker_replication": {
-                "evidence_class": "EXTERNAL_BROKER_REPLICATION",
+                "evidence_class": (
+                    "TARGET_BROKER_STABILITY"
+                    if validation_scope == "TARGET_BROKER_SINGLE"
+                    else "EXTERNAL_BROKER_REPLICATION"
+                ),
                 **broker_requirements,
-                "note": "Broker labels are requirements, not generated evidence. Each run must come from the declared environment.",
+                "note": (
+                    "Single-target-broker evidence. This validates stability inside the declared broker "
+                    "and does not claim cross-broker portability."
+                    if validation_scope == "TARGET_BROKER_SINGLE"
+                    else
+                    "Broker labels are requirements, not generated evidence. Each run must come from the declared environment."
+                ),
             },
             "cost_sensitivity": {
                 "evidence_class": "MODELED_COST_SENSITIVITY",

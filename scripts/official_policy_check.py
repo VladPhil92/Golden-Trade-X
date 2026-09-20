@@ -208,10 +208,14 @@ def _validate_walk_forward(path: Path, promotion_path: Path) -> dict[str, Any]:
     }
 
 
-def validate_official_policy_bundle(config_root: str | Path = "config") -> dict[str, Any]:
+def validate_official_policy_bundle(
+    config_root: str | Path = "config",
+    *,
+    robustness_policy_name: str = "robustness_policy.v1.json",
+) -> dict[str, Any]:
     root = Path(config_root).resolve()
     promotion_path = root / "promotion_policy.v1.json"
-    robustness_path = root / "robustness_policy.v1.json"
+    robustness_path = root / robustness_policy_name
     forward_path = root / "forward_demo_policy.v1.json"
     walk_path = root / "walk_forward_plan.v1.json"
 
@@ -239,10 +243,14 @@ def validate_official_policy_bundle(config_root: str | Path = "config") -> dict[
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config-root", default="config")
+    parser.add_argument("--robustness-policy", default="robustness_policy.v1.json")
     parser.add_argument("--output")
     args = parser.parse_args()
     try:
-        result = validate_official_policy_bundle(args.config_root)
+        result = validate_official_policy_bundle(
+            args.config_root,
+            robustness_policy_name=args.robustness_policy,
+        )
     except OfficialPolicyValidationError as exc:
         parser.error(str(exc))
         return

@@ -19,6 +19,18 @@ except ModuleNotFoundError:
     from experiment_registry import RegistryValidationError, sha256_file
 
 SUPPORTED_OPERATORS = {">=", "<=", ">", "<", "=="}
+BASE_EVIDENCE_CLASSES = {
+    "parameter_stability": "EXECUTED_COUNTERFACTUAL",
+    "cost_sensitivity": "MODELED_COST_SENSITIVITY",
+}
+_ALLOWED_BROKER_EVIDENCE_CLASSES = {
+    "EXTERNAL_BROKER_REPLICATION",
+    "TARGET_BROKER_STABILITY",
+}
+
+# Backward-compatible default evidence-class contract used by adversarial tests
+# and external tooling. XM-only campaigns may substitute TARGET_BROKER_STABILITY
+# at runtime, but the historical multi-broker default remains unchanged.
 REQUIRED_EVIDENCE_CLASSES = {
     "parameter_stability": "EXECUTED_COUNTERFACTUAL",
     "broker_replication": "EXTERNAL_BROKER_REPLICATION",
@@ -62,8 +74,19 @@ def evaluate_robustness(
     if summary_doc.get("methodology") != "ROBUSTNESS_AGGREGATION_V1":
         raise RegistryValidationError("unsupported robustness summary methodology")
     evidence_classes = summary_doc.get("evidence_classes")
-    if evidence_classes != REQUIRED_EVIDENCE_CLASSES:
-        raise RegistryValidationError("robustness evidence classes are missing or misclassified")
+    evidence_classes_valid = (
+        isinstance(evidence_classes, dict)
+        and evidence_classes.get("parameter_stability")
+        == BASE_EVIDENCE_CLASSES["parameter_stability"]
+        and evidence_classes.get("cost_sensitivity")
+        == BASE_EVIDENCE_CLASSES["cost_sensitivity"]
+        and evidence_classes.get("broker_replication")
+        in _ALLOWED_BROKER_EVIDENCE_CLASSES
+    )
+    if not evidence_classes_valid:
+        raise RegistryValidationError(
+            "robustness evidence classes are missing or misclassified"
+        )
 
     if policy.get("schema_version") != 1:
         raise RegistryValidationError("unsupported robustness policy schema_version")
@@ -145,7 +168,7 @@ def evaluate_robustness(
         "baseline_preset_sha256": summary_doc.get("baseline", {}).get("preset_sha256"),
         "criteria": checks,
         "all_criteria_passed": all_passed,
-        "evidence_classes": REQUIRED_EVIDENCE_CLASSES,
+        "evidence_classes": evidence_classes,
     }
 
     if output_path is not None:
