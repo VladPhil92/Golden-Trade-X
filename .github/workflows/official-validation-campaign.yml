@@ -13,6 +13,14 @@ on:
         required: true
         default: "3600"
         type: string
+      confirmation:
+        description: Type RUN_L4_DEMO_OOS to launch official DEMO evidence generation
+        required: true
+        type: string
+
+concurrency:
+  group: golden-trade-x-l4-official-campaign
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -25,6 +33,7 @@ jobs:
     env:
       GTX_CAMPAIGN_CONFIG: ${{ inputs.campaign_config }}
       GTX_TIMEOUT_SECONDS: ${{ inputs.timeout_seconds }}
+      GTX_CONFIRMATION: ${{ inputs.confirmation }}
       GTX_MT5_LOGIN: ${{ secrets.GTX_MT5_LOGIN }}
       GTX_MT5_PASSWORD: ${{ secrets.GTX_MT5_PASSWORD }}
       GTX_MT5_SERVER: ${{ secrets.GTX_MT5_SERVER }}
@@ -34,6 +43,20 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
+
+      - name: Validate explicit L4 launch and DEMO credentials
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          if ($env:GTX_CONFIRMATION -ne "RUN_L4_DEMO_OOS") {
+            throw "confirmation must equal RUN_L4_DEMO_OOS"
+          }
+          if ([string]::IsNullOrWhiteSpace($env:GTX_MT5_LOGIN) -or
+              [string]::IsNullOrWhiteSpace($env:GTX_MT5_PASSWORD) -or
+              [string]::IsNullOrWhiteSpace($env:GTX_MT5_SERVER)) {
+            throw "GTX_MT5_LOGIN, GTX_MT5_PASSWORD and GTX_MT5_SERVER secrets are required"
+          }
 
       - name: Validate campaign input paths
         shell: pwsh
@@ -70,6 +93,9 @@ jobs:
           if (-not $campaign.execution_environment_path) {
             throw "Campaign config requires execution_environment_path"
           }
+          if (-not $campaign.python_runtime_lock_path) {
+            throw "Campaign config requires python_runtime_lock_path"
+          }
           $configRoot = Split-Path $campaignPath -Parent
           $environmentPath = [System.IO.Path]::GetFullPath(
             (Join-Path $configRoot ([string]$campaign.execution_environment_path))
@@ -84,10 +110,23 @@ jobs:
           if (-not (Test-Path -LiteralPath $environmentPath -PathType Leaf)) {
             throw "Execution environment contract not found: $environmentPath"
           }
+          $runtimeLockPath = [System.IO.Path]::GetFullPath(
+            (Join-Path $configRoot ([string]$campaign.python_runtime_lock_path))
+          )
+          if (-not $runtimeLockPath.StartsWith(
+              $configPrefix,
+              [System.StringComparison]::OrdinalIgnoreCase
+          )) {
+            throw "python_runtime_lock_path escapes the campaign config root"
+          }
+          if (-not (Test-Path -LiteralPath $runtimeLockPath -PathType Leaf)) {
+            throw "Python runtime lock not found: $runtimeLockPath"
+          }
 
           "GTX_CAMPAIGN_PATH=$campaignPath" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "GTX_CONFIG_ROOT=$configRoot" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "GTX_ENVIRONMENT_PATH=$environmentPath" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "GTX_RUNTIME_LOCK=$runtimeLockPath" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "GTX_TIMEOUT=$timeout" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Enforce pre-campaign repository readiness
@@ -98,6 +137,17 @@ jobs:
             --calendar-include "MQL5/Include/GoldenTradeX/EconomicCalendarData.mqh" `
             --output "data/research/official_campaign/pre_campaign_readiness.json"
 
+      - name: Enforce READY_TO_FREEZE decision
+        shell: pwsh
+        run: |
+          $readiness = Get-Content -Raw "data/research/official_campaign/pre_campaign_readiness.json" | ConvertFrom-Json
+          if ($readiness.decision -ne "READY_TO_FREEZE" -or -not [bool]$readiness.ready) {
+            throw "Pre-campaign readiness did not return READY_TO_FREEZE"
+          }
+          if ([bool]$readiness.live_trading_authorized -or [bool]$readiness.real_capital_authorized) {
+            throw "Pre-campaign readiness must deny live trading and real capital"
+          }
+
       - name: Freeze campaign before evidence
         shell: pwsh
         run: |
@@ -106,15 +156,29 @@ jobs:
             --output-dir "data/research/official_campaign/freeze" `
             --build-id "$env:GITHUB_SHA"
 
+      - name: Verify frozen campaign boundary
+        shell: pwsh
+        run: |
+          $lock = Get-Content -Raw "data/research/official_campaign/freeze/campaign_lock.json" | ConvertFrom-Json
+          if ($lock.status -ne "OFFICIAL_CAMPAIGN_FROZEN") {
+            throw "Campaign freeze did not produce OFFICIAL_CAMPAIGN_FROZEN"
+          }
+          if ([string]$lock.build_id -ne [string]$env:GITHUB_SHA) {
+            throw "Frozen build_id differs from GITHUB_SHA"
+          }
+          if ([bool]$lock.live_trading_authorized -or [bool]$lock.real_capital_authorized) {
+            throw "Frozen campaign must deny live trading and real capital"
+          }
+
+      - name: Install frozen Python campaign runtime
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check -r "$env:GTX_RUNTIME_LOCK"
+          python -c "import importlib.metadata as m; print('MetaTrader5=' + m.version('MetaTrader5'))"
+
       - name: Install MetaTrader 5 and compile frozen build
         shell: pwsh
         run: .github/scripts/compile-mql5.ps1
-
-      - name: Install pinned MT5 Python attestation client
-        shell: pwsh
-        run: |
-          python -m pip install --disable-pip-version-check "MetaTrader5==5.0.6147"
-          python -c "import importlib.metadata as m; print('MetaTrader5=' + m.version('MetaTrader5'))"
 
       - name: Resolve actual MetaTrader data root
         shell: pwsh
@@ -165,6 +229,20 @@ jobs:
             --terminal "$env:GTX_MT5_TERMINAL" `
             --output "data/research/official_campaign/environment_attestation.json"
 
+      - name: Verify exact DEMO attestation boundary
+        shell: pwsh
+        run: |
+          $attestation = Get-Content -Raw "data/research/official_campaign/environment_attestation.json" | ConvertFrom-Json
+          if ($attestation.status -ne "VERIFIED") {
+            throw "MT5 environment attestation is not VERIFIED"
+          }
+          if ($attestation.observed.trade_mode -ne "DEMO") {
+            throw "Official L4 campaign requires DEMO trade_mode"
+          }
+          if ([bool]$attestation.live_trading_authorized) {
+            throw "MT5 attestation must deny live trading"
+          }
+
       - name: Execute official rolling IS to frozen OOS campaign
         shell: pwsh
         run: |
@@ -180,12 +258,40 @@ jobs:
             --runs-dir "data/research/official_campaign/runs" `
             --timeout-seconds $env:GTX_TIMEOUT
 
+      - name: Validate completed L4 OOS evidence integrity
+        shell: pwsh
+        run: |
+          python scripts/official_campaign_evidence_check.py `
+            --readiness "data/research/official_campaign/pre_campaign_readiness.json" `
+            --campaign-lock "data/research/official_campaign/freeze/campaign_lock.json" `
+            --attestation "data/research/official_campaign/environment_attestation.json" `
+            --execution-manifest "data/research/official_campaign/execution/campaign_execution_manifest.json" `
+            --oos-evidence "data/research/official_campaign/execution/oos_evidence_manifest.json" `
+            --oos-summary "data/research/official_campaign/execution/oos_summary.json" `
+            --promotion-decision "data/research/official_campaign/execution/oos_promotion_decision.json" `
+            --output "data/research/official_campaign/l4_completion.json"
+
+      - name: Publish L4 outcome summary
+        shell: pwsh
+        run: |
+          $result = Get-Content -Raw "data/research/official_campaign/l4_completion.json" | ConvertFrom-Json
+          @(
+            "## Golden Trade X L4 Official OOS Campaign",
+            "",
+            "- Integrity status: $($result.status)",
+            "- OOS result: $($result.oos_terminal_status)",
+            "- Folds: $($result.fold_count)",
+            "- Next stage: $($result.next_stage)",
+            "- Live trading authorized: false",
+            "- Real capital authorized: false"
+          ) | Out-File $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+
       - name: Upload official campaign evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: official-validation-campaign-${{ github.run_id }}
-          retention-days: 90
+          retention-days: 180
           if-no-files-found: warn
           path: |
             data/research/official_campaign/
