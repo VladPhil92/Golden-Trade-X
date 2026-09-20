@@ -71,6 +71,7 @@ input int     InpMaxPositions     = 1;
 input double  InpAtrSlMultiplier  = 2.0;
 input double  InpAtrTpMultiplier  = 3.0;
 input double  InpMaxSpreadPoints  = 350;
+input double  InpMaxSpreadBps     = 0.0;  // 0=off; útil para BTC/activos de precio alto
 input double  InpCpThresholdPct   = 8.0;
 input double  InpMinInitialRR     = 0.0;  // 0=off hasta research OOS
 
@@ -191,6 +192,7 @@ string BuildResearchConfigSnapshot()
    s += "|InpAtrSlMultiplier=" + DoubleToString(InpAtrSlMultiplier, 8);
    s += "|InpAtrTpMultiplier=" + DoubleToString(InpAtrTpMultiplier, 8);
    s += "|InpMaxSpreadPoints=" + DoubleToString(InpMaxSpreadPoints, 8);
+   s += "|InpMaxSpreadBps=" + DoubleToString(InpMaxSpreadBps, 8);
    s += "|InpCpThresholdPct=" + DoubleToString(InpCpThresholdPct, 8);
    s += "|InpMinInitialRR=" + DoubleToString(InpMinInitialRR, 8);
    s += "|InpUseTrailing=" + B(InpUseTrailing);
@@ -269,6 +271,8 @@ int OnInit()
      { Print("GoldenTradeX: InpMinConfidence debe ser 0-100"); return INIT_PARAMETERS_INCORRECT; }
    if(InpMinInitialRR < 0)
      { Print("GoldenTradeX: InpMinInitialRR no puede ser negativo"); return INIT_PARAMETERS_INCORRECT; }
+   if(InpMaxSpreadPoints < 0 || InpMaxSpreadBps < 0)
+     { Print("GoldenTradeX: límites de spread no pueden ser negativos"); return INIT_PARAMETERS_INCORRECT; }
    if(InpPartialTPR <= 0)
      { Print("GoldenTradeX: InpPartialTPR debe ser > 0"); return INIT_PARAMETERS_INCORRECT; }
    if(InpPartialTPPct <= 0 || InpPartialTPPct >= 100)
@@ -313,7 +317,8 @@ int OnInit()
    riskManager.Init(InpRiskPercent, InpMaxDailyDD, InpMaxPositions,
                     InpMaxSpreadPoints, InpMagicNumber,
                     InpMaxConsecLosses, InpMaxWeeklyDD,
-                    InpMaxMonthlyDD, InpCpThresholdPct);
+                    InpMaxMonthlyDD, InpCpThresholdPct,
+                    InpMaxSpreadBps);
 
    sessionFilter.Init(InpUseSessionFilter, InpStartHour, InpEndHour,
                       InpCloseOnFriday, InpFridayCloseHour);
