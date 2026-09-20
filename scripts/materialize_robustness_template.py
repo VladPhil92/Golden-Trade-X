@@ -58,8 +58,12 @@ def materialize_robustness_template(
     validation_scope = str(base_snapshot["validation_scope"])
     minimum = int(base_snapshot["broker_requirements"]["minimum_distinct_brokers"])
     if len(environment_paths) < minimum:
+        if minimum == 2:
+            raise RegistryValidationError(
+                "robustness materialization requires at least two approved DEMO environments"
+            )
         raise RegistryValidationError(
-            f"robustness materialization requires at least {minimum} environment contracts"
+            f"robustness materialization requires at least {minimum} environment contract(s)"
         )
 
     source_rows: list[dict[str, Any]] = []
