@@ -11,6 +11,7 @@ private:
    double  m_maxDailyDD;
    int     m_maxPositions;
    double  m_maxSpreadPoints;
+   double  m_maxSpreadBps;
    ulong   m_magic;
    double  m_dayStartEquity;
    int     m_currentDay;
@@ -209,12 +210,14 @@ public:
              double maxSpreadPoints, ulong magic,
              int maxConsecutiveLosses, double maxWeeklyDD,
              double maxMonthlyDD = 0.0,
-             double cpThresholdPct = 8.0)
+             double cpThresholdPct = 8.0,
+             double maxSpreadBps = 0.0)
      {
       m_riskPercent = riskPercent;
       m_maxDailyDD = maxDailyDD;
       m_maxPositions = maxPositions;
       m_maxSpreadPoints = maxSpreadPoints;
+      m_maxSpreadBps = MathMax(0.0, maxSpreadBps);
       m_magic = magic;
       m_currentDay = -1;
       m_maxConsecutiveLosses = maxConsecutiveLosses;
