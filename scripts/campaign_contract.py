@@ -98,6 +98,12 @@ def robustness_template_snapshot(document: Any) -> dict[str, Any]:
             {"name": name, "parameter": parameter.strip(), "value": raw["value"]}
         )
 
+    validation_scope = document.get("validation_scope", "MULTI_BROKER")
+    if validation_scope not in {"MULTI_BROKER", "TARGET_BROKER_SINGLE"}:
+        raise RegistryValidationError(
+            "robustness template validation_scope must be MULTI_BROKER or TARGET_BROKER_SINGLE"
+        )
+
     broker = document.get("broker_requirements")
     if not isinstance(broker, dict):
         raise RegistryValidationError("robustness template broker_requirements must be an object")
@@ -116,6 +122,19 @@ def robustness_template_snapshot(document: Any) -> dict[str, Any]:
         raise RegistryValidationError("minimum_distinct_brokers must be an integer >= 1")
     if minimum > len(clean_labels):
         raise RegistryValidationError("minimum_distinct_brokers exceeds required broker labels")
+    if validation_scope == "MULTI_BROKER" and minimum < 2:
+        raise RegistryValidationError(
+            "MULTI_BROKER robustness requires minimum_distinct_brokers >= 2"
+        )
+    if validation_scope == "TARGET_BROKER_SINGLE":
+        if minimum != 1:
+            raise RegistryValidationError(
+                "TARGET_BROKER_SINGLE robustness requires minimum_distinct_brokers == 1"
+            )
+        if len(clean_labels) != 1:
+            raise RegistryValidationError(
+                "TARGET_BROKER_SINGLE robustness requires exactly one broker label"
+            )
 
     costs = document.get("modeled_cost_scenarios")
     if not isinstance(costs, list) or not costs:
@@ -145,6 +164,7 @@ def robustness_template_snapshot(document: Any) -> dict[str, Any]:
 
     return {
         "template_id": template_id.strip(),
+        "validation_scope": validation_scope,
         "parameter_scenarios": sorted(parameter_rows, key=lambda item: item["name"]),
         "broker_requirements": {
             "required_labels": sorted(clean_labels),
