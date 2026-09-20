@@ -2,7 +2,7 @@
   "schema_version": 1,
   "environment_id": "GTX-XAUUSD-M15-DEMO-ENV-DRAFT",
   "approved": false,
-  "status_note": "Engineering template only. Replace every broker/server/build placeholder from one exact DEMO environment, review it, and create a new immutable approved contract before official evidence generation.",
+  "status_note": "Engineering template only. Replace broker/server/build and every symbol_contract value from one exact DEMO environment, review it, and create a new immutable approved contract before official evidence generation.",
   "live_trading_authorized": false,
   "require_trade_mode": "DEMO",
   "broker_label": "REPLACE_WITH_CANONICAL_BROKER_LABEL",
@@ -25,5 +25,13 @@
   "slippage_points": 0,
   "optimization": false,
   "forward_mode": "disabled",
-  "forward_mode_code": 0
+  "forward_mode_code": 0,
+  "symbol_contract": {
+    "digits": 2,
+    "point": 0.01,
+    "trade_contract_size": 100,
+    "trade_tick_size": 0.01,
+    "trade_tick_value": 1,
+    "currency_profit": "USD"
+  }
 }
