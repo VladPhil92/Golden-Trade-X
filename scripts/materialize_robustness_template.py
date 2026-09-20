@@ -71,7 +71,8 @@ def materialize_robustness_template(
     broker_identities: set[tuple[str, str]] = set()
 
     for raw_path in environment_paths:
-        path = Path(raw_path).resolve()
+        declared_path = Path(raw_path)
+        path = declared_path.resolve()
         environment, file_sha = load_execution_environment_contract(path)
         if environment["approved"] is not True:
             raise RegistryValidationError(
@@ -105,7 +106,7 @@ def materialize_robustness_template(
         broker_identities.add(identity)
         source_rows.append(
             {
-                "path": path.as_posix(),
+                "path": declared_path.as_posix(),
                 "environment_id": environment["environment_id"],
                 "broker_label": label,
                 "account_company": environment["account_company"],
