@@ -91,9 +91,23 @@ def _validate_discovery_audit(
         "trade_mode": "DEMO",
         "account_company": candidate["account_company"],
         "account_server": candidate["account_server"],
+        "account_currency": candidate["currency"],
+        "leverage": candidate["leverage"],
         "symbol": candidate["symbol"],
         "mt5_build": candidate["mt5_build"],
     }
+    symbol_contract = candidate.get("symbol_contract")
+    if isinstance(symbol_contract, dict):
+        expected_observed.update(
+            {
+                "symbol_digits": symbol_contract["digits"],
+                "symbol_point": symbol_contract["point"],
+                "trade_contract_size": symbol_contract["trade_contract_size"],
+                "trade_tick_size": symbol_contract["trade_tick_size"],
+                "trade_tick_value": symbol_contract["trade_tick_value"],
+                "currency_profit": symbol_contract["currency_profit"],
+            }
+        )
     for field, expected in expected_observed.items():
         actual = observed.get(field)
         if str(actual).strip() != str(expected).strip():
@@ -170,8 +184,16 @@ def freeze_approved_environment(
             "trade_mode": observed["trade_mode"],
             "account_company": observed["account_company"],
             "account_server": observed["account_server"],
+            "account_currency": observed["account_currency"],
+            "leverage": int(observed["leverage"]),
             "symbol": observed["symbol"],
             "mt5_build": str(observed["mt5_build"]),
+            "symbol_digits": int(observed["symbol_digits"]),
+            "symbol_point": float(observed["symbol_point"]),
+            "trade_contract_size": float(observed["trade_contract_size"]),
+            "trade_tick_size": float(observed["trade_tick_size"]),
+            "trade_tick_value": float(observed["trade_tick_value"]),
+            "currency_profit": str(observed["currency_profit"]),
             "terminal_connected": True,
             "symbol_synchronized": True,
         },
