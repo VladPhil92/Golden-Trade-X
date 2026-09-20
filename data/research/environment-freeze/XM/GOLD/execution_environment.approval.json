@@ -1,0 +1,32 @@
+{
+  "approval_note": "Reviewed XM Global GOLD DEMO environment for official validation.",
+  "approved_at_utc": "2026-09-20T21:19:59Z",
+  "approved_by": "VladPhil92",
+  "approved_environment_canonical_sha256": "99a4086605a8733609c7521a04929de82317bd120bee70eeb0ca62ae800a720e",
+  "candidate_canonical_sha256": "0ab343a6d879f510643c43573a6a2366fc425ed9c02120aa0b05489a4d571932",
+  "candidate_file_sha256": "9c54249f63e07024a29b57c6c82d7da40a33ec807617244a54bf96eea0af991c",
+  "decision": "APPROVED_FOR_OFFICIAL_VALIDATION",
+  "discovery_audit_file_sha256": "88910930b0d1c9c1dbd994478394cef8a99542e0d722d43e271dee50168a2dd1",
+  "environment_id": "GTX-GOLD-M15-DEMO-C39BBEB63A6F",
+  "live_trading_authorized": false,
+  "methodology": "MT5_EXECUTION_ENVIRONMENT_APPROVAL_FREEZE_V1",
+  "observed": {
+    "account_company": "XM Global Limited",
+    "account_currency": "USD",
+    "account_server": "XMGlobal-MT5 2",
+    "currency_profit": "USD",
+    "leverage": 1000,
+    "mt5_build": "6204",
+    "symbol": "GOLD",
+    "symbol_digits": 2,
+    "symbol_point": 0.01,
+    "symbol_synchronized": true,
+    "terminal_connected": true,
+    "trade_contract_size": 100.0,
+    "trade_mode": "DEMO",
+    "trade_tick_size": 0.01,
+    "trade_tick_value": 1.0
+  },
+  "real_capital_authorized": false,
+  "schema_version": 1
+}
