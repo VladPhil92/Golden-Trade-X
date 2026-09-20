@@ -5,6 +5,42 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [2.64] — 2026-09-20
+
+Adaptive Multi-Asset Analysis milestone. Añade una capa research-first de análisis
+normalizado para GOLD/XAU y BTCUSD, sin alterar el baseline legacy salvo que los
+nuevos inputs opt-in estén activados. No constituye validación de rentabilidad.
+
+### Added — Adaptive analysis engine
+- Nuevo `AdaptiveAnalysisEngine.mqh` con métricas calculadas únicamente sobre
+  barras cerradas: separación EMA normalizada por ATR, pendiente direccional,
+  RSI, ADX, eficiencia de vela, ATR en basis points, spread en basis points,
+  volumen relativo, ubicación en rango de 20 barras y alineación H4.
+- Score heurístico 0–100 descompuesto en tendencia, momentum, fuerza, HTF,
+  estructura, eficiencia y liquidez. El score queda explícitamente sujeto a
+  calibración IS → frozen OOS.
+- Auto-perfiles GOLD/XAU y BTC, además de perfiles explícitos y genérico.
+
+### Added — Signal stability candidate
+- `InpSignalClosedBarOnly` permite investigar cruces EMA confirmados solo con
+  barras [2]→[1], eliminando la dependencia de la EMA de la barra [0].
+- Default `false`: el preset legacy conserva exactamente la continuación
+  intrabar existente.
+
+### Added — Multi-asset telemetry and presets
+- `ResearchTelemetry` añade un stream `analysis` con score, sub-scores,
+  ATR bps, spread bps y volumen relativo.
+- Preset experimental GOLD M15 adaptive con perfil GOLD y riesgo research 0.5%.
+- Preset experimental BTCUSD M15 actualizado con perfil BTC y closed-bar signal.
+- Los presets legacy mantienen adaptive analysis desactivado.
+
+### Verification
+- Nuevos tests MQL5 deterministas para scoring adaptativo y modo closed-bar.
+- CI valida ambos presets experimentales y exige los nuevos módulos.
+- Producción y dinero real continúan bloqueados por defecto.
+
+---
+
 ## [2.63] — 2026-08-28
 
 Automated Verification milestone. Convierte la suite MQL5 de scripts manuales
