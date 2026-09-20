@@ -1,0 +1,27 @@
+{
+  "approved": false,
+  "candidate_canonical_sha256": "6ba773367c34b3867210f5bb5ed510aa9edff75b6689e46acb1587fcb17cbda3",
+  "environment_id": "GTX-BTCUSD-M15-DEMO-ECBD82E92679",
+  "live_trading_authorized": false,
+  "methodology": "MT5_EXECUTION_ENVIRONMENT_DISCOVERY_V1",
+  "observed": {
+    "account_company": "XM Global Limited",
+    "account_currency": "USD",
+    "account_server": "XMGlobal-MT5 2",
+    "currency_profit": "USD",
+    "leverage": 1000,
+    "mt5_build": "6204",
+    "symbol": "BTCUSD",
+    "symbol_digits": 2,
+    "symbol_point": 0.01,
+    "symbol_synchronized": true,
+    "terminal_connected": true,
+    "trade_contract_size": 1.0,
+    "trade_mode": "DEMO",
+    "trade_tick_size": 0.01,
+    "trade_tick_value": 0.01
+  },
+  "real_capital_authorized": false,
+  "schema_version": 1,
+  "status": "CANDIDATE_DISCOVERED"
+}
