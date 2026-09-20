@@ -196,6 +196,11 @@ def freeze_official_campaign(
     campaign_id = config.get("campaign_id")
     if not isinstance(campaign_id, str) or not campaign_id.strip():
         raise RegistryValidationError("campaign_id is required")
+    validation_scope = config.get("validation_scope", "MULTI_BROKER")
+    if validation_scope not in {"MULTI_BROKER", "TARGET_BROKER_SINGLE"}:
+        raise RegistryValidationError(
+            "validation_scope must be MULTI_BROKER or TARGET_BROKER_SINGLE"
+        )
     build_id = _resolve_build_id(config, build_id_override)
 
     candidates, universe_sha = _candidate_universe(config_path, config.get("candidate_universe"))
@@ -254,6 +259,7 @@ def freeze_official_campaign(
 
     core = {
         "campaign_id": campaign_id.strip(),
+        "validation_scope": validation_scope,
         "build_id": build_id,
         "candidate_universe_sha256": universe_sha,
         "execution_environment_file_sha256": environment_file_sha,
@@ -271,6 +277,7 @@ def freeze_official_campaign(
         "schema_version": 1,
         "methodology": "OFFICIAL_VALIDATION_CAMPAIGN_FREEZE_V1",
         "campaign_id": campaign_id.strip(),
+        "validation_scope": validation_scope,
         "status": (
             "OFFICIAL_CAMPAIGN_FROZEN"
             if all_inputs_approved
