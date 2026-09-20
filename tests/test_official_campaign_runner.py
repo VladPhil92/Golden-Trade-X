@@ -204,6 +204,8 @@ def _attestation(tmp_path: Path, environment_path: Path, *, company: str = "Test
                 "trade_mode": "DEMO",
                 "account_company": company,
                 "account_server": environment["account_server"],
+                "account_currency": str(environment["currency"]).upper(),
+                "leverage": environment["leverage"],
                 "symbol": environment["symbol"],
                 "mt5_build": environment["mt5_build"],
                 "terminal_connected": True,
