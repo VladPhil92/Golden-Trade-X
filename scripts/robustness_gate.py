@@ -28,6 +28,15 @@ _ALLOWED_BROKER_EVIDENCE_CLASSES = {
     "TARGET_BROKER_STABILITY",
 }
 
+# Backward-compatible default evidence-class contract used by adversarial tests
+# and external tooling. XM-only campaigns may substitute TARGET_BROKER_STABILITY
+# at runtime, but the historical multi-broker default remains unchanged.
+REQUIRED_EVIDENCE_CLASSES = {
+    "parameter_stability": "EXECUTED_COUNTERFACTUAL",
+    "broker_replication": "EXTERNAL_BROKER_REPLICATION",
+    "cost_sensitivity": "MODELED_COST_SENSITIVITY",
+}
+
 
 def _load_json_object(path: str | Path) -> dict[str, Any]:
     target = Path(path)
