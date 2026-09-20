@@ -1,0 +1,104 @@
+; Golden Trade X v3.3 — GOLD M15 adaptive experimental research preset
+; Research/DEMO only. This preset has NOT demonstrated profitable edge.
+; Designed for brokers such as XM that expose gold as GOLD rather than XAUUSD.
+
+InpMagicNumber=933260
+InpTradeComment=GoldenTradeX_GOLD_ADAPT
+InpAllowRealTrading=false
+
+; --- Signals ---
+InpEmaFast=21
+InpEmaSlow=55
+InpRsiPeriod=14
+InpRsiUpper=70.0
+InpRsiLower=30.0
+InpRsiLongMin=45.0
+InpRsiShortMax=55.0
+InpTimeframe=15
+InpAtrPeriod=14
+InpAtrMinRatio=0.8
+InpAtrMaxRatio=3.0
+InpAdxPeriod=14
+InpAdxMinLevel=25.0
+InpMinTickVolume=10
+
+; Experimental stability candidate: evaluate confirmed closed bars only.
+InpSignalClosedBarOnly=true
+
+; --- Adaptive Multi-Asset Analysis ---
+InpUseAdaptiveAnalysisFilter=true
+InpAdaptiveProfile=2
+InpAdaptiveMinQuality=60
+
+; --- HTF / confluence ---
+InpUseHtfFilter=true
+InpHtfEmaPeriod=50
+InpUseRegimeFilter=true
+InpUseSmcFilter=true
+InpMinConfidence=55
+InpConfWeightBase=25
+InpConfWeightRegime=25
+InpConfWeightSmc=30
+InpConfWeightHtf=15
+InpConfWeightFib=5
+
+; --- Risk: conservative research default ---
+InpRiskPercent=0.5
+InpMaxDailyDD=3.0
+InpMaxWeeklyDD=6.0
+InpMaxMonthlyDD=10.0
+InpMaxConsecLosses=3
+InpMaxPositions=1
+InpAtrSlMultiplier=2.0
+InpAtrTpMultiplier=3.0
+
+; Normalize execution quality by bps for broker portability.
+; 6 bps is a research candidate, not an optimized production threshold.
+InpMaxSpreadPoints=0
+InpMaxSpreadBps=6.0
+InpCpThresholdPct=3.0
+InpMinInitialRR=0.0
+
+; --- Position management ---
+InpUseTrailing=true
+InpTrailAtrMult=1.5
+InpUseBreakEven=true
+InpBreakEvenR=0.5
+InpUsePartialTP=true
+InpPartialTPR=1.0
+InpPartialTPPct=50.0
+InpUseEqCurveFilter=true
+InpEqCurvePeriod=20
+
+; --- Sessions ---
+; Broker-server time; must be validated against XM session behavior/DST.
+InpUseSessionFilter=true
+InpStartHour=7
+InpEndHour=20
+InpCloseOnFriday=true
+InpFridayCloseHour=19
+
+; --- Macro news ---
+InpUseNewsFilter=true
+InpNewsBufferBefore=30
+InpNewsBufferAfter=90
+InpNewsCalendarPolicy=0
+InpPauseForNews=false
+
+; --- Kelly OFF / portfolio cap ON for research safety ---
+InpUseKelly=false
+InpKellyFraction=0.25
+InpKellyMinTrades=30
+InpUsePortfolioCap=true
+InpMaxPortfolioRiskPct=1.0
+
+; --- Execution ---
+InpOrderMaxRetries=3
+InpOrderRetryDelay=500
+InpMinMarginLevel=250.0
+
+; --- Telemetry ---
+InpEnableTradeLog=true
+InpEnableResearchTelemetry=true
+InpResearchCandidateId=GOLD_M15_V33_ADAPTIVE
+InpResearchBuildId=
