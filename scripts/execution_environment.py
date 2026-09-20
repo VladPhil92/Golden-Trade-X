@@ -278,9 +278,15 @@ def validate_environment_attestation(
                 "currency_profit": symbol_contract["currency_profit"],
             }
         )
+    case_insensitive_fields = {"account_currency", "currency_profit"}
     for field, expected_value in expected.items():
         actual = observed.get(field)
-        if str(actual).strip() != str(expected_value).strip():
+        actual_value = str(actual).strip()
+        expected_text = str(expected_value).strip()
+        if field in case_insensitive_fields:
+            actual_value = actual_value.upper()
+            expected_text = expected_text.upper()
+        if actual_value != expected_text:
             raise RegistryValidationError(
                 f"environment attestation {field} mismatch: "
                 f"expected {expected_value!r}, got {actual!r}"
