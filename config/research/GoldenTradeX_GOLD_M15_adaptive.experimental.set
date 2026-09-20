@@ -56,7 +56,7 @@ InpAtrTpMultiplier=3.0
 ; 6 bps is a research candidate, not an optimized production threshold.
 InpMaxSpreadPoints=0
 InpMaxSpreadBps=6.0
-InpCpThresholdPct=3.0
+InpCpThresholdPct=2.0
 InpMinInitialRR=0.0
 
 ; --- Position management ---
