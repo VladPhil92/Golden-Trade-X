@@ -88,7 +88,12 @@ jobs:
         with:
           python-version: "3.12"
       - name: Validate presets and cross-preset invariants
-        run: python scripts/validate_set.py config/GoldenTradeX.set config/GoldenTradeX_XAGUSD.set
+        run: >-
+          python scripts/validate_set.py
+          config/GoldenTradeX.set
+          config/GoldenTradeX_XAGUSD.set
+          config/research/GoldenTradeX_GOLD_M15_adaptive.experimental.set
+          config/research/GoldenTradeX_BTCUSD_M15.experimental.set
       - name: Validate canonical approved economic calendar contract
         run: |
           python scripts/economic_calendar_contract.py \
@@ -121,11 +126,14 @@ jobs:
             "MQL5/Include/GoldenTradeX/OrderManager.mqh" \
             "MQL5/Include/GoldenTradeX/HealthMonitor.mqh" \
             "MQL5/Include/GoldenTradeX/PositionStateManager.mqh" \
+            "MQL5/Include/GoldenTradeX/AdaptiveAnalysisEngine.mqh" \
             "MQL5/Scripts/Tests/TestIntegration.mq5" \
             "MQL5/Scripts/Tests/TestOrderManager.mq5" \
             "MQL5/Scripts/Tests/TestNewsFilter.mq5" \
             "MQL5/Scripts/Tests/TestRiskManager.mq5" \
             "MQL5/Scripts/Tests/TestMarketRegime.mq5" \
+            "MQL5/Scripts/Tests/TestAdaptiveAnalysis.mq5" \
+            "MQL5/Scripts/Tests/TestSignalClosedBar.mq5" \
             "MQL5/Scripts/Tests/TestSessionFilter.mq5" \
             "MQL5/Scripts/Tests/TestFibonacci.mq5" \
             "MQL5/Scripts/Tests/TestPositionState.mq5" \
@@ -167,6 +175,8 @@ jobs:
             "dashboard/index.html" \
             "config/GoldenTradeX.set" \
             "config/GoldenTradeX_XAGUSD.set" \
+            "config/research/GoldenTradeX_GOLD_M15_adaptive.experimental.set" \
+            "config/research/GoldenTradeX_BTCUSD_M15.experimental.set" \
             "config/economic_calendar.example.json" \
             "config/economic_calendar.v1.json" \
             "config/campaign_requirements.lock" \
