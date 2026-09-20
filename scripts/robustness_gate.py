@@ -87,7 +87,6 @@ def evaluate_robustness(
         raise RegistryValidationError(
             "robustness evidence classes are missing or misclassified"
         )
-    broker_evidence_class = evidence_classes.get("broker_replication")
 
     if policy.get("schema_version") != 1:
         raise RegistryValidationError("unsupported robustness policy schema_version")
