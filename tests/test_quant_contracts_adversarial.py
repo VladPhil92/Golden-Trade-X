@@ -218,7 +218,7 @@ def _attestation(env: dict, file_sha: str) -> dict:
             "trade_mode": "DEMO",
             "account_company": env["account_company"],
             "account_server": env["account_server"],
-            "account_currency": env["currency"],
+            "account_currency": str(env["currency"]).upper(),
             "leverage": env["leverage"],
             "symbol": env["symbol"],
             "mt5_build": env["mt5_build"],
