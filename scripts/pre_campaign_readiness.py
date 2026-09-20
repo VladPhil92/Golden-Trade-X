@@ -154,6 +154,11 @@ def evaluate_campaign_readiness(
         raise CampaignReadinessError("execution environment is not approved")
     if environment["require_trade_mode"] != "DEMO" or environment["live_trading_authorized"] is not False:
         raise CampaignReadinessError("official execution environment must remain DEMO-only")
+    symbol_contract = environment.get("symbol_contract")
+    if not isinstance(symbol_contract, dict):
+        raise CampaignReadinessError(
+            "approved execution environment must freeze symbol_contract metadata"
+        )
 
     robustness_template_path = _resolve(
         base, campaign.get("robustness_template_path"), "robustness_template_path"
@@ -212,6 +217,9 @@ def evaluate_campaign_readiness(
             "account_server": environment["account_server"],
             "mt5_build": environment["mt5_build"],
             "trade_mode": "DEMO",
+            "currency": environment["currency"],
+            "leverage": environment["leverage"],
+            "symbol_contract": symbol_contract,
         },
         "economic_calendar": {
             "calendar_id": calendar["calendar_id"],
