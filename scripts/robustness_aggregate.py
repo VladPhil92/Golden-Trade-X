@@ -211,6 +211,9 @@ def aggregate_robustness(
     broker_domain = domains.get("broker_replication")
     if not isinstance(broker_domain, dict):
         raise RegistryValidationError("broker_replication domain missing")
+    broker_evidence_class = broker_domain.get("evidence_class")
+    if broker_evidence_class not in {"EXTERNAL_BROKER_REPLICATION", "TARGET_BROKER_STABILITY"}:
+        raise RegistryValidationError("unsupported broker robustness evidence class")
     required_labels = broker_domain.get("required_labels")
     minimum_brokers = broker_domain.get("minimum_distinct_brokers")
     if not isinstance(required_labels, list) or not isinstance(minimum_brokers, int):
@@ -346,11 +349,12 @@ def aggregate_robustness(
         "schema_version": 1,
         "methodology": "ROBUSTNESS_AGGREGATION_V1",
         "campaign_id": plan.get("campaign_id"),
+        "validation_scope": plan.get("validation_scope", "MULTI_BROKER"),
         "plan_sha256": sha256_file(plan_path),
         "robustness_policy_sha256": plan.get("robustness_policy", {}).get("sha256"),
         "evidence_classes": {
             "parameter_stability": "EXECUTED_COUNTERFACTUAL",
-            "broker_replication": "EXTERNAL_BROKER_REPLICATION",
+            "broker_replication": broker_evidence_class,
             "cost_sensitivity": "MODELED_COST_SENSITIVITY",
         },
         "modeled_cost_warning": (
