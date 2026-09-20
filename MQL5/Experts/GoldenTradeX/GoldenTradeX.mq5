@@ -1,13 +1,13 @@
 //+------------------------------------------------------------------+
 //|                                                 GoldenTradeX.mq5 |
-//|                    Golden Trade X v2.63 — Expert Advisor          |
+//|                    Golden Trade X v2.64 — Expert Advisor          |
 //|                    CTG One Technology S.A.S.                      |
 //+------------------------------------------------------------------+
 #property copyright "CTG One Technology S.A.S."
 #property link      "https://github.com/VladPhil92/Golden-Trade-X"
-#property version   "2.63"
+#property version   "2.64"
 #property strict
-#property description "Golden Trade X v2.63: verificación MQL5 automatizada, integration smoke determinista y gates DevSecOps."
+#property description "Golden Trade X v2.64: adaptive multi-asset analysis para GOLD/BTC, research-first y fail-closed."
 
 #include <Trade/Trade.mqh>
 #include <GoldenTradeX/RiskManager.mqh>
@@ -25,6 +25,7 @@
 #include <GoldenTradeX/HealthMonitor.mqh>
 #include <GoldenTradeX/PositionStateManager.mqh>
 #include <GoldenTradeX/ResearchTelemetry.mqh>
+#include <GoldenTradeX/AdaptiveAnalysisEngine.mqh>
 
 input group "=== Identidad ==="
 input ulong   InpMagicNumber      = 920260;
@@ -46,6 +47,12 @@ input double  InpAtrMaxRatio      = 3.0;
 input int     InpAdxPeriod        = 14;
 input double  InpAdxMinLevel      = 25.0;
 input int     InpMinTickVolume    = 10;
+input bool    InpSignalClosedBarOnly = false;
+
+input group "=== Adaptive Multi-Asset Analysis (research) ==="
+input bool    InpUseAdaptiveAnalysisFilter = false;
+input ENUM_GTX_ANALYSIS_PROFILE InpAdaptiveProfile = GTX_ANALYSIS_AUTO;
+input int     InpAdaptiveMinQuality = 58;
 
 input group "=== Filtro de Tendencia HTF ==="
 input bool    InpUseHtfFilter     = true;
@@ -142,6 +149,7 @@ COrderManager         orderMgr;
 CHealthMonitor        healthMonitor;
 CPositionStateManager positionState;
 CResearchTelemetry    researchTelemetry;
+CAdaptiveAnalysisEngine adaptiveAnalysis;
 
 datetime g_lastBarTime = 0;
 string   g_gvLastBarKey = "";
@@ -173,6 +181,10 @@ string BuildResearchConfigSnapshot()
    s += "|InpAdxPeriod=" + IntegerToString(InpAdxPeriod);
    s += "|InpAdxMinLevel=" + DoubleToString(InpAdxMinLevel, 8);
    s += "|InpMinTickVolume=" + IntegerToString(InpMinTickVolume);
+   s += "|InpSignalClosedBarOnly=" + B(InpSignalClosedBarOnly);
+   s += "|InpUseAdaptiveAnalysisFilter=" + B(InpUseAdaptiveAnalysisFilter);
+   s += "|InpAdaptiveProfile=" + IntegerToString((int)InpAdaptiveProfile);
+   s += "|InpAdaptiveMinQuality=" + IntegerToString(InpAdaptiveMinQuality);
    s += "|InpUseHtfFilter=" + B(InpUseHtfFilter);
    s += "|InpHtfEmaPeriod=" + IntegerToString(InpHtfEmaPeriod);
    s += "|InpUseRegimeFilter=" + B(InpUseRegimeFilter);
@@ -269,6 +281,8 @@ int OnInit()
      { Print("GoldenTradeX: InpBreakEvenR debe ser > 0"); return INIT_PARAMETERS_INCORRECT; }
    if(InpMinConfidence < 0 || InpMinConfidence > 100)
      { Print("GoldenTradeX: InpMinConfidence debe ser 0-100"); return INIT_PARAMETERS_INCORRECT; }
+   if(InpAdaptiveMinQuality < 0 || InpAdaptiveMinQuality > 100)
+     { Print("GoldenTradeX: InpAdaptiveMinQuality debe ser 0-100"); return INIT_PARAMETERS_INCORRECT; }
    if(InpMinInitialRR < 0)
      { Print("GoldenTradeX: InpMinInitialRR no puede ser negativo"); return INIT_PARAMETERS_INCORRECT; }
    if(InpMaxSpreadPoints < 0 || InpMaxSpreadBps < 0)
@@ -311,7 +325,8 @@ int OnInit()
                          InpAtrPeriod, InpAtrMinRatio,
                          InpAdxMinLevel, InpAtrMaxRatio,
                          InpUseHtfFilter, InpHtfEmaPeriod,
-                         (long)InpMinTickVolume, InpAdxPeriod))
+                         (long)InpMinTickVolume, InpAdxPeriod,
+                         InpSignalClosedBarOnly))
      { Print("GoldenTradeX: error inicializando SignalEngine"); return INIT_FAILED; }
 
    riskManager.Init(InpRiskPercent, InpMaxDailyDD, InpMaxPositions,
@@ -353,6 +368,21 @@ int OnInit()
    if(!fibEngine.Init(_Symbol, InpTimeframe, 100, 0.5, InpAtrPeriod))
      { Print("GoldenTradeX: error inicializando FibonacciEngine"); return INIT_FAILED; }
 
+   if(InpUseAdaptiveAnalysisFilter)
+     {
+      if(!adaptiveAnalysis.Init(_Symbol, InpTimeframe,
+                                InpEmaFast, InpEmaSlow,
+                                InpRsiPeriod, InpAdxPeriod, InpAtrPeriod,
+                                InpHtfEmaPeriod,
+                                InpAdaptiveProfile,
+                                InpAdaptiveMinQuality,
+                                InpMaxSpreadBps))
+        {
+         Print("GoldenTradeX: error inicializando AdaptiveAnalysisEngine");
+         return INIT_FAILED;
+        }
+     }
+
    partialTP.Init(InpUsePartialTP, InpMagicNumber);
    eqCurveFilter.Init(InpUseEqCurveFilter, InpEqCurvePeriod, InpMagicNumber);
    orderMgr.Init(&trade, InpOrderMaxRetries, InpOrderRetryDelay);
@@ -374,7 +404,7 @@ int OnInit()
    EventSetTimer(60);
    newsFilter.PrintStatus();
    riskManager.PrintStatus();
-   Print("GoldenTradeX v2.63 inicializado en ", _Symbol,
+   Print("GoldenTradeX v2.64 inicializado en ", _Symbol,
          " | MinConf=", InpMinConfidence,
          " | MinRR=", DoubleToString(InpMinInitialRR, 2),
          " | Retries=", InpOrderMaxRetries,
@@ -382,6 +412,9 @@ int OnInit()
          " | EqFilter=", InpUseEqCurveFilter ? "ON" : "OFF",
          " | Kelly=", InpUseKelly ? "ON" : "OFF",
          " | PortfolioCap=", InpUsePortfolioCap ? "ON" : "OFF",
+         " | ClosedBarSignal=", InpSignalClosedBarOnly ? "ON" : "OFF",
+         " | AdaptiveAnalysis=", InpUseAdaptiveAnalysisFilter ? "ON" : "OFF",
+         " | AnalysisProfile=", GtxAnalysisProfileToString(GtxResolveAnalysisProfile(_Symbol, InpAdaptiveProfile)),
          " | ResearchTelemetry=", InpEnableResearchTelemetry ? "ON" : "OFF");
    return INIT_SUCCEEDED;
   }
@@ -395,6 +428,7 @@ void OnDeinit(const int reason)
    confEngine.Release();
    smcEngine.Release();
    fibEngine.Release();
+   adaptiveAnalysis.Release();
    healthMonitor.Release();
    orderMgr.PrintStats();
    Print("GoldenTradeX: deinit razón=", reason);
@@ -501,6 +535,46 @@ void OnTick()
      }
    bool isBuy = (signal == SIGNAL_BUY);
    string direction = isBuy ? "BUY" : "SELL";
+
+   if(InpUseAdaptiveAnalysisFilter)
+     {
+      SAdaptiveAnalysisResult analysis = adaptiveAnalysis.Analyze(isBuy);
+      string analysisDecision = analysis.passed ? "PASS" : "REJECTED";
+      if(!analysis.valid) analysisDecision = "INVALID";
+      researchTelemetry.LogAdaptiveAnalysis(
+         g_lastBarTime,
+         GtxAnalysisProfileToString(analysis.profile),
+         direction,
+         analysisDecision,
+         analysis.quality,
+         analysis.trendScore,
+         analysis.momentumScore,
+         analysis.strengthScore,
+         analysis.htfScore,
+         analysis.structureScore,
+         analysis.efficiencyScore,
+         analysis.liquidityScore,
+         analysis.atrBps,
+         analysis.spreadBps,
+         analysis.volumeRatio);
+
+      if(!analysis.valid)
+        {
+         LogResearchGuard("ADAPTIVE_ANALYSIS_INVALID");
+         return;
+        }
+      if(!analysis.passed)
+        {
+         researchTelemetry.LogSignal(g_lastBarTime,
+                                     "ADAPTIVE_ANALYSIS", "REJECTED", "ADAPTIVE_QUALITY_OR_ALIGNMENT", direction,
+                                     analysis.quality, (int)g_lastRegime,
+                                     analysis.trendScore, analysis.momentumScore,
+                                     analysis.strengthScore, analysis.htfScore,
+                                     analysis.structureScore,
+                                     signalEngine.GetATR(), 0.0, 0.0, 0.0, 0.0, 0.0);
+         return;
+        }
+     }
 
    int regScore = InpUseRegimeFilter ? regimeEngine.RegimeScore(isBuy) : 15;
    int smcScore = 0;
