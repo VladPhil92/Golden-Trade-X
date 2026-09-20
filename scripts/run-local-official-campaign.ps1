@@ -214,10 +214,10 @@ if (-not (Test-Path -LiteralPath $compileLog -PathType Leaf)) {
     throw "MetaEditor did not create compile log: $compileLog"
 }
 $compileText = Get-Content -Raw -LiteralPath $compileLog
-if ($compileText -match "(?im)(^|\s)([1-9][0-9]*)\s+errors?\b") {
+if ($compileText -match '(?im)(^|\s)([1-9][0-9]*)\s+errors?\b') {
     throw "MQL5 compilation reported errors. See $compileLog"
 }
-if ($compileText -notmatch "(?im)\b0\s+errors?\b") {
+if ($compileText -notmatch '(?im)\b0\s+errors?\b') {
     throw "Compile log lacks explicit 0 errors result."
 }
 if (-not (Test-Path -LiteralPath $ex5 -PathType Leaf)) {
