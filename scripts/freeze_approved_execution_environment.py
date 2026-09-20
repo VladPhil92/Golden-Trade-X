@@ -153,6 +153,10 @@ def freeze_approved_environment(
         raise EnvironmentApprovalError("candidate must require DEMO trade mode")
     if candidate["live_trading_authorized"] is not False:
         raise EnvironmentApprovalError("candidate must deny live trading")
+    if not isinstance(candidate.get("symbol_contract"), dict):
+        raise EnvironmentApprovalError(
+            "candidate must freeze symbol_contract metadata before approval"
+        )
 
     discovery_audit = _load_json(discovery_audit_path)
     observed = _validate_discovery_audit(discovery_audit, candidate)
