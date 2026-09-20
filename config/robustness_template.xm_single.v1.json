@@ -9,9 +9,7 @@
     {"name":"min_confidence_minus","parameter":"InpMinConfidence","value":50},
     {"name":"min_confidence_plus","parameter":"InpMinConfidence","value":60},
     {"name":"atr_sl_minus","parameter":"InpAtrSlMultiplier","value":1.8},
-    {"name":"atr_sl_plus","parameter":"InpAtrSlMultiplier","value":2.2},
-    {"name":"adaptive_quality_minus","parameter":"InpAdaptiveMinQuality","value":54},
-    {"name":"adaptive_quality_plus","parameter":"InpAdaptiveMinQuality","value":64}
+    {"name":"atr_sl_plus","parameter":"InpAtrSlMultiplier","value":2.2}
   ],
   "broker_requirements": {
     "required_labels": ["XM Global Limited"],
