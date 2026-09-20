@@ -57,7 +57,7 @@ InpAtrTpMultiplier=3.0
 ; 10 bps is a research candidate threshold and must be validated, not assumed optimal.
 InpMaxSpreadPoints=0
 InpMaxSpreadBps=10.0
-InpCpThresholdPct=3.0
+InpCpThresholdPct=2.0
 InpMinInitialRR=0.0
 
 ; --- Position management ---
