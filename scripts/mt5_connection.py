@@ -135,7 +135,7 @@ def connect_existing_mt5_session(
     mt5: Any,
     *,
     terminal_path: str | Path,
-    portable: bool = false,
+    portable: bool = False,
     initialize_timeout_ms: int = 60000,
 ) -> None:
     """Attach Python to an MT5 terminal/session already running on this Windows user desktop.
