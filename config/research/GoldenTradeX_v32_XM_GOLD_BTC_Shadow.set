@@ -1,0 +1,35 @@
+; Golden Trade X v3.2 — XM GOLD + BTCUSD shadow research
+; Research-only multi-symbol scanner. This Expert NEVER sends orders.
+; Both symbols remain hypotheses until independently validated.
+
+InpEnableOpportunityShadow=true
+InpOpportunitySymbols=GOLD,BTCUSD
+InpOpportunityMagic=932100
+InpEnableOpportunityTelemetry=true
+InpOpportunityMinQuality=55.0
+InpOpportunityRiskPct=0.5
+
+InpEmaFast=21
+InpEmaSlow=55
+InpRsiPeriod=14
+InpRsiUpper=70.0
+InpRsiLower=30.0
+InpRsiLongMin=45.0
+InpRsiShortMax=55.0
+InpTimeframe=15
+InpAtrPeriod=14
+InpAtrMinRatio=0.8
+InpAtrMaxRatio=3.0
+InpAdxPeriod=14
+InpAdxMinLevel=25.0
+InpMinTickVolume=10
+InpUseHtfFilter=true
+InpHtfEmaPeriod=50
+InpUseRegimeFilter=true
+InpUseSmcFilter=true
+InpMinConfidence=55
+InpConfWeightBase=25
+InpConfWeightRegime=25
+InpConfWeightSmc=30
+InpConfWeightHtf=15
+InpConfWeightFib=5
