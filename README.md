@@ -6,7 +6,7 @@
 ![MQL5](https://img.shields.io/badge/MQL5-MetaTrader%205-orange)
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB)
 
-**Golden Trade X** es una plataforma experimental de trading sistemático para MetaTrader 5, orientada inicialmente a XAUUSD M15. Combina un EA modular en MQL5 con herramientas Python para validación estadística, telemetría, Strategy Tester reproducible, rolling IS → frozen OOS, robustez y forward demo controlado.
+**Golden Trade X** es una plataforma experimental de trading sistemático para MetaTrader 5, orientada a GOLD/XAU y BTCUSD en M15, con perfiles independientes y validación por activo. Combina un EA modular en MQL5 con herramientas Python para validación estadística, telemetría, Strategy Tester reproducible, rolling IS → frozen OOS, robustez y forward demo controlado.
 
 Desarrollado y mantenido por **CTG One Technology S.A.S.**
 
@@ -39,6 +39,7 @@ Market / Broker
       ▼
 SignalEngine
       │
+      ├── AdaptiveAnalysisEngine (opt-in, GOLD/BTC)
       ├── MarketRegimeEngine
       ├── SmartMoneyEngine
       ├── FibonacciEngine
@@ -65,7 +66,8 @@ Broker
 
 | Módulo | Responsabilidad |
 |---|---|
-| `SignalEngine.mqh` | EMA 21/55, RSI, ADX, ATR, volumen, filtro H4 |
+| `SignalEngine.mqh` | EMA 21/55, RSI, ADX, ATR, volumen, H4 y candidato closed-bar |
+| `AdaptiveAnalysisEngine.mqh` | score multi-activo normalizado: tendencia/ATR, momentum, ADX, H4, estructura, eficiencia, spread bps y volumen relativo |
 | `MarketRegimeEngine.mqh` | clasificación heurística de régimen |
 | `SmartMoneyEngine.mqh` | BOS, CHOCH, FVG, order blocks, liquidity sweep |
 | `FibonacciEngine.mqh` | contexto/swing y confluencia Fibonacci |
@@ -263,6 +265,7 @@ Los workflows versionados usan referencias de GitHub Actions fijadas a commits c
 ```text
 v2.62     Trading Correctness                         DONE
 v2.63     Automated MQL5 Verification                DONE
+v2.64     Adaptive Multi-Asset Analysis               DONE; evidence pending
 v2.70     Research Telemetry / Event Ledger           DONE
 v2.80     Quant Research / Ablation tooling           DONE; evidence pending
 v2.90     Reproducible Validation                     DONE
@@ -273,6 +276,7 @@ v3.0-rc1  Official OOS validation infrastructure      READY; evidence pending
 v3.0-rc2  Forward validated                           PENDING
 v3.1      Daily opportunity / multi-symbol research   READY; research-only
 v3.2      BTCUSD multi-asset expansion                 READY; evidence pending
+v3.3      Adaptive GOLD/BTC analysis                   READY; research-only
 v3.0      Controlled production                       BLOCKED
 ```
 
@@ -282,8 +286,9 @@ v3.0      Controlled production                       BLOCKED
 2. Copiar `MQL5/Experts/GoldenTradeX/` a `MQL5/Experts/`.
 3. Copiar `MQL5/Include/GoldenTradeX/` a `MQL5/Include/`.
 4. Compilar `GoldenTradeX.mq5` en MetaEditor.
-5. Cargar `config/GoldenTradeX.set` sobre XAUUSD M15.
-6. Operar únicamente en DEMO mientras no se hayan superado los gates cuantitativos y forward.
+5. Para baseline legacy usar `config/GoldenTradeX.set`; para XM GOLD/BTC usar los presets experimentales bajo `config/research/`.
+6. Validar cada símbolo de forma independiente antes de cualquier forward DEMO.
+7. Operar únicamente en DEMO mientras no se hayan superado los gates cuantitativos y forward.
 
 ## Licencia
 

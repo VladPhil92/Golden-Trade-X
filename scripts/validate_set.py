@@ -12,13 +12,14 @@ REQUIRED = {
     "InpEmaFast", "InpEmaSlow", "InpRsiPeriod", "InpRsiUpper", "InpRsiLower",
     "InpRsiLongMin", "InpRsiShortMax", "InpTimeframe",
     "InpAtrPeriod", "InpAtrMinRatio", "InpAtrMaxRatio",
-    "InpAdxPeriod", "InpAdxMinLevel",
+    "InpAdxPeriod", "InpAdxMinLevel", "InpSignalClosedBarOnly",
+    "InpUseAdaptiveAnalysisFilter", "InpAdaptiveProfile", "InpAdaptiveMinQuality",
     # HTF filter
     "InpUseHtfFilter", "InpHtfEmaPeriod",
     # Risk
     "InpRiskPercent", "InpMaxDailyDD", "InpMaxWeeklyDD",
     "InpMaxConsecLosses", "InpMaxPositions",
-    "InpAtrSlMultiplier", "InpAtrTpMultiplier", "InpMaxSpreadPoints",
+    "InpAtrSlMultiplier", "InpAtrTpMultiplier", "InpMaxSpreadPoints", "InpMaxSpreadBps",
     "InpMinInitialRR",
     # Trailing / break-even
     "InpUseTrailing", "InpTrailAtrMult", "InpUseBreakEven", "InpBreakEvenR",
@@ -56,7 +57,8 @@ BOOLEAN_KEYS = {
     "InpUseHtfFilter", "InpUseTrailing", "InpUseBreakEven", "InpUseSessionFilter",
     "InpCloseOnFriday", "InpUseNewsFilter", "InpPauseForNews", "InpEnableTradeLog",
     "InpUseRegimeFilter", "InpUseSmcFilter", "InpUseKelly", "InpUsePortfolioCap",
-    "InpUsePartialTP", "InpUseEqCurveFilter",
+    "InpUsePartialTP", "InpUseEqCurveFilter", "InpSignalClosedBarOnly",
+    "InpUseAdaptiveAnalysisFilter",
 }
 
 RANGE_CHECKS = {
@@ -77,12 +79,15 @@ RANGE_CHECKS = {
     "InpAtrMaxRatio":         (0, 20, False, False),
     "InpAdxPeriod":           (2, 100, True, True),
     "InpAdxMinLevel":         (0, 100, False, True),
+    "InpAdaptiveProfile":      (0, 3, True, True),
+    "InpAdaptiveMinQuality":   (0, 100, True, True),
     "InpHtfEmaPeriod":        (2, 2000, True, True),
     "InpMaxConsecLosses":     (1, 100, True, True),
     "InpMaxPositions":        (1, 100, True, True),
     "InpAtrSlMultiplier":     (0, 20, False, False),
     "InpAtrTpMultiplier":     (0, 20, False, False),
-    "InpMaxSpreadPoints":     (0, 100000, False, False),
+    "InpMaxSpreadPoints":     (0, 100000, False, True),
+    "InpMaxSpreadBps":        (0, 1000, False, True),
     "InpMinInitialRR":        (0, 10, False, True),
     "InpTrailAtrMult":        (0, 20, False, False),
     "InpBreakEvenR":          (0, 10, False, False),

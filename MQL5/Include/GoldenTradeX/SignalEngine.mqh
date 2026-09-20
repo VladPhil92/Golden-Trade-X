@@ -11,6 +11,35 @@ enum ENUM_SIGNAL
    SIGNAL_SELL = -1
   };
 
+ENUM_SIGNAL GtxEvaluateCrossCandidate(double fast0,
+                                      double fast1,
+                                      double fast2,
+                                      double slow0,
+                                      double slow1,
+                                      double slow2,
+                                      double rsi1,
+                                      double rsiLongMin,
+                                      double rsiUpper,
+                                      double rsiLower,
+                                      double rsiShortMax,
+                                      bool closedBarOnly)
+  {
+   bool bullCross = (fast2 <= slow2 && fast1 > slow1);
+   bool bearCross = (fast2 >= slow2 && fast1 < slow1);
+
+   if(!closedBarOnly)
+     {
+      bullCross = bullCross && (fast0 > slow0);
+      bearCross = bearCross && (fast0 < slow0);
+     }
+
+   if(bullCross && rsi1 >= rsiLongMin && rsi1 < rsiUpper)
+      return SIGNAL_BUY;
+   if(bearCross && rsi1 <= rsiShortMax && rsi1 > rsiLower)
+      return SIGNAL_SELL;
+   return SIGNAL_NONE;
+  }
+
 class CSignalEngine
   {
 private:
@@ -31,6 +60,7 @@ private:
    double          m_atrMaxRatio;  // ATR / ATR_SMA(20) máximo permitido (0 = desactivado)
    bool            m_useHtfFilter;
    long            m_minVolume;     // v2.20: volumen mínimo de ticks en barra cerrada (0=off)
+   bool            m_closedBarOnly; // research seam: evita depender de EMA de barra [0]
 
    // Caché del ATR: evita CopyBuffer en cada tick
    double          m_cachedAtr;
@@ -64,7 +94,8 @@ public:
              double adxMinLevel, double atrMaxRatio,
              bool useHtfFilter, int htfEmaPeriod,
              long minTickVolume = 0,
-             int adxPeriod = 14)
+             int adxPeriod = 14,
+             bool closedBarOnly = false)
      {
       m_symbol       = symbol;
       m_tf           = tf;
@@ -77,6 +108,7 @@ public:
       m_atrMaxRatio  = atrMaxRatio;
       m_useHtfFilter = useHtfFilter;
       m_minVolume    = minTickVolume;
+      m_closedBarOnly = closedBarOnly;
       m_cachedAtr    = 0;
       m_cachedAtrBar = 0;
       m_hHtfEma      = INVALID_HANDLE;
@@ -117,15 +149,19 @@ public:
    //--- Señal por cruce de EMAs con filtros en cadena
    ENUM_SIGNAL GetSignal()
      {
-      // Leer EMAs en barras 0 (en curso), 1 (cerrada) y 2 (cerrada anterior)
-      double fast0, fast1, fast2, slow0, slow1, slow2, rsi1;
-      if(!CopyOne(m_hEmaFast, 0, fast0)) return(SIGNAL_NONE);
+      // Barras [1] y [2] siempre son cerradas. [0] solo se consulta cuando
+      // el candidato mantiene la regla legacy de continuación intrabar.
+      double fast0 = 0, fast1, fast2, slow0 = 0, slow1, slow2, rsi1;
       if(!CopyOne(m_hEmaFast, 1, fast1)) return(SIGNAL_NONE);
       if(!CopyOne(m_hEmaFast, 2, fast2)) return(SIGNAL_NONE);
-      if(!CopyOne(m_hEmaSlow, 0, slow0)) return(SIGNAL_NONE);
       if(!CopyOne(m_hEmaSlow, 1, slow1)) return(SIGNAL_NONE);
       if(!CopyOne(m_hEmaSlow, 2, slow2)) return(SIGNAL_NONE);
       if(!CopyOne(m_hRsi,     1, rsi1))  return(SIGNAL_NONE);
+      if(!m_closedBarOnly)
+        {
+         if(!CopyOne(m_hEmaFast, 0, fast0)) return(SIGNAL_NONE);
+         if(!CopyOne(m_hEmaSlow, 0, slow0)) return(SIGNAL_NONE);
+        }
 
       // Filtro ATR mínimo: bloquear entradas en compresión lateral
       if(m_atrMinRatio > 0)
@@ -151,16 +187,15 @@ public:
          if(atrAvg > 0 && atrNow > atrAvg * m_atrMaxRatio) return(SIGNAL_NONE);
         }
 
-      // Cruce confirmado en barra cerrada [1 vs 2] + continuación en barra en curso [0]
-      // RSI como confirmación de momentum: rsiLongMin..rsiUpper / rsiLower..rsiShortMax
-      ENUM_SIGNAL candidate = SIGNAL_NONE;
-
-      if(fast2 <= slow2 && fast1 > slow1 && fast0 > slow0 &&
-         rsi1 >= m_rsiLongMin && rsi1 < m_rsiUpper)
-         candidate = SIGNAL_BUY;
-      else if(fast2 >= slow2 && fast1 < slow1 && fast0 < slow0 &&
-              rsi1 <= m_rsiShortMax && rsi1 > m_rsiLower)
-         candidate = SIGNAL_SELL;
+      // La variante closed-bar-only se pre-registra como candidato experimental.
+      // Default=false conserva exactamente el comportamiento legacy.
+      ENUM_SIGNAL candidate = GtxEvaluateCrossCandidate(
+         fast0, fast1, fast2,
+         slow0, slow1, slow2,
+         rsi1,
+         m_rsiLongMin, m_rsiUpper,
+         m_rsiLower, m_rsiShortMax,
+         m_closedBarOnly);
 
       if(candidate == SIGNAL_NONE) return(SIGNAL_NONE);
 
