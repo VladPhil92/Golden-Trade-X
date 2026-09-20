@@ -1,4 +1,4 @@
-; Golden Trade X v3.2 — BTCUSD M15 experimental research preset
+; Golden Trade X v3.3 — BTCUSD M15 adaptive experimental research preset
 ; Research/DEMO only. This preset has NOT demonstrated profitable edge.
 ; Load on the broker's exact BTCUSD chart/symbol after environment discovery.
 ; Do not enable real trading. Forward DEMO remains blocked until official OOS,
@@ -23,6 +23,12 @@ InpAtrMaxRatio=3.0
 InpAdxPeriod=14
 InpAdxMinLevel=25.0
 InpMinTickVolume=10
+InpSignalClosedBarOnly=true
+
+; --- Adaptive Multi-Asset Analysis ---
+InpUseAdaptiveAnalysisFilter=true
+InpAdaptiveProfile=3
+InpAdaptiveMinQuality=58
 
 ; --- HTF / confluence ---
 InpUseHtfFilter=true
@@ -98,5 +104,5 @@ InpMinMarginLevel=250.0
 ; --- Telemetry ---
 InpEnableTradeLog=true
 InpEnableResearchTelemetry=true
-InpResearchCandidateId=BTCUSD_M15_V32_BASELINE
+InpResearchCandidateId=BTCUSD_M15_V33_ADAPTIVE
 InpResearchBuildId=
