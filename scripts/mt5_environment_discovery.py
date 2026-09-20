@@ -24,9 +24,11 @@ try:
         validate_execution_environment,
     )
     from scripts.experiment_registry import RegistryValidationError
+    from scripts.mt5_connection import connect_mt5, stop_bootstrap_process
 except ModuleNotFoundError:
     from execution_environment import canonical_environment_sha256, validate_execution_environment
     from experiment_registry import RegistryValidationError
+    from mt5_connection import connect_mt5, stop_bootstrap_process
 
 METHODOLOGY = "MT5_EXECUTION_ENVIRONMENT_DISCOVERY_V1"
 
@@ -216,18 +218,14 @@ def discover_mt5_environment(
             "MetaTrader5 Python package is required for environment discovery"
         ) from exc
 
-    initialized = mt5.initialize(
-        str(terminal),
+    bootstrap_process = connect_mt5(
+        mt5,
+        terminal_path=terminal,
         login=login,
         password=password,
         server=requested_server,
         portable=bool(portable_mode),
     )
-    if not initialized:
-        code, message = mt5.last_error()
-        raise RegistryValidationError(
-            f"MetaTrader5 initialize failed: code={code}, message={message}"
-        )
 
     try:
         terminal_info = mt5.terminal_info()
@@ -301,6 +299,7 @@ def discover_mt5_environment(
         return candidate, audit
     finally:
         mt5.shutdown()
+        stop_bootstrap_process(bootstrap_process)
 
 
 def main() -> None:
