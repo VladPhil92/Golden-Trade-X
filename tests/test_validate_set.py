@@ -12,11 +12,15 @@ from scripts.validate_set import parse_set, validate_params
 ROOT = Path(__file__).resolve().parents[1]
 XAU = ROOT / "config" / "GoldenTradeX.set"
 XAG = ROOT / "config" / "GoldenTradeX_XAGUSD.set"
+GOLD_ADAPTIVE = ROOT / "config" / "research" / "GoldenTradeX_GOLD_M15_adaptive.experimental.set"
+BTC_ADAPTIVE = ROOT / "config" / "research" / "GoldenTradeX_BTCUSD_M15.experimental.set"
 
 
 def test_repository_presets_are_individually_valid() -> None:
     assert validate_params(parse_set(XAU), str(XAU)) == []
     assert validate_params(parse_set(XAG), str(XAG)) == []
+    assert validate_params(parse_set(GOLD_ADAPTIVE), str(GOLD_ADAPTIVE)) == []
+    assert validate_params(parse_set(BTC_ADAPTIVE), str(BTC_ADAPTIVE)) == []
 
 
 def test_relational_invariants_are_enforced() -> None:
@@ -68,3 +72,18 @@ def test_cross_preset_magic_numbers_must_be_unique(tmp_path: Path) -> None:
 
     assert proc.returncode == 1
     assert "duplicate InpMagicNumber=920260" in proc.stdout
+
+
+def test_adaptive_research_presets_are_opt_in_and_demo_safe() -> None:
+    gold = parse_set(GOLD_ADAPTIVE)
+    btc = parse_set(BTC_ADAPTIVE)
+
+    for params in (gold, btc):
+        assert params["InpAllowRealTrading"].lower() == "false"
+        assert params["InpSignalClosedBarOnly"].lower() == "true"
+        assert params["InpUseAdaptiveAnalysisFilter"].lower() == "true"
+        assert float(params["InpRiskPercent"]) <= 0.5
+        assert params["InpUsePortfolioCap"].lower() == "true"
+
+    assert gold["InpAdaptiveProfile"] == "2"
+    assert btc["InpAdaptiveProfile"] == "3"
