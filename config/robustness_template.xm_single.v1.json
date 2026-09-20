@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "template_id": "GTX-ROBUSTNESS-TEMPLATE-XM-SINGLE-V1",
+  "validation_scope": "TARGET_BROKER_SINGLE",
+  "status_note": "XM-only robustness template. Validates parameter/cost stability inside the approved XM Global DEMO environment and does not claim cross-broker portability.",
+  "parameter_scenarios": [
+    {"name":"ema_fast_minus","parameter":"InpEmaFast","value":18},
+    {"name":"ema_fast_plus","parameter":"InpEmaFast","value":24},
+    {"name":"min_confidence_minus","parameter":"InpMinConfidence","value":50},
+    {"name":"min_confidence_plus","parameter":"InpMinConfidence","value":60},
+    {"name":"atr_sl_minus","parameter":"InpAtrSlMultiplier","value":1.8},
+    {"name":"atr_sl_plus","parameter":"InpAtrSlMultiplier","value":2.2},
+    {"name":"adaptive_quality_minus","parameter":"InpAdaptiveMinQuality","value":54},
+    {"name":"adaptive_quality_plus","parameter":"InpAdaptiveMinQuality","value":64}
+  ],
+  "broker_requirements": {
+    "required_labels": ["XM Global Limited"],
+    "minimum_distinct_brokers": 1
+  },
+  "modeled_cost_scenarios": [
+    {"name":"cost_1x","cost_per_trade_currency":1.0},
+    {"name":"cost_2x","cost_per_trade_currency":2.0},
+    {"name":"cost_4x","cost_per_trade_currency":4.0}
+  ],
+  "executed_metadata_stress": []
+}
