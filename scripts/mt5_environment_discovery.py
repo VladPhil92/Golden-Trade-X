@@ -130,6 +130,22 @@ def build_discovered_environment(
         "optimization": False,
         "forward_mode": "disabled",
         "forward_mode_code": 0,
+        "symbol_contract": {
+            "digits": int(observed.get("symbol_digits", 0)),
+            "point": _positive_number(observed.get("symbol_point"), "symbol_point"),
+            "trade_contract_size": _positive_number(
+                observed.get("trade_contract_size"), "trade_contract_size"
+            ),
+            "trade_tick_size": _positive_number(
+                observed.get("trade_tick_size"), "trade_tick_size"
+            ),
+            "trade_tick_value": _positive_number(
+                observed.get("trade_tick_value"), "trade_tick_value"
+            ),
+            "currency_profit": _text(
+                observed.get("currency_profit"), "currency_profit"
+            ).upper(),
+        },
     }
 
     # Validate against the same schema used later by campaign readiness.
