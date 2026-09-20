@@ -1,0 +1,27 @@
+{
+  "approved": false,
+  "candidate_canonical_sha256": "0ab343a6d879f510643c43573a6a2366fc425ed9c02120aa0b05489a4d571932",
+  "environment_id": "GTX-GOLD-M15-DEMO-C39BBEB63A6F",
+  "live_trading_authorized": false,
+  "methodology": "MT5_EXECUTION_ENVIRONMENT_DISCOVERY_V1",
+  "observed": {
+    "account_company": "XM Global Limited",
+    "account_currency": "USD",
+    "account_server": "XMGlobal-MT5 2",
+    "currency_profit": "USD",
+    "leverage": 1000,
+    "mt5_build": "6204",
+    "symbol": "GOLD",
+    "symbol_digits": 2,
+    "symbol_point": 0.01,
+    "symbol_synchronized": true,
+    "terminal_connected": true,
+    "trade_contract_size": 100.0,
+    "trade_mode": "DEMO",
+    "trade_tick_size": 0.01,
+    "trade_tick_value": 1.0
+  },
+  "real_capital_authorized": false,
+  "schema_version": 1,
+  "status": "CANDIDATE_DISCOVERED"
+}
