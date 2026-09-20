@@ -297,6 +297,16 @@ def validate_environment_attestation(
     if observed.get("symbol_synchronized") is not True:
         raise RegistryValidationError("environment attestation requires symbol_synchronized=true")
 
+    runtime_portable_mode = attestation.get("runtime_portable_mode")
+    if runtime_portable_mode is not None and not isinstance(runtime_portable_mode, bool):
+        raise RegistryValidationError("runtime_portable_mode must be true/false when provided")
+    session_mode = attestation.get("session_mode")
+    if session_mode is not None and session_mode not in {
+        "EXPLICIT_CREDENTIAL_LOGIN",
+        "REUSE_EXISTING_LOCAL_SESSION",
+    }:
+        raise RegistryValidationError("unsupported environment attestation session_mode")
+
     return {
         "schema_version": 1,
         "methodology": "MT5_EXECUTION_ENVIRONMENT_ATTESTATION_V1",
@@ -306,6 +316,8 @@ def validate_environment_attestation(
         "contract_file_sha256": contract_file_sha256,
         "observed": observed,
         "python_api_version": attestation.get("python_api_version"),
+        "runtime_portable_mode": runtime_portable_mode,
+        "session_mode": session_mode,
     }
 
 

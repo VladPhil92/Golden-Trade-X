@@ -16,14 +16,22 @@ try:
         validate_environment_attestation,
     )
     from scripts.experiment_registry import RegistryValidationError
-    from scripts.mt5_connection import connect_mt5, stop_bootstrap_process
+    from scripts.mt5_connection import (
+        connect_existing_mt5_session,
+        connect_mt5,
+        stop_bootstrap_process,
+    )
 except ModuleNotFoundError:
     from execution_environment import (
         load_execution_environment_contract,
         validate_environment_attestation,
     )
     from experiment_registry import RegistryValidationError
-    from mt5_connection import connect_mt5, stop_bootstrap_process
+    from mt5_connection import (
+        connect_existing_mt5_session,
+        connect_mt5,
+        stop_bootstrap_process,
+    )
 
 
 def _required_env(name: str) -> str:
@@ -48,6 +56,7 @@ def create_mt5_environment_attestation(
     output_path: str | Path,
     *,
     runtime_portable_mode: bool | None = None,
+    reuse_existing_session: bool = False,
 ) -> dict[str, Any]:
     if platform.system() != "Windows":
         raise RegistryValidationError("MT5 environment attestation is supported only on Windows")
@@ -60,18 +69,6 @@ def create_mt5_environment_attestation(
     if contract["approved"] is not True:
         raise RegistryValidationError(
             "runtime attestation requires an approved execution environment contract"
-        )
-
-    login_text = _required_env("GTX_MT5_LOGIN")
-    password = _required_env("GTX_MT5_PASSWORD")
-    server = _required_env("GTX_MT5_SERVER")
-    try:
-        login = int(login_text)
-    except ValueError as exc:
-        raise RegistryValidationError("GTX_MT5_LOGIN must be an integer account login") from exc
-    if server != contract["account_server"]:
-        raise RegistryValidationError(
-            "GTX_MT5_SERVER differs from the frozen execution environment account_server"
         )
 
     try:
@@ -87,14 +84,33 @@ def create_mt5_environment_attestation(
         else bool(runtime_portable_mode)
     )
 
-    bootstrap_process = connect_mt5(
-        mt5,
-        terminal_path=terminal,
-        login=login,
-        password=password,
-        server=server,
-        portable=effective_portable_mode,
-    )
+    bootstrap_process = None
+    if reuse_existing_session:
+        connect_existing_mt5_session(
+            mt5,
+            terminal_path=terminal,
+            portable=effective_portable_mode,
+        )
+    else:
+        login_text = _required_env("GTX_MT5_LOGIN")
+        password = _required_env("GTX_MT5_PASSWORD")
+        server = _required_env("GTX_MT5_SERVER")
+        try:
+            login = int(login_text)
+        except ValueError as exc:
+            raise RegistryValidationError("GTX_MT5_LOGIN must be an integer account login") from exc
+        if server != contract["account_server"]:
+            raise RegistryValidationError(
+                "GTX_MT5_SERVER differs from the frozen execution environment account_server"
+            )
+        bootstrap_process = connect_mt5(
+            mt5,
+            terminal_path=terminal,
+            login=login,
+            password=password,
+            server=server,
+            portable=effective_portable_mode,
+        )
 
     try:
         terminal_info = mt5.terminal_info()
@@ -144,6 +160,11 @@ def create_mt5_environment_attestation(
             "contract_file_sha256": contract_sha,
             "python_api_version": getattr(mt5, "__version__", None),
             "runtime_portable_mode": effective_portable_mode,
+            "session_mode": (
+                "REUSE_EXISTING_LOCAL_SESSION"
+                if reuse_existing_session
+                else "EXPLICIT_CREDENTIAL_LOGIN"
+            ),
             "observed": observed,
         }
         validated = validate_environment_attestation(payload, contract, contract_sha)
@@ -168,6 +189,14 @@ def main() -> None:
         default="data/research/official_campaign/environment_attestation.json",
     )
     parser.add_argument(
+        "--reuse-existing-session",
+        action="store_true",
+        help=(
+            "Attach to the account already logged into the local MT5 terminal. "
+            "No MT5 password or account login is read from environment variables."
+        ),
+    )
+    parser.add_argument(
         "--runtime-portable-mode",
         choices=("true", "false"),
         default=None,
@@ -186,6 +215,7 @@ def main() -> None:
             args.terminal,
             args.output,
             runtime_portable_mode=runtime_portable_mode,
+            reuse_existing_session=args.reuse_existing_session,
         )
     except RegistryValidationError as exc:
         parser.error(str(exc))
