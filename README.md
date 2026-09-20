@@ -271,6 +271,8 @@ v2.90.3   Robustness framework                        DONE
 v2.90.4   Forward Demo observation contracts          DONE
 v3.0-rc1  Official OOS validation infrastructure      READY; evidence pending
 v3.0-rc2  Forward validated                           PENDING
+v3.1      Daily opportunity / multi-symbol research   READY; research-only
+v3.2      BTCUSD multi-asset expansion                 READY; evidence pending
 v3.0      Controlled production                       BLOCKED
 ```
 
