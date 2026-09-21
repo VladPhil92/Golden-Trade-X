@@ -334,18 +334,37 @@ def _compile_exact_build(
     process_failed = completed.returncode != 0
     deadline = time.monotonic() + (15.0 if process_failed else 60.0)
     ex5_seen_at: float | None = None
+    last_log_signature: tuple[int, int] | None = None
+    log_stable_since: float | None = None
     while time.monotonic() < deadline:
         if source_log.is_file():
             try:
                 candidate_text = _read_compile_log(source_log)
             except (OSError, RegistryValidationError):
                 candidate_text = ""
+
             if candidate_text and (
                 _ERROR_RE.search(candidate_text)
                 or _ZERO_ERRORS_RE.search(candidate_text)
-                or process_failed
             ):
                 break
+
+            if process_failed:
+                try:
+                    stat = source_log.stat()
+                    signature = (stat.st_size, stat.st_mtime_ns)
+                except OSError:
+                    signature = None
+
+                now = time.monotonic()
+                if signature is not None and signature == last_log_signature:
+                    if log_stable_since is None:
+                        log_stable_since = now
+                    elif now - log_stable_since >= 2.0:
+                        break
+                else:
+                    last_log_signature = signature
+                    log_stable_since = now if signature is not None else None
 
         if ex5.is_file() and ex5_seen_at is None:
             ex5_seen_at = time.monotonic()
