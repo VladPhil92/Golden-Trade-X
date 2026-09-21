@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from types import SimpleNamespace
 
 import pytest
@@ -51,6 +51,30 @@ def _compile_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
     return repo, data_path, terminal
 
 
+def _source_from_command_line(command: str) -> Path:
+    prefix = '/compile:"'
+    assert prefix in command
+    return Path(command.split(prefix, 1)[1].split('"', 1)[0])
+
+
+def test_metaeditor_command_line_quotes_paths_with_spaces() -> None:
+    command = local_campaign._metaeditor_command_line(
+        metaeditor=PureWindowsPath(r"C:\Program Files\XM MT5\metaeditor64.exe"),
+        source=PureWindowsPath(
+            r"C:\Users\JUAN PABLO\AppData\Roaming\MetaQuotes\Terminal\ABC\MQL5\Experts\GoldenTradeX\GoldenTradeX.mq5"
+        ),
+        mql5_root=PureWindowsPath(
+            r"C:\Users\JUAN PABLO\AppData\Roaming\MetaQuotes\Terminal\ABC\MQL5"
+        ),
+        portable_mode=False,
+    )
+
+    assert command.startswith('"C:\\Program Files\\XM MT5\\metaeditor64.exe" ')
+    assert '/compile:"C:\\Users\\JUAN PABLO\\' in command
+    assert '/include:"C:\\Users\\JUAN PABLO\\' in command
+    assert command.endswith(" /log")
+
+
 def test_compile_accepts_fresh_ex5_when_metaeditor_omits_log(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -58,9 +82,8 @@ def test_compile_accepts_fresh_ex5_when_metaeditor_omits_log(
     repo, data_path, terminal = _compile_fixture(tmp_path)
     evidence_log = tmp_path / "evidence" / "compile.log"
 
-    def fake_run(command: list[str], check: bool = False):  # noqa: ARG001
-        source_arg = next(item for item in command if item.startswith("/compile:"))
-        source = Path(source_arg.split(":", 1)[1])
+    def fake_run(command: str, check: bool = False):  # noqa: ARG001
+        source = _source_from_command_line(command)
         source.with_suffix(".ex5").write_bytes(b"fresh-ex5")
         return SimpleNamespace(returncode=0)
 
@@ -85,17 +108,15 @@ def test_compile_accepts_fresh_ex5_when_metaeditor_omits_log(
     assert len(payload["ex5_sha256"]) == 64
 
 
-def test_compile_rejects_reported_errors_even_when_ex5_exists(
+def test_compile_surfaces_reported_errors_even_when_ex5_is_missing(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo, data_path, terminal = _compile_fixture(tmp_path)
     evidence_log = tmp_path / "evidence" / "compile.log"
 
-    def fake_run(command: list[str], check: bool = False):  # noqa: ARG001
-        source_arg = next(item for item in command if item.startswith("/compile:"))
-        source = Path(source_arg.split(":", 1)[1])
-        source.with_suffix(".ex5").write_bytes(b"fresh-ex5")
+    def fake_run(command: str, check: bool = False):  # noqa: ARG001
+        source = _source_from_command_line(command)
         source.with_suffix(".log").write_text(
             "Result: 1 errors, 0 warnings\n",
             encoding="utf-8",
@@ -113,3 +134,36 @@ def test_compile_rejects_reported_errors_even_when_ex5_exists(
             compile_log=evidence_log,
             build_id="b" * 40,
         )
+
+
+def test_compile_classifies_exit_zero_without_artifacts_as_cli_noop(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, data_path, terminal = _compile_fixture(tmp_path)
+    evidence_log = tmp_path / "evidence" / "compile.log"
+
+    monkeypatch.setattr(
+        local_campaign.subprocess,
+        "run",
+        lambda command, check=False: SimpleNamespace(returncode=0),
+    )
+    clock = iter((0.0, 61.0))
+    monkeypatch.setattr(local_campaign.time, "monotonic", lambda: next(clock))
+
+    with pytest.raises(RegistryValidationError, match="METAEDITOR_CLI_NOOP"):
+        local_campaign._compile_exact_build(
+            repo=repo,
+            terminal=terminal,
+            data_path=data_path,
+            portable_mode=False,
+            compile_log=evidence_log,
+            build_id="c" * 40,
+        )
+
+    diagnostic_path = evidence_log.with_suffix(".diagnostic.json")
+    payload = json.loads(diagnostic_path.read_text(encoding="utf-8"))
+    assert payload["status"] == "METAEDITOR_CLI_NOOP"
+    assert payload["metaeditor_exit_code"] == 0
+    assert payload["source_log_present"] is False
+    assert payload["ex5_present"] is False
