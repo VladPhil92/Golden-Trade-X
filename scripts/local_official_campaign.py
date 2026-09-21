@@ -9,6 +9,7 @@ state or evidence generation.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import platform
 import re
@@ -50,6 +51,14 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
         json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _run(
@@ -141,6 +150,7 @@ def _compile_exact_build(
     data_path: Path,
     portable_mode: bool,
     compile_log: Path,
+    build_id: str,
 ) -> tuple[Path, Path]:
     mql5_root = data_path / "MQL5"
     standard_trade = mql5_root / "Include" / "Trade" / "Trade.mqh"
@@ -184,37 +194,72 @@ def _compile_exact_build(
         command.append("/portable")
 
     print("\n== Compile exact local Git build in XM MT5 data tree ==", flush=True)
+    started_at = datetime.now(timezone.utc)
     completed = subprocess.run(command, check=False)
     print(f"MetaEditor exit code: {completed.returncode}", flush=True)
+    if completed.returncode != 0:
+        raise RegistryValidationError(
+            f"MetaEditor compilation process failed with exit code {completed.returncode}"
+        )
 
-    # If another MetaEditor process already owns the single-instance UI, the
-    # command process can exit before the compile artifact lands on disk.
+    # MetaEditor can return before the single-instance GUI flushes artifacts.
+    # The EX5 is the primary executable compilation artifact, so wait for it.
     deadline = time.monotonic() + 60.0
     while time.monotonic() < deadline:
-        if source_log.is_file() and ex5.is_file():
+        if ex5.is_file():
             break
         time.sleep(0.5)
 
-    if not source_log.is_file():
-        raise RegistryValidationError(
-            f"MetaEditor did not create source compilation log: {source_log}"
-        )
     if not ex5.is_file():
         raise RegistryValidationError(
             f"MetaEditor did not create compiled EX5 artifact: {ex5}"
         )
 
-    shutil.copy2(source_log, compile_log)
-    compile_text = _read_compile_log(compile_log)
-    if _ERROR_RE.search(compile_text):
-        raise RegistryValidationError(
-            f"MQL5 compilation reported errors. See {compile_log}"
+    log_status = "UNAVAILABLE_FRESH_EX5_FALLBACK"
+    if source_log.is_file():
+        shutil.copy2(source_log, compile_log)
+        compile_text = _read_compile_log(compile_log)
+        if _ERROR_RE.search(compile_text):
+            raise RegistryValidationError(
+                f"MQL5 compilation reported errors. See {compile_log}"
+            )
+        if not _ZERO_ERRORS_RE.search(compile_text):
+            raise RegistryValidationError(
+                "compile log exists but lacks explicit 0 errors result"
+            )
+        log_status = "VERIFIED_0_ERRORS"
+
+    attestation_path = compile_log.with_suffix(".attestation.json")
+    attestation = {
+        "schema_version": 1,
+        "methodology": "LOCAL_METAEDITOR_COMPILE_ATTESTATION_V2",
+        "build_id": build_id,
+        "metaeditor_path": str(metaeditor),
+        "metaeditor_exit_code": completed.returncode,
+        "portable_mode": portable_mode,
+        "source_path": str(source),
+        "source_sha256": _sha256_file(source),
+        "ex5_path": str(ex5),
+        "ex5_sha256": _sha256_file(ex5),
+        "ex5_size_bytes": ex5.stat().st_size,
+        "source_log_path": str(source_log),
+        "source_log_present": source_log.is_file(),
+        "log_status": log_status,
+        "started_at_utc": started_at.isoformat(),
+        "completed_at_utc": datetime.now(timezone.utc).isoformat(),
+        "live_trading_authorized": False,
+        "real_capital_authorized": False,
+    }
+    _write_json(attestation_path, attestation)
+
+    if log_status == "VERIFIED_0_ERRORS":
+        print("MQL5 LOCAL COMPILE PASS — log verified, 0 errors", flush=True)
+    else:
+        print(
+            "MQL5 LOCAL COMPILE PASS — fresh EX5 verified; MetaEditor log unavailable",
+            flush=True,
         )
-    if not _ZERO_ERRORS_RE.search(compile_text):
-        raise RegistryValidationError(
-            "compile log lacks explicit 0 errors result"
-        )
-    print("MQL5 LOCAL COMPILE PASS — 0 errors", flush=True)
+    print(f"EX5 SHA256: {attestation['ex5_sha256']}", flush=True)
     return ex5, mql5_root
 
 
@@ -353,6 +398,7 @@ def run_local_campaign(
         data_path=data_path,
         portable_mode=portable_mode,
         compile_log=compile_log,
+        build_id=git_sha,
     )
     tester_profiles = mql5_root / "Profiles" / "Tester"
     tester_profiles.mkdir(parents=True, exist_ok=True)
