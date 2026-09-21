@@ -268,7 +268,11 @@ def test_compile_classifies_exit_zero_without_artifacts_as_cli_noop(
     monkeypatch.setattr(
         local_campaign.subprocess,
         "run",
-        lambda command, check=False: SimpleNamespace(returncode=0),
+        lambda command, check=False, text=False, capture_output=False: SimpleNamespace(
+            returncode=0,
+            stdout="",
+            stderr="",
+        ),
     )
     clock = iter((0.0, 61.0))
     monkeypatch.setattr(local_campaign.time, "monotonic", lambda: next(clock))
