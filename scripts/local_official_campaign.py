@@ -143,6 +143,109 @@ def _find_metaeditor(terminal: Path) -> Path:
     )
 
 
+def _quote_metaeditor_value(value: Path) -> str:
+    """Quote a MetaEditor switch value using the CLI syntax documented by MetaQuotes."""
+
+    return f'"{value}"'
+
+
+def _metaeditor_command_line(
+    *,
+    metaeditor: Path,
+    source: Path,
+    mql5_root: Path,
+    portable_mode: bool,
+) -> str:
+    executable = f'"{metaeditor}"'
+    command = (
+        f"{executable} "
+        f"/compile:{_quote_metaeditor_value(source)} "
+        f"/include:{_quote_metaeditor_value(mql5_root)} "
+        "/log"
+    )
+    if portable_mode:
+        command += " /portable"
+    return command
+
+
+def _ensure_target_metaeditor_not_running(metaeditor: Path) -> None:
+    """Refuse to compile through a pre-existing target MetaEditor instance.
+
+    MetaEditor is single-instance. Reusing an already-open editor can turn a CLI
+    compile request into a silent no-op, but force-killing editors risks losing
+    unsaved work. Detect only the editor executable that belongs to this MT5
+    installation and fail with an actionable instruction instead.
+    """
+
+    if platform.system() != "Windows":
+        return
+
+    target = str(metaeditor.resolve()).replace("'", "''")
+    ps_command = (
+        f"$target='{target}'; "
+        "$p=@(Get-Process metaeditor64,metaeditor -ErrorAction SilentlyContinue | "
+        "Where-Object { $_.Path -and $_.Path -ieq $target }); "
+        "$p | Select-Object -ExpandProperty Id"
+    )
+    result = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            ps_command,
+        ],
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        raise RegistryValidationError(
+            "could not safely determine whether the target MetaEditor is already running"
+        )
+
+    pids = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    if pids:
+        raise RegistryValidationError(
+            "TARGET_METAEDITOR_ALREADY_RUNNING: close the MetaEditor window that "
+            f"belongs to {metaeditor.parent} and rerun. Keep the XM MT5 terminal open."
+        )
+
+
+def _write_compile_diagnostic(
+    path: Path,
+    *,
+    status: str,
+    message: str,
+    metaeditor: Path,
+    command_line: str,
+    source: Path,
+    source_log: Path,
+    ex5: Path,
+    exit_code: int,
+    started_at: datetime,
+) -> None:
+    payload = {
+        "schema_version": 1,
+        "methodology": "LOCAL_METAEDITOR_CLI_DIAGNOSTIC_V1",
+        "status": status,
+        "message": message,
+        "metaeditor_path": str(metaeditor),
+        "command_line": command_line,
+        "metaeditor_exit_code": exit_code,
+        "source_path": str(source),
+        "source_log_path": str(source_log),
+        "source_log_present": source_log.is_file(),
+        "ex5_path": str(ex5),
+        "ex5_present": ex5.is_file(),
+        "started_at_utc": started_at.isoformat(),
+        "completed_at_utc": datetime.now(timezone.utc).isoformat(),
+        "live_trading_authorized": False,
+        "real_capital_authorized": False,
+    }
+    _write_json(path, payload)
+
+
 def _compile_exact_build(
     *,
     repo: Path,
@@ -175,59 +278,166 @@ def _compile_exact_build(
     metaeditor = _find_metaeditor(terminal)
     compile_log.parent.mkdir(parents=True, exist_ok=True)
 
-    # MetaEditor documents /log as a flag. The generated compilation log is
-    # <source>.log beside the MQ5 file, so do not pass a custom /log:<path>.
-    # Remove stale artifacts so a successful gate always belongs to this build.
+    # MetaEditor documents /log as a flag and /compile:"<path>" /
+    # include:"<path>" with quoted switch values. Use the exact CLI form
+    # because the local Windows profile path can contain spaces.
     for stale in (ex5, source_log, compile_log):
         try:
             stale.unlink()
         except FileNotFoundError:
             pass
 
-    command = [
-        str(metaeditor),
-        f"/compile:{source}",
-        f"/include:{mql5_root}",
-        "/log",
-    ]
-    if portable_mode:
-        command.append("/portable")
+    diagnostic_path = compile_log.with_suffix(".diagnostic.json")
+    try:
+        diagnostic_path.unlink()
+    except FileNotFoundError:
+        pass
+
+    command_line = _metaeditor_command_line(
+        metaeditor=metaeditor,
+        source=source,
+        mql5_root=mql5_root,
+        portable_mode=portable_mode,
+    )
 
     print("\n== Compile exact local Git build in XM MT5 data tree ==", flush=True)
+    print("Checking target MetaEditor single-instance state; XM MT5 remains running.", flush=True)
+    _ensure_target_metaeditor_not_running(metaeditor)
+
     started_at = datetime.now(timezone.utc)
-    completed = subprocess.run(command, check=False)
+    completed = subprocess.run(command_line, check=False)
     print(f"MetaEditor exit code: {completed.returncode}", flush=True)
     if completed.returncode != 0:
-        raise RegistryValidationError(
+        message = (
             f"MetaEditor compilation process failed with exit code {completed.returncode}"
         )
+        _write_compile_diagnostic(
+            diagnostic_path,
+            status="METAEDITOR_PROCESS_FAILED",
+            message=message,
+            metaeditor=metaeditor,
+            command_line=command_line,
+            source=source,
+            source_log=source_log,
+            ex5=ex5,
+            exit_code=completed.returncode,
+            started_at=started_at,
+        )
+        raise RegistryValidationError(f"{message}. Diagnostic: {diagnostic_path}")
 
-    # MetaEditor can return before the single-instance GUI flushes artifacts.
-    # The EX5 is the primary executable compilation artifact, so wait for it.
+    # MetaEditor is a single-instance GUI and can return before its artifacts are
+    # flushed. Watch both outputs. A compile log with errors takes precedence over
+    # the missing-EX5 symptom so the real compiler error is surfaced immediately.
     deadline = time.monotonic() + 60.0
+    ex5_seen_at: float | None = None
     while time.monotonic() < deadline:
-        if ex5.is_file():
+        if source_log.is_file():
+            try:
+                compile_text = _read_compile_log(source_log)
+            except (OSError, RegistryValidationError):
+                compile_text = ""
+            if compile_text and _ERROR_RE.search(compile_text):
+                shutil.copy2(source_log, compile_log)
+                message = f"MQL5 compilation reported errors. See {compile_log}"
+                _write_compile_diagnostic(
+                    diagnostic_path,
+                    status="MQL5_COMPILE_ERRORS",
+                    message=message,
+                    metaeditor=metaeditor,
+                    command_line=command_line,
+                    source=source,
+                    source_log=source_log,
+                    ex5=ex5,
+                    exit_code=completed.returncode,
+                    started_at=started_at,
+                )
+                raise RegistryValidationError(
+                    f"{message}. Diagnostic: {diagnostic_path}"
+                )
+
+        if ex5.is_file() and ex5_seen_at is None:
+            ex5_seen_at = time.monotonic()
+
+        # Give the log a short grace period after EX5 creation. Some MetaEditor
+        # builds omit it entirely, in which case the fresh EX5 remains valid
+        # primary compilation evidence.
+        if ex5.is_file() and (
+            source_log.is_file()
+            or (
+                ex5_seen_at is not None
+                and time.monotonic() - ex5_seen_at >= 3.0
+            )
+        ):
             break
         time.sleep(0.5)
-
-    if not ex5.is_file():
-        raise RegistryValidationError(
-            f"MetaEditor did not create compiled EX5 artifact: {ex5}"
-        )
 
     log_status = "UNAVAILABLE_FRESH_EX5_FALLBACK"
     if source_log.is_file():
         shutil.copy2(source_log, compile_log)
         compile_text = _read_compile_log(compile_log)
         if _ERROR_RE.search(compile_text):
+            message = f"MQL5 compilation reported errors. See {compile_log}"
+            _write_compile_diagnostic(
+                diagnostic_path,
+                status="MQL5_COMPILE_ERRORS",
+                message=message,
+                metaeditor=metaeditor,
+                command_line=command_line,
+                source=source,
+                source_log=source_log,
+                ex5=ex5,
+                exit_code=completed.returncode,
+                started_at=started_at,
+            )
             raise RegistryValidationError(
-                f"MQL5 compilation reported errors. See {compile_log}"
+                f"{message}. Diagnostic: {diagnostic_path}"
             )
         if not _ZERO_ERRORS_RE.search(compile_text):
+            message = "compile log exists but lacks explicit 0 errors result"
+            _write_compile_diagnostic(
+                diagnostic_path,
+                status="MQL5_COMPILE_LOG_INDETERMINATE",
+                message=message,
+                metaeditor=metaeditor,
+                command_line=command_line,
+                source=source,
+                source_log=source_log,
+                ex5=ex5,
+                exit_code=completed.returncode,
+                started_at=started_at,
+            )
             raise RegistryValidationError(
-                "compile log exists but lacks explicit 0 errors result"
+                f"{message}. See {compile_log}. Diagnostic: {diagnostic_path}"
             )
         log_status = "VERIFIED_0_ERRORS"
+
+    if not ex5.is_file():
+        if source_log.is_file():
+            message = (
+                "MetaEditor reported 0 errors but did not create the compiled EX5 artifact"
+            )
+            status = "METAEDITOR_NO_EX5_AFTER_ZERO_ERRORS"
+        else:
+            message = (
+                "METAEDITOR_CLI_NOOP: MetaEditor exited with code 0 but produced "
+                "neither a compilation log nor an EX5 artifact"
+            )
+            status = "METAEDITOR_CLI_NOOP"
+        _write_compile_diagnostic(
+            diagnostic_path,
+            status=status,
+            message=message,
+            metaeditor=metaeditor,
+            command_line=command_line,
+            source=source,
+            source_log=source_log,
+            ex5=ex5,
+            exit_code=completed.returncode,
+            started_at=started_at,
+        )
+        raise RegistryValidationError(
+            f"{message}. Diagnostic: {diagnostic_path}"
+        )
 
     attestation_path = compile_log.with_suffix(".attestation.json")
     attestation = {
