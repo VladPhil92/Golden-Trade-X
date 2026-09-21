@@ -212,6 +212,13 @@ def _ensure_target_metaeditor_not_running(metaeditor: Path) -> None:
         )
 
 
+def _compile_log_excerpt(text: str, *, max_lines: int = 20) -> str:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    error_lines = [line for line in lines if re.search(r"(?i)\berror\b", line)]
+    selected = error_lines if error_lines else lines[-max_lines:]
+    return "\n".join(selected[:max_lines])
+
+
 def _write_compile_diagnostic(
     path: Path,
     *,
@@ -224,6 +231,9 @@ def _write_compile_diagnostic(
     ex5: Path,
     exit_code: int,
     started_at: datetime,
+    process_stdout: str = "",
+    process_stderr: str = "",
+    compiler_log_excerpt: str = "",
 ) -> None:
     payload = {
         "schema_version": 1,
@@ -233,6 +243,9 @@ def _write_compile_diagnostic(
         "metaeditor_path": str(metaeditor),
         "command_line": command_line,
         "metaeditor_exit_code": exit_code,
+        "process_stdout": process_stdout,
+        "process_stderr": process_stderr,
+        "compiler_log_excerpt": compiler_log_excerpt,
         "source_path": str(source),
         "source_log_path": str(source_log),
         "source_log_present": source_log.is_file(),
@@ -305,63 +318,58 @@ def _compile_exact_build(
     _ensure_target_metaeditor_not_running(metaeditor)
 
     started_at = datetime.now(timezone.utc)
-    completed = subprocess.run(command_line, check=False)
+    completed = subprocess.run(
+        command_line,
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    process_stdout = completed.stdout or ""
+    process_stderr = completed.stderr or ""
     print(f"MetaEditor exit code: {completed.returncode}", flush=True)
-    if completed.returncode != 0:
-        message = (
-            f"MetaEditor compilation process failed with exit code {completed.returncode}"
-        )
-        _write_compile_diagnostic(
-            diagnostic_path,
-            status="METAEDITOR_PROCESS_FAILED",
-            message=message,
-            metaeditor=metaeditor,
-            command_line=command_line,
-            source=source,
-            source_log=source_log,
-            ex5=ex5,
-            exit_code=completed.returncode,
-            started_at=started_at,
-        )
-        raise RegistryValidationError(f"{message}. Diagnostic: {diagnostic_path}")
 
-    # MetaEditor is a single-instance GUI and can return before its artifacts are
-    # flushed. Watch both outputs. A compile log with errors takes precedence over
-    # the missing-EX5 symptom so the real compiler error is surfaced immediately.
-    deadline = time.monotonic() + 60.0
+    # A non-zero MetaEditor process code is not enough diagnostic evidence by
+    # itself. MetaEditor may still flush <source>.log after the process exits.
+    # Always give that log a bounded capture window before classifying the failure.
+    process_failed = completed.returncode != 0
+    deadline = time.monotonic() + (15.0 if process_failed else 60.0)
     ex5_seen_at: float | None = None
+    last_log_signature: tuple[int, int] | None = None
+    log_stable_since: float | None = None
     while time.monotonic() < deadline:
         if source_log.is_file():
             try:
-                compile_text = _read_compile_log(source_log)
+                candidate_text = _read_compile_log(source_log)
             except (OSError, RegistryValidationError):
-                compile_text = ""
-            if compile_text and _ERROR_RE.search(compile_text):
-                shutil.copy2(source_log, compile_log)
-                message = f"MQL5 compilation reported errors. See {compile_log}"
-                _write_compile_diagnostic(
-                    diagnostic_path,
-                    status="MQL5_COMPILE_ERRORS",
-                    message=message,
-                    metaeditor=metaeditor,
-                    command_line=command_line,
-                    source=source,
-                    source_log=source_log,
-                    ex5=ex5,
-                    exit_code=completed.returncode,
-                    started_at=started_at,
-                )
-                raise RegistryValidationError(
-                    f"{message}. Diagnostic: {diagnostic_path}"
-                )
+                candidate_text = ""
+
+            if candidate_text and (
+                _ERROR_RE.search(candidate_text)
+                or _ZERO_ERRORS_RE.search(candidate_text)
+            ):
+                break
+
+            if process_failed:
+                try:
+                    stat = source_log.stat()
+                    signature = (stat.st_size, stat.st_mtime_ns)
+                except OSError:
+                    signature = None
+
+                now = time.monotonic()
+                if signature is not None and signature == last_log_signature:
+                    if log_stable_since is None:
+                        log_stable_since = now
+                    elif now - log_stable_since >= 2.0:
+                        break
+                else:
+                    last_log_signature = signature
+                    log_stable_since = now if signature is not None else None
 
         if ex5.is_file() and ex5_seen_at is None:
             ex5_seen_at = time.monotonic()
 
-        # Give the log a short grace period after EX5 creation. Some MetaEditor
-        # builds omit it entirely, in which case the fresh EX5 remains valid
-        # primary compilation evidence.
-        if ex5.is_file() and (
+        if not process_failed and ex5.is_file() and (
             source_log.is_file()
             or (
                 ex5_seen_at is not None
@@ -371,27 +379,79 @@ def _compile_exact_build(
             break
         time.sleep(0.5)
 
-    log_status = "UNAVAILABLE_FRESH_EX5_FALLBACK"
+    compile_text = ""
+    compile_excerpt = ""
     if source_log.is_file():
         shutil.copy2(source_log, compile_log)
         compile_text = _read_compile_log(compile_log)
-        if _ERROR_RE.search(compile_text):
-            message = f"MQL5 compilation reported errors. See {compile_log}"
-            _write_compile_diagnostic(
-                diagnostic_path,
-                status="MQL5_COMPILE_ERRORS",
-                message=message,
-                metaeditor=metaeditor,
-                command_line=command_line,
-                source=source,
-                source_log=source_log,
-                ex5=ex5,
-                exit_code=completed.returncode,
-                started_at=started_at,
+        compile_excerpt = _compile_log_excerpt(compile_text)
+
+    # Compiler evidence has precedence over the process exit code. This is the
+    # path needed on XM installations where MetaEditor returns 1 and writes the
+    # actual MQL5 error only to the source log.
+    if compile_text and _ERROR_RE.search(compile_text):
+        if compile_excerpt:
+            print("---- MetaEditor compiler error excerpt ----", flush=True)
+            print(compile_excerpt, flush=True)
+            print("------------------------------------------", flush=True)
+        message = f"MQL5 compilation reported errors. See {compile_log}"
+        _write_compile_diagnostic(
+            diagnostic_path,
+            status="MQL5_COMPILE_ERRORS",
+            message=message,
+            metaeditor=metaeditor,
+            command_line=command_line,
+            source=source,
+            source_log=source_log,
+            ex5=ex5,
+            exit_code=completed.returncode,
+            started_at=started_at,
+            process_stdout=process_stdout,
+            process_stderr=process_stderr,
+            compiler_log_excerpt=compile_excerpt,
+        )
+        raise RegistryValidationError(
+            f"{message}. Diagnostic: {diagnostic_path}"
+        )
+
+    if process_failed:
+        if compile_text:
+            status = "METAEDITOR_PROCESS_FAILED_WITH_LOG"
+            message = (
+                f"MetaEditor exited with code {completed.returncode}. "
+                f"Compiler log captured at {compile_log}"
             )
-            raise RegistryValidationError(
-                f"{message}. Diagnostic: {diagnostic_path}"
+            if compile_excerpt:
+                print("---- MetaEditor compiler log excerpt ----", flush=True)
+                print(compile_excerpt, flush=True)
+                print("----------------------------------------", flush=True)
+        else:
+            status = "METAEDITOR_PROCESS_FAILED_NO_LOG"
+            message = (
+                f"MetaEditor exited with code {completed.returncode} and did not "
+                "produce a source compilation log"
             )
+        _write_compile_diagnostic(
+            diagnostic_path,
+            status=status,
+            message=message,
+            metaeditor=metaeditor,
+            command_line=command_line,
+            source=source,
+            source_log=source_log,
+            ex5=ex5,
+            exit_code=completed.returncode,
+            started_at=started_at,
+            process_stdout=process_stdout,
+            process_stderr=process_stderr,
+            compiler_log_excerpt=compile_excerpt,
+        )
+        raise RegistryValidationError(
+            f"{message}. Diagnostic: {diagnostic_path}"
+        )
+
+    log_status = "UNAVAILABLE_FRESH_EX5_FALLBACK"
+    if compile_text:
         if not _ZERO_ERRORS_RE.search(compile_text):
             message = "compile log exists but lacks explicit 0 errors result"
             _write_compile_diagnostic(
@@ -405,6 +465,9 @@ def _compile_exact_build(
                 ex5=ex5,
                 exit_code=completed.returncode,
                 started_at=started_at,
+                process_stdout=process_stdout,
+                process_stderr=process_stderr,
+                compiler_log_excerpt=compile_excerpt,
             )
             raise RegistryValidationError(
                 f"{message}. See {compile_log}. Diagnostic: {diagnostic_path}"
