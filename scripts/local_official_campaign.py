@@ -168,18 +168,47 @@ def _metaeditor_command_line(
     return command
 
 
-def _close_metaeditor_instances() -> None:
-    """Best-effort close MetaEditor only; never terminate the active MT5 terminal."""
+def _ensure_target_metaeditor_not_running(metaeditor: Path) -> None:
+    """Refuse to compile through a pre-existing target MetaEditor instance.
+
+    MetaEditor is single-instance. Reusing an already-open editor can turn a CLI
+    compile request into a silent no-op, but force-killing editors risks losing
+    unsaved work. Detect only the editor executable that belongs to this MT5
+    installation and fail with an actionable instruction instead.
+    """
 
     if platform.system() != "Windows":
         return
 
-    for image in ("metaeditor64.exe", "metaeditor.exe"):
-        subprocess.run(
-            ["taskkill", "/IM", image, "/F"],
-            check=False,
-            text=True,
-            capture_output=True,
+    target = str(metaeditor.resolve()).replace("'", "''")
+    ps_command = (
+        f"$target='{target}'; "
+        "$p=@(Get-Process metaeditor64,metaeditor -ErrorAction SilentlyContinue | "
+        "Where-Object { $_.Path -and $_.Path -ieq $target }); "
+        "$p | Select-Object -ExpandProperty Id"
+    )
+    result = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            ps_command,
+        ],
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        raise RegistryValidationError(
+            "could not safely determine whether the target MetaEditor is already running"
+        )
+
+    pids = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    if pids:
+        raise RegistryValidationError(
+            "TARGET_METAEDITOR_ALREADY_RUNNING: close the MetaEditor window that "
+            f"belongs to {metaeditor.parent} and rerun. Keep the XM MT5 terminal open."
         )
 
 
@@ -272,8 +301,8 @@ def _compile_exact_build(
     )
 
     print("\n== Compile exact local Git build in XM MT5 data tree ==", flush=True)
-    print("Closing stale MetaEditor instances only; XM MT5 terminal remains running.", flush=True)
-    _close_metaeditor_instances()
+    print("Checking target MetaEditor single-instance state; XM MT5 remains running.", flush=True)
+    _ensure_target_metaeditor_not_running(metaeditor)
 
     started_at = datetime.now(timezone.utc)
     completed = subprocess.run(command_line, check=False)
