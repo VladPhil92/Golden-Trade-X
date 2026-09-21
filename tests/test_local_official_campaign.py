@@ -113,10 +113,15 @@ def test_compile_accepts_fresh_ex5_when_metaeditor_omits_log(
     repo, data_path, terminal = _compile_fixture(tmp_path)
     evidence_log = tmp_path / "evidence" / "compile.log"
 
-    def fake_run(command: str, check: bool = False):  # noqa: ARG001
+    def fake_run(
+        command: str,
+        check: bool = False,
+        text: bool = False,
+        capture_output: bool = False,
+    ):  # noqa: ARG001
         source = _source_from_command_line(command)
         source.with_suffix(".ex5").write_bytes(b"fresh-ex5")
-        return SimpleNamespace(returncode=0)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(local_campaign.subprocess, "run", fake_run)
 
@@ -146,13 +151,18 @@ def test_compile_surfaces_reported_errors_even_when_ex5_is_missing(
     repo, data_path, terminal = _compile_fixture(tmp_path)
     evidence_log = tmp_path / "evidence" / "compile.log"
 
-    def fake_run(command: str, check: bool = False):  # noqa: ARG001
+    def fake_run(
+        command: str,
+        check: bool = False,
+        text: bool = False,
+        capture_output: bool = False,
+    ):  # noqa: ARG001
         source = _source_from_command_line(command)
         source.with_suffix(".log").write_text(
             "Result: 1 errors, 0 warnings\n",
             encoding="utf-8",
         )
-        return SimpleNamespace(returncode=0)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(local_campaign.subprocess, "run", fake_run)
 
@@ -165,6 +175,87 @@ def test_compile_surfaces_reported_errors_even_when_ex5_is_missing(
             compile_log=evidence_log,
             build_id="b" * 40,
         )
+
+
+def test_compile_exit_one_surfaces_compiler_log_before_process_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, data_path, terminal = _compile_fixture(tmp_path)
+    evidence_log = tmp_path / "evidence" / "compile.log"
+
+    def fake_run(
+        command: str,
+        check: bool = False,
+        text: bool = False,
+        capture_output: bool = False,
+    ):  # noqa: ARG001
+        source = _source_from_command_line(command)
+        source.with_suffix(".log").write_text(
+            "GoldenTradeX.mq5(42,7) : error 256: undeclared identifier\n"
+            "Result: 1 errors, 0 warnings\n",
+            encoding="utf-8",
+        )
+        return SimpleNamespace(
+            returncode=1,
+            stdout="",
+            stderr="MetaEditor failed",
+        )
+
+    monkeypatch.setattr(local_campaign.subprocess, "run", fake_run)
+
+    with pytest.raises(RegistryValidationError, match="reported errors"):
+        local_campaign._compile_exact_build(
+            repo=repo,
+            terminal=terminal,
+            data_path=data_path,
+            portable_mode=False,
+            compile_log=evidence_log,
+            build_id="d" * 40,
+        )
+
+    assert evidence_log.is_file()
+    diagnostic_path = evidence_log.with_suffix(".diagnostic.json")
+    payload = json.loads(diagnostic_path.read_text(encoding="utf-8"))
+    assert payload["status"] == "MQL5_COMPILE_ERRORS"
+    assert payload["metaeditor_exit_code"] == 1
+    assert "undeclared identifier" in payload["compiler_log_excerpt"]
+    assert payload["process_stderr"] == "MetaEditor failed"
+
+
+def test_compile_exit_one_without_log_is_classified(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, data_path, terminal = _compile_fixture(tmp_path)
+    evidence_log = tmp_path / "evidence" / "compile.log"
+
+    monkeypatch.setattr(
+        local_campaign.subprocess,
+        "run",
+        lambda command, check=False, text=False, capture_output=False: SimpleNamespace(
+            returncode=1,
+            stdout="",
+            stderr="",
+        ),
+    )
+    clock = iter((0.0, 16.0))
+    monkeypatch.setattr(local_campaign.time, "monotonic", lambda: next(clock))
+
+    with pytest.raises(RegistryValidationError, match="did not produce a source compilation log"):
+        local_campaign._compile_exact_build(
+            repo=repo,
+            terminal=terminal,
+            data_path=data_path,
+            portable_mode=False,
+            compile_log=evidence_log,
+            build_id="e" * 40,
+        )
+
+    diagnostic_path = evidence_log.with_suffix(".diagnostic.json")
+    payload = json.loads(diagnostic_path.read_text(encoding="utf-8"))
+    assert payload["status"] == "METAEDITOR_PROCESS_FAILED_NO_LOG"
+    assert payload["metaeditor_exit_code"] == 1
 
 
 def test_compile_classifies_exit_zero_without_artifacts_as_cli_noop(
