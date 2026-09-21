@@ -75,6 +75,37 @@ def test_metaeditor_command_line_quotes_paths_with_spaces() -> None:
     assert command.endswith(" /log")
 
 
+def test_target_metaeditor_detection_fails_closed_without_killing_processes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install = tmp_path / "XM MT5"
+    install.mkdir()
+    metaeditor = install / "metaeditor64.exe"
+    metaeditor.write_bytes(b"metaeditor")
+
+    monkeypatch.setattr(local_campaign.platform, "system", lambda: "Windows")
+
+    captured: dict[str, object] = {}
+
+    def fake_run(command, check=False, text=False, capture_output=False):
+        captured["command"] = command
+        return SimpleNamespace(returncode=0, stdout="12345\n", stderr="")
+
+    monkeypatch.setattr(local_campaign.subprocess, "run", fake_run)
+
+    with pytest.raises(
+        RegistryValidationError,
+        match="TARGET_METAEDITOR_ALREADY_RUNNING",
+    ):
+        local_campaign._ensure_target_metaeditor_not_running(metaeditor)
+
+    command = captured["command"]
+    assert isinstance(command, list)
+    assert command[0] == "powershell.exe"
+    assert "taskkill" not in " ".join(command).lower()
+
+
 def test_compile_accepts_fresh_ex5_when_metaeditor_omits_log(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
